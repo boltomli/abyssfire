@@ -66,5 +66,8 @@ export const EmeraldPlainsMap: MapData = {
     { col: 16, row: 17, npcs: ['merchant'] },
   ],
   playerStart: { col: 3, row: 4 },
-  exits: [],
+  exits: [
+    { col: 18, row: 10, targetMap: 'twilight_forest', targetCol: 1, targetRow: 12 },
+  ],
+  levelRange: [1, 10] as [number, number],
 };

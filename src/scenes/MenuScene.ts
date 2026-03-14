@@ -66,7 +66,7 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Version
-    this.add.text(cx, GAME_HEIGHT - 30, 'Phase 1 - v0.1.0', {
+    this.add.text(cx, GAME_HEIGHT - 30, 'v0.5.0 - All Phases', {
       fontSize: '12px',
       color: '#555555',
       fontFamily: 'monospace',

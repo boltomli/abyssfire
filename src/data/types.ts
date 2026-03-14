@@ -55,6 +55,115 @@ export interface MonsterDefinition {
   goldReward: [number, number];
   spriteKey: string;
   elite?: boolean;
+  lootTable?: LootEntry[];
+  bossSkills?: string[];
+}
+
+export interface LootEntry {
+  itemId?: string;
+  quality?: ItemQuality;
+  dropRate: number;
+  levelRange?: [number, number];
+}
+
+export type ItemQuality = 'normal' | 'magic' | 'rare' | 'legendary' | 'set';
+export type EquipSlot = 'helmet' | 'armor' | 'gloves' | 'boots' | 'weapon' | 'offhand' | 'necklace' | 'ring1' | 'ring2' | 'belt';
+
+export interface ItemBase {
+  id: string;
+  name: string;
+  nameEn: string;
+  description: string;
+  type: 'weapon' | 'armor' | 'accessory' | 'consumable' | 'gem' | 'material' | 'scroll';
+  slot?: EquipSlot;
+  icon: string;
+  levelReq: number;
+  sellPrice: number;
+  stackable: boolean;
+  maxStack: number;
+}
+
+export interface WeaponBase extends ItemBase {
+  type: 'weapon';
+  slot: 'weapon' | 'offhand';
+  baseDamage: [number, number];
+  attackSpeed: number;
+  weaponType: 'sword' | 'axe' | 'mace' | 'dagger' | 'bow' | 'staff' | 'wand' | 'shield';
+  sockets: number;
+}
+
+export interface ArmorBase extends ItemBase {
+  type: 'armor';
+  slot: 'helmet' | 'armor' | 'gloves' | 'boots' | 'belt';
+  baseDefense: number;
+  sockets: number;
+}
+
+export interface AccessoryBase extends ItemBase {
+  type: 'accessory';
+  slot: 'necklace' | 'ring1' | 'ring2';
+}
+
+export interface AffixDefinition {
+  id: string;
+  name: string;
+  nameEn: string;
+  type: 'prefix' | 'suffix';
+  tier: number;
+  stat: string;
+  minValue: number;
+  maxValue: number;
+  levelReq: number;
+  allowedSlots?: EquipSlot[];
+}
+
+export interface ItemAffix {
+  affixId: string;
+  name: string;
+  stat: string;
+  value: number;
+}
+
+export interface ItemInstance {
+  uid: string;
+  baseId: string;
+  name: string;
+  quality: ItemQuality;
+  level: number;
+  affixes: ItemAffix[];
+  sockets: GemInstance[];
+  setId?: string;
+  legendaryEffect?: string;
+  identified: boolean;
+  quantity: number;
+  // Computed stats
+  stats: Partial<Record<string, number>>;
+}
+
+export interface GemInstance {
+  gemId: string;
+  name: string;
+  stat: string;
+  value: number;
+  tier: number;
+}
+
+export interface SetDefinition {
+  id: string;
+  name: string;
+  nameEn: string;
+  pieces: string[];
+  bonuses: { count: number; description: string; stats: Partial<Record<string, number>> }[];
+}
+
+export interface LegendaryDefinition {
+  id: string;
+  baseId: string;
+  name: string;
+  nameEn: string;
+  fixedAffixes: ItemAffix[];
+  specialEffect: string;
+  specialEffectDescription: string;
 }
 
 export interface TileData {
@@ -73,4 +182,120 @@ export interface MapData {
   camps: { col: number; row: number; npcs: string[] }[];
   playerStart: { col: number; row: number };
   exits: { col: number; row: number; targetMap: string; targetCol: number; targetRow: number }[];
+  levelRange: [number, number];
+  bgColor?: string;
+}
+
+export interface QuestDefinition {
+  id: string;
+  name: string;
+  description: string;
+  zone: string;
+  type: 'kill' | 'collect' | 'explore' | 'talk';
+  objectives: QuestObjective[];
+  rewards: QuestReward;
+  prereqQuests?: string[];
+  level: number;
+}
+
+export interface QuestObjective {
+  type: 'kill' | 'collect' | 'explore' | 'talk';
+  targetId: string;
+  targetName: string;
+  required: number;
+  current: number;
+}
+
+export interface QuestReward {
+  exp: number;
+  gold: number;
+  items?: string[];
+}
+
+export interface QuestProgress {
+  questId: string;
+  status: 'available' | 'active' | 'completed' | 'turned_in';
+  objectives: { current: number }[];
+}
+
+export interface NPCDefinition {
+  id: string;
+  name: string;
+  type: 'blacksmith' | 'merchant' | 'quest' | 'stash';
+  dialogue: string[];
+  shopItems?: string[];
+  quests?: string[];
+}
+
+export interface AchievementDefinition {
+  id: string;
+  name: string;
+  description: string;
+  type: 'kill' | 'collect' | 'explore' | 'level' | 'quest';
+  targetId?: string;
+  required: number;
+  reward?: { stat: string; value: number };
+  title?: string;
+}
+
+export interface HomesteadBuilding {
+  id: string;
+  name: string;
+  description: string;
+  maxLevel: number;
+  costPerLevel: { gold: number; materials?: Record<string, number> }[];
+  bonusPerLevel: { stat: string; value: number }[];
+}
+
+export interface PetDefinition {
+  id: string;
+  name: string;
+  description: string;
+  rarity: 'common' | 'rare' | 'epic';
+  bonusStat: string;
+  bonusValue: number;
+  bonusPerLevel: number;
+  maxLevel: number;
+  feedItem: string;
+}
+
+export interface SaveData {
+  id: string;
+  version: number;
+  timestamp: number;
+  classId: string;
+  player: {
+    level: number;
+    exp: number;
+    gold: number;
+    hp: number;
+    maxHp: number;
+    mana: number;
+    maxMana: number;
+    stats: Stats;
+    freeStatPoints: number;
+    freeSkillPoints: number;
+    skillLevels: Record<string, number>;
+    tileCol: number;
+    tileRow: number;
+    currentMap: string;
+  };
+  inventory: ItemInstance[];
+  equipment: Partial<Record<EquipSlot, ItemInstance>>;
+  stash: ItemInstance[];
+  quests: QuestProgress[];
+  exploration: Record<string, boolean[][]>;
+  homestead: {
+    buildings: Record<string, number>;
+    pets: { petId: string; level: number; exp: number }[];
+    activePet?: string;
+  };
+  achievements: Record<string, number>;
+  settings: {
+    autoCombat: boolean;
+    musicVolume: number;
+    sfxVolume: number;
+  };
+  difficulty: 'normal' | 'nightmare' | 'hell';
+  completedDifficulties: string[];
 }
