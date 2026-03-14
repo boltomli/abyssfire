@@ -1,0 +1,80 @@
+import Phaser from 'phaser';
+import { TILE_WIDTH, TILE_HEIGHT } from '../config';
+import { cartToIso } from '../utils/IsometricUtils';
+
+export class FogOfWarSystem {
+  private scene: Phaser.Scene;
+  private fogLayer: Phaser.GameObjects.Graphics;
+  private explored: boolean[][];
+  private cols: number;
+  private rows: number;
+  private viewRadius: number;
+
+  constructor(scene: Phaser.Scene, cols: number, rows: number, viewRadius = 5) {
+    this.scene = scene;
+    this.cols = cols;
+    this.rows = rows;
+    this.viewRadius = viewRadius;
+    this.explored = Array.from({ length: rows }, () => Array(cols).fill(false));
+    this.fogLayer = scene.add.graphics();
+    this.fogLayer.setDepth(1000);
+  }
+
+  update(playerCol: number, playerRow: number): void {
+    // Mark tiles in view as explored
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        const dist = Math.sqrt((c - playerCol) ** 2 + (r - playerRow) ** 2);
+        if (dist <= this.viewRadius) {
+          this.explored[r][c] = true;
+        }
+      }
+    }
+    this.render(playerCol, playerRow);
+  }
+
+  private render(playerCol: number, playerRow: number): void {
+    this.fogLayer.clear();
+
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        const dist = Math.sqrt((c - playerCol) ** 2 + (r - playerRow) ** 2);
+        const pos = cartToIso(c, r);
+
+        if (dist > this.viewRadius && !this.explored[r][c]) {
+          // Unexplored: full black fog
+          this.fogLayer.fillStyle(0x000000, 0.85);
+          this.drawIsoTile(pos.x, pos.y);
+        } else if (dist > this.viewRadius && this.explored[r][c]) {
+          // Explored but out of view: dimmed
+          this.fogLayer.fillStyle(0x000000, 0.45);
+          this.drawIsoTile(pos.x, pos.y);
+        }
+      }
+    }
+  }
+
+  private drawIsoTile(x: number, y: number): void {
+    const hw = TILE_WIDTH / 2;
+    const hh = TILE_HEIGHT / 2;
+    this.fogLayer.fillPoints([
+      new Phaser.Geom.Point(x, y - hh),
+      new Phaser.Geom.Point(x + hw, y),
+      new Phaser.Geom.Point(x, y + hh),
+      new Phaser.Geom.Point(x - hw, y),
+    ], true);
+  }
+
+  isExplored(col: number, row: number): boolean {
+    if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return false;
+    return this.explored[row][col];
+  }
+
+  getExploredData(): boolean[][] {
+    return this.explored.map(row => [...row]);
+  }
+
+  loadExploredData(data: boolean[][]): void {
+    this.explored = data.map(row => [...row]);
+  }
+}
