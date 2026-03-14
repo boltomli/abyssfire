@@ -4,6 +4,7 @@ import { cartToIso } from '../utils/IsometricUtils';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import type { ClassDefinition, SkillDefinition, Stats } from '../data/types';
 import type { CombatEntity, ActiveBuff } from '../systems/CombatSystem';
+import { CharacterAnimator, getAnimConfig } from '../systems/CharacterAnimator';
 
 export class Player {
   scene: Phaser.Scene;
@@ -24,6 +25,7 @@ export class Player {
   skillLevels: Map<string, number> = new Map();
   skillCooldowns: Map<string, number> = new Map();
   buffs: ActiveBuff[] = [];
+  animator!: CharacterAnimator;
 
   tileCol: number;
   tileRow: number;
@@ -80,6 +82,7 @@ export class Player {
       this.skillCooldowns.set(skill.id, 0);
     }
     this.autoSkillPriority = classData.skills.map(s => s.id);
+    this.animator = new CharacterAnimator(scene, this.sprite, getAnimConfig(classData.id));
   }
 
   private calcMaxHp(): number {
@@ -147,13 +150,16 @@ export class Player {
     if (this.hp < this.maxHp && this.hp > 0) {
       this.hp = Math.min(this.maxHp, this.hp + (0.5 + this.stats.vit * 0.05) * delta / 1000);
     }
+    this.animator.update(delta);
   }
 
   private updateMovement(delta: number): void {
     if (this.path.length === 0) {
       this.isMoving = false;
+      this.animator.setIdle();
       return;
     }
+    this.animator.setWalk();
 
     const target = this.path[0];
     const targetWorld = cartToIso(target.col, target.row);
@@ -226,6 +232,7 @@ export class Player {
   }
 
   die(): void {
+    this.playDeath();
     EventBus.emit(GameEvents.PLAYER_DIED, {});
     EventBus.emit(GameEvents.LOG_MESSAGE, {
       text: '你已死亡，将在营地复活...',
@@ -240,10 +247,31 @@ export class Player {
     this.path = [];
     this.isMoving = false;
     this.attackTarget = null;
+    this.sprite.setAlpha(1);
+    this.sprite.setScale(1);
+    this.sprite.setAngle(0);
+    this.animator.cleanup();
+    this.animator = new CharacterAnimator(this.scene, this.sprite, getAnimConfig(this.classData.id));
     EventBus.emit(GameEvents.PLAYER_HEALTH_CHANGED, { hp: this.hp, maxHp: this.maxHp });
     EventBus.emit(GameEvents.LOG_MESSAGE, {
       text: '你在营地复活了。',
       type: 'system',
     });
+  }
+
+  playAttack(targetX: number, targetY: number): void {
+    this.animator.playAttack(targetX, targetY);
+  }
+
+  playCast(): void {
+    this.animator.playCast();
+  }
+
+  playHurt(sourceX: number, sourceY: number): void {
+    this.animator.playHurt(sourceX, sourceY);
+  }
+
+  playDeath(): void {
+    this.animator.playDeath();
   }
 }
