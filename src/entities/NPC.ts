@@ -20,32 +20,14 @@ export class NPC {
     this.sprite = scene.add.container(worldPos.x, worldPos.y);
     this.sprite.setDepth(worldPos.y + 80);
 
-    const color = this.getNPCColor();
-    // Shadow
-    const shadow = scene.add.ellipse(0, 6, 32, 10, 0x000000, 0.3);
-    this.sprite.add(shadow);
-
-    // Body
-    const body = scene.add.rectangle(0, -20, 28, 38, color);
-    body.setStrokeStyle(1.5, Phaser.Display.Color.IntegerToColor(color).darken(20).color);
-    this.sprite.add(body);
-
-    // Head
-    const headColor = Phaser.Display.Color.IntegerToColor(color).lighten(15).color;
-    const head = scene.add.circle(0, -44, 12, 0xffcc80);
-    this.sprite.add(head);
-
-    // Hat/identifier
-    const hatColor = this.getHatColor();
-    const hat = scene.add.rectangle(0, -54, 20, 8, hatColor);
-    hat.setStrokeStyle(1, Phaser.Display.Color.IntegerToColor(hatColor).darken(15).color);
-    this.sprite.add(hat);
-
-    // Eyes
-    const eye1 = scene.add.circle(-4, -46, 1.5, 0x2c3e50);
-    const eye2 = scene.add.circle(4, -46, 1.5, 0x2c3e50);
-    this.sprite.add(eye1);
-    this.sprite.add(eye2);
+    // Use loaded sprite texture if available, otherwise draw procedural fallback
+    const spriteKey = `npc_${definition.type}`;
+    if (scene.textures.exists(spriteKey)) {
+      const img = scene.add.image(0, -32, spriteKey);
+      this.sprite.add(img);
+    } else {
+      this.drawProceduralNPC(scene);
+    }
 
     // Exclamation mark for quest NPCs
     if (definition.type === 'quest') {
@@ -74,6 +56,13 @@ export class NPC {
       strokeThickness: 3,
     }).setOrigin(0.5);
     this.sprite.add(this.nameLabel);
+
+    // Interactive hit area covering the full NPC visual
+    const hitZone = scene.add.rectangle(0, -20, 40, 70, 0xffffff, 0);
+    hitZone.setInteractive({ useHandCursor: true });
+    this.sprite.add(hitZone);
+    this.sprite.setSize(40, 70);
+    this.sprite.setInteractive(new Phaser.Geom.Rectangle(-20, -60, 40, 80), Phaser.Geom.Rectangle.Contains);
   }
 
   private getNPCColor(): number {
@@ -94,6 +83,34 @@ export class NPC {
       case 'stash': return 0x5b2c6f;
       default: return 0x7f8c8d;
     }
+  }
+
+  private drawProceduralNPC(scene: Phaser.Scene): void {
+    const color = this.getNPCColor();
+    // Shadow
+    const shadow = scene.add.ellipse(0, 6, 32, 10, 0x000000, 0.3);
+    this.sprite.add(shadow);
+
+    // Body
+    const body = scene.add.rectangle(0, -20, 28, 38, color);
+    body.setStrokeStyle(1.5, Phaser.Display.Color.IntegerToColor(color).darken(20).color);
+    this.sprite.add(body);
+
+    // Head
+    const head = scene.add.circle(0, -44, 12, 0xffcc80);
+    this.sprite.add(head);
+
+    // Hat/identifier
+    const hatColor = this.getHatColor();
+    const hat = scene.add.rectangle(0, -54, 20, 8, hatColor);
+    hat.setStrokeStyle(1, Phaser.Display.Color.IntegerToColor(hatColor).darken(15).color);
+    this.sprite.add(hat);
+
+    // Eyes
+    const eye1 = scene.add.circle(-4, -46, 1.5, 0x2c3e50);
+    const eye2 = scene.add.circle(4, -46, 1.5, 0x2c3e50);
+    this.sprite.add(eye1);
+    this.sprite.add(eye2);
   }
 
   isNearPlayer(playerCol: number, playerRow: number, range = 2): boolean {

@@ -15,6 +15,7 @@ import { QuestSystem } from '../systems/QuestSystem';
 import { HomesteadSystem } from '../systems/HomesteadSystem';
 import { AchievementSystem } from '../systems/AchievementSystem';
 import { SaveSystem } from '../systems/SaveSystem';
+import { SkillEffectSystem } from '../systems/SkillEffectSystem';
 import { audioSystem } from '../systems/AudioSystem';
 import { AllClasses } from '../data/classes/index';
 import { AllMaps } from '../data/maps/index';
@@ -34,13 +35,16 @@ export class ZoneScene extends Phaser.Scene {
   private pathfinding!: PathfindingSystem;
   private fogOfWar!: FogOfWarSystem;
   private combatSystem!: CombatSystem;
+  private skillEffects!: SkillEffectSystem;
   lootSystem!: LootSystem;
   inventorySystem!: InventorySystem;
   questSystem!: QuestSystem;
   homesteadSystem!: HomesteadSystem;
   achievementSystem!: AchievementSystem;
   saveSystem!: SaveSystem;
-  private mapLayer!: Phaser.GameObjects.Container;
+  private tileSprites: (Phaser.GameObjects.Image | null)[][] = [];
+  private decorSprites: Map<string, Phaser.GameObjects.Image> = new Map();
+  private visibleTiles: Set<string> = new Set();
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
   private campPositions: { col: number; row: number }[] = [];
@@ -49,6 +53,7 @@ export class ZoneScene extends Phaser.Scene {
   private totalKills = 0;
   private exploredZones: Set<string> = new Set();
   private fogData: Record<string, boolean[][]> = {};
+  private lastTileUpdate = 0;
 
   constructor() {
     super({ key: 'ZoneScene' });
@@ -61,15 +66,14 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   create(data: { classId: string; mapId: string }): void {
-    // Clean up previous scene
     this.monsters = [];
     this.npcs = [];
     this.lootDrops = [];
 
     this.combatSystem = new CombatSystem();
     this.lootSystem = new LootSystem();
+    this.skillEffects = new SkillEffectSystem(this);
 
-    // Initialize systems (only on first load, not zone transitions)
     if (!this.inventorySystem) {
       this.inventorySystem = new InventorySystem();
       this.questSystem = new QuestSystem();
@@ -79,9 +83,13 @@ export class ZoneScene extends Phaser.Scene {
       this.questSystem.registerQuests(AllQuests);
     }
 
-    // Create map
-    this.mapLayer = this.add.container(0, 0);
-    this.renderMap();
+    // Initialize tile sprite grid
+    this.tileSprites = [];
+    for (let r = 0; r < this.mapData.rows; r++) {
+      this.tileSprites.push(new Array(this.mapData.cols).fill(null));
+    }
+    this.visibleTiles = new Set();
+    this.decorSprites = new Map();
 
     // Create or reposition player
     if (!this.player || !this.player.sprite.scene) {
@@ -89,7 +97,6 @@ export class ZoneScene extends Phaser.Scene {
       this.player = new Player(this, classData, this.mapData.playerStart.col, this.mapData.playerStart.row);
       this.player.recalcDerived();
     } else {
-      // Re-create sprite in new scene
       const oldStats = {
         level: this.player.level, exp: this.player.exp, gold: this.player.gold,
         hp: this.player.hp, mana: this.player.mana, stats: { ...this.player.stats },
@@ -102,23 +109,23 @@ export class ZoneScene extends Phaser.Scene {
       this.player.recalcDerived();
     }
 
-    // Pathfinding
     this.pathfinding = new PathfindingSystem(this.mapData.collisions, this.mapData.cols, this.mapData.rows);
 
-    // Fog of war
-    this.fogOfWar = new FogOfWarSystem(this, this.mapData.cols, this.mapData.rows, 6);
+    this.fogOfWar = new FogOfWarSystem(this, this.mapData.cols, this.mapData.rows, 10);
     if (this.fogData[this.currentMapId]) {
       this.fogOfWar.loadExploredData(this.fogData[this.currentMapId]);
     }
     this.fogOfWar.update(this.player.tileCol, this.player.tileRow);
 
-    // Spawn monsters + NPCs
     this.spawnMonsters();
     this.spawnNPCs();
 
+    // Initial tile render
+    this.updateVisibleTiles();
+
     // Camera
     this.cameras.main.startFollow(this.player.sprite, true, 0.08, 0.08);
-    this.cameras.main.setZoom(1.2);
+    this.cameras.main.setZoom(1.8);
 
     // Input
     if (this.input.keyboard) {
@@ -143,23 +150,19 @@ export class ZoneScene extends Phaser.Scene {
       };
     }
 
-    // Click to move / interact
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (pointer.rightButtonDown()) return;
       const tile = worldToTile(pointer.worldX, pointer.worldY);
 
-      // Check loot pickup
       const loot = this.findLootAt(tile.col, tile.row);
       if (loot) { this.pickupLoot(loot); return; }
 
-      // Check NPC interaction
       const npc = this.findNPCAt(tile.col, tile.row);
       if (npc && npc.isNearPlayer(this.player.tileCol, this.player.tileRow, 3)) {
         this.interactNPC(npc);
         return;
       }
 
-      // Check monster click
       const monster = this.findMonsterAt(tile.col, tile.row);
       if (monster && monster.isAlive()) {
         this.player.attackTarget = monster.id;
@@ -171,14 +174,12 @@ export class ZoneScene extends Phaser.Scene {
         return;
       }
 
-      // Check exit
       const exit = this.findExitAt(tile.col, tile.row);
       if (exit) {
         this.changeZone(exit.targetMap, exit.targetCol, exit.targetRow);
         return;
       }
 
-      // Move
       if (tile.col >= 0 && tile.col < this.mapData.cols && tile.row >= 0 && tile.row < this.mapData.rows) {
         const path = this.pathfinding.findPath(
           Math.round(this.player.tileCol), Math.round(this.player.tileRow),
@@ -191,14 +192,12 @@ export class ZoneScene extends Phaser.Scene {
       }
     });
 
-    // Start UI scene
     if (!this.scene.isActive('UIScene')) {
       this.scene.launch('UIScene', { player: this.player, zone: this });
     } else {
       EventBus.emit('ui:refresh', { player: this.player, zone: this });
     }
 
-    // Listen for events
     EventBus.removeAllListeners(GameEvents.PLAYER_DIED);
     EventBus.on(GameEvents.PLAYER_DIED, () => {
       this.time.delayedCall(2000, () => {
@@ -212,7 +211,6 @@ export class ZoneScene extends Phaser.Scene {
       this.tryUseSkill(data.skillId, this.time.now);
     });
 
-    // Track explored zone
     this.exploredZones.add(this.currentMapId);
     this.achievementSystem.update('explore', this.currentMapId);
 
@@ -222,7 +220,6 @@ export class ZoneScene extends Phaser.Scene {
       type: 'system',
     });
 
-    // Auto save
     this.autoSave();
   }
 
@@ -241,17 +238,121 @@ export class ZoneScene extends Phaser.Scene {
 
     if (this.player.autoCombat) this.handleAutoCombat(time);
 
-    // Check exits proximity
     this.checkExitProximity();
+
+    // Throttled viewport tile update
+    if (time - this.lastTileUpdate > 100) {
+      this.lastTileUpdate = time;
+      this.updateVisibleTiles();
+    }
 
     // Throttled fog update
     if (Math.floor(time / 200) !== Math.floor((time - delta) / 200)) {
       this.fogOfWar.update(Math.round(this.player.tileCol), Math.round(this.player.tileRow));
     }
 
-    // HUD update
     EventBus.emit(GameEvents.PLAYER_HEALTH_CHANGED, { hp: this.player.hp, maxHp: this.player.maxHp });
     EventBus.emit(GameEvents.PLAYER_MANA_CHANGED, { mana: this.player.mana, maxMana: this.player.maxMana });
+  }
+
+  // --- Viewport culling tile rendering ---
+  private updateVisibleTiles(): void {
+    const cam = this.cameras.main;
+    const camCX = cam.scrollX + cam.width / 2 / cam.zoom;
+    const camCY = cam.scrollY + cam.height / 2 / cam.zoom;
+    const viewW = cam.width / cam.zoom / 2;
+    const viewH = cam.height / cam.zoom / 2;
+    const margin = 4;
+
+    const newVisible = new Set<string>();
+
+    for (let row = 0; row < this.mapData.rows; row++) {
+      for (let col = 0; col < this.mapData.cols; col++) {
+        const pos = cartToIso(col, row);
+        const dx = Math.abs(pos.x - camCX);
+        const dy = Math.abs(pos.y - camCY);
+        if (dx < viewW + TILE_WIDTH * margin && dy < viewH + TILE_HEIGHT * margin) {
+          const key = `${col},${row}`;
+          newVisible.add(key);
+          if (!this.tileSprites[row][col]) {
+            const tileType = this.mapData.tiles[row][col];
+            const tileKey = TILE_KEYS[tileType] || 'tile_grass';
+            const tile = this.add.image(pos.x, pos.y, tileKey);
+            tile.setDepth(pos.y);
+            this.tileSprites[row][col] = tile;
+
+            if (tileType === 5) {
+              const flag = this.add.rectangle(pos.x, pos.y - 12, 3, 10, 0xf1c40f);
+              flag.setDepth(pos.y + 1);
+            }
+
+            const exit = this.mapData.exits.find(e => e.col === col && e.row === row);
+            if (exit) {
+              if (this.textures.exists('exit_portal')) {
+                const portal = this.add.image(pos.x, pos.y - 8, 'exit_portal');
+                portal.setDepth(pos.y + 2);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Destroy tiles no longer visible
+    for (const key of this.visibleTiles) {
+      if (!newVisible.has(key)) {
+        const [c, r] = key.split(',').map(Number);
+        const sprite = this.tileSprites[r]?.[c];
+        if (sprite) {
+          sprite.destroy();
+          this.tileSprites[r][c] = null;
+        }
+      }
+    }
+    this.visibleTiles = newVisible;
+
+    // Update decorations visibility
+    this.updateVisibleDecorations();
+  }
+
+  private updateVisibleDecorations(): void {
+    const decorations = this.mapData.decorations ?? [];
+    const cam = this.cameras.main;
+    const camCX = cam.scrollX + cam.width / 2 / cam.zoom;
+    const camCY = cam.scrollY + cam.height / 2 / cam.zoom;
+    const viewW = cam.width / cam.zoom / 2;
+    const viewH = cam.height / cam.zoom / 2;
+    const margin = 5;
+
+    const visibleDecorKeys = new Set<string>();
+
+    for (let i = 0; i < decorations.length; i++) {
+      const decor = decorations[i];
+      const pos = cartToIso(decor.col, decor.row);
+      const dx = Math.abs(pos.x - camCX);
+      const dy = Math.abs(pos.y - camCY);
+      const key = `d_${i}`;
+
+      if (dx < viewW + TILE_WIDTH * margin && dy < viewH + TILE_HEIGHT * margin) {
+        visibleDecorKeys.add(key);
+        if (!this.decorSprites.has(key)) {
+          const texKey = `decor_${decor.type}`;
+          if (this.textures.exists(texKey)) {
+            const sprite = this.add.image(pos.x, pos.y - 6, texKey);
+            sprite.setDepth(pos.y + 20);
+            this.decorSprites.set(key, sprite);
+          }
+        }
+      }
+    }
+
+    // Remove out-of-view decorations
+    for (const [key, sprite] of this.decorSprites) {
+      if (!visibleDecorKeys.has(key)) {
+        sprite.destroy();
+        this.decorSprites.delete(key);
+      }
+    }
   }
 
   private handleKeyboardMovement(delta: number): void {
@@ -323,31 +424,40 @@ export class ZoneScene extends Phaser.Scene {
 
     this.player.useSkill(skillId, time);
     const level = this.player.getSkillLevel(skillId);
+    audioSystem.playSFX('skill');
 
     if (skill.buff) {
       this.player.buffs.push({ stat: skill.buff.stat, value: skill.buff.value + level * 0.02, duration: skill.buff.duration, startTime: time });
       EventBus.emit(GameEvents.LOG_MESSAGE, { text: `${skill.name} 激活!`, type: 'combat' });
-      this.showSkillEffect(this.player.sprite.x, this.player.sprite.y, 0x3498db);
+      this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y);
       return;
     }
 
     if (skill.aoe && skill.aoeRadius) {
-      const targets = this.monsters.filter(m =>
+      const aoeTargets = this.monsters.filter(m =>
         m.isAlive() && euclideanDistance(this.player.tileCol, this.player.tileRow, m.tileCol, m.tileRow) <= skill.aoeRadius!
       );
-      for (const t of targets) {
+      for (const t of aoeTargets) {
         const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(), t.toCombatEntity(), skill, level);
         t.takeDamage(result.damage);
         this.showDamageText(t.sprite.x, t.sprite.y, result.damage, result.isCrit);
         if (!t.isAlive()) this.onMonsterKilled(t);
       }
-      this.showSkillEffect(this.player.sprite.x, this.player.sprite.y, 0xe74c3c);
+      if (skillId === 'chain_lightning') {
+        this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
+          undefined, undefined,
+          aoeTargets.map(t => ({ x: t.sprite.x, y: t.sprite.y })));
+      } else {
+        this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
+          this.player.sprite.x, this.player.sprite.y);
+      }
     } else if (target) {
       const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(), target.toCombatEntity(), skill, level);
       target.takeDamage(result.damage);
       this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
       if (!target.isAlive()) this.onMonsterKilled(target);
-      this.showSkillEffect(target.sprite.x, target.sprite.y, 0xf39c12);
+      this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
+        target.sprite.x, target.sprite.y);
     }
   }
 
@@ -366,6 +476,7 @@ export class ZoneScene extends Phaser.Scene {
           const finalDmg = Math.floor(result.damage * diffMult);
           this.player.hp = Math.max(0, this.player.hp - finalDmg);
           this.showDamageText(this.player.sprite.x, this.player.sprite.y, finalDmg, result.isCrit, false, true);
+          this.skillEffects.playMonsterAttack(this.player.sprite.x, this.player.sprite.y);
           if (this.player.hp <= 0) this.player.die();
         }
       }
@@ -383,6 +494,7 @@ export class ZoneScene extends Phaser.Scene {
         const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(), target.toCombatEntity());
         target.takeDamage(result.damage);
         this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
+        this.skillEffects.playAttack(this.player.sprite.x, this.player.sprite.y, target.sprite.x, target.sprite.y, true);
         if (!target.isAlive()) { this.onMonsterKilled(target); this.player.attackTarget = null; }
       }
     }
@@ -424,16 +536,13 @@ export class ZoneScene extends Phaser.Scene {
     this.player.addExp(exp);
     this.player.gold += gold;
 
-    // Achievements
     this.totalKills++;
     this.achievementSystem.update('kill', undefined, 1);
     this.achievementSystem.update('kill', monster.definition.id, 1);
     this.achievementSystem.checkLevel(this.player.level);
 
-    // Quest progress
     this.questSystem.updateProgress('kill', monster.definition.id);
 
-    // Loot
     const luckBonus = this.player.stats.lck + (homeBonus['magicFind'] ?? 0);
     const loot = this.lootSystem.generateLoot(monster.definition, luckBonus);
     for (const item of loot) {
@@ -445,7 +554,6 @@ export class ZoneScene extends Phaser.Scene {
       type: 'loot',
     });
 
-    // Respawn
     this.time.delayedCall(15000, () => this.respawnMonster(monster));
   }
 
@@ -454,7 +562,6 @@ export class ZoneScene extends Phaser.Scene {
     const container = this.add.container(worldPos.x, worldPos.y);
     container.setDepth(worldPos.y + 30);
 
-    // Use loot bag sprite or colored rectangle
     if (this.textures.exists('loot_bag')) {
       const bag = this.add.image(0, 0, 'loot_bag');
       const tintColor = this.getQualityColor(item.quality);
@@ -467,14 +574,12 @@ export class ZoneScene extends Phaser.Scene {
       container.add(bg);
     }
 
-    // Quality glow for rare+
     if (item.quality !== 'normal' && item.quality !== 'magic') {
       const glow = this.add.circle(0, 0, 14, this.getQualityColor(item.quality), 0.15);
       container.add(glow);
       container.sendToBack(glow);
     }
 
-    // Floating animation
     this.tweens.add({
       targets: container,
       y: container.y - 5,
@@ -486,7 +591,6 @@ export class ZoneScene extends Phaser.Scene {
 
     this.lootDrops.push({ sprite: container, item, col, row });
 
-    // Auto-destroy after 60s
     this.time.delayedCall(60000, () => {
       const idx = this.lootDrops.findIndex(l => l.item.uid === item.uid);
       if (idx !== -1) {
@@ -527,28 +631,51 @@ export class ZoneScene extends Phaser.Scene {
       case 'merchant':
         EventBus.emit(GameEvents.SHOP_OPEN, { npcId: def.id, shopItems: def.shopItems ?? [], type: def.type });
         break;
-      case 'quest':
+      case 'quest': {
+        // Try to turn in completed quests first
+        const turnedIn: string[] = [];
         if (def.quests) {
-          // Try to turn in completed quests first
           for (const qid of def.quests) {
             const reward = this.questSystem.turnInQuest(qid);
             if (reward) {
               this.player.addExp(reward.exp);
               this.player.gold += reward.gold;
               this.achievementSystem.update('quest');
+              turnedIn.push(qid);
             }
           }
-          // Offer available quests
+        }
+
+        // Build dialogue actions for available quests
+        const actions: { label: string; callback: () => void }[] = [];
+        if (def.quests) {
           const available = this.questSystem.getAvailableQuests(def.quests, this.player.level);
           for (const q of available) {
             const prog = this.questSystem.progress.get(q.id);
             if (!prog) {
-              this.questSystem.acceptQuest(q.id);
-              break; // Accept one at a time
+              actions.push({
+                label: `接受: ${q.name}`,
+                callback: () => { this.questSystem.acceptQuest(q.id); },
+              });
             }
           }
         }
+
+        // Determine dialogue text
+        let dialogueText = def.dialogue[0];
+        if (turnedIn.length > 0) {
+          dialogueText = '感谢你完成了任务！';
+        } else if (actions.length === 0) {
+          dialogueText = def.dialogue.length > 1 ? def.dialogue[1] : def.dialogue[0];
+        }
+
+        EventBus.emit(GameEvents.NPC_INTERACT, {
+          npcName: def.name,
+          dialogue: dialogueText,
+          actions,
+        });
         break;
+      }
       case 'stash':
         EventBus.emit(GameEvents.UI_TOGGLE_PANEL, { panel: 'stash' });
         break;
@@ -556,11 +683,8 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private changeZone(targetMap: string, targetCol: number, targetRow: number): void {
-    // Save fog data
     this.fogData[this.currentMapId] = this.fogOfWar.getExploredData();
     this.autoSave();
-
-    // Restart scene with new map
     this.scene.restart({ classId: this.player.classData.id, mapId: targetMap });
   }
 
@@ -606,47 +730,14 @@ export class ZoneScene extends Phaser.Scene {
     } catch (_e) { /* silent fail */ }
   }
 
-  // --- Rendering helpers ---
-  private renderMap(): void {
-    for (let row = 0; row < this.mapData.rows; row++) {
-      for (let col = 0; col < this.mapData.cols; col++) {
-        const tileType = this.mapData.tiles[row][col];
-        const tileKey = TILE_KEYS[tileType] || 'tile_grass';
-        const pos = cartToIso(col, row);
-        const tile = this.add.image(pos.x, pos.y, tileKey);
-        tile.setDepth(pos.y);
-        this.mapLayer.add(tile);
-        if (tileType === 5) {
-          const flag = this.add.rectangle(pos.x, pos.y - 24, 5, 18, 0xf1c40f);
-          flag.setDepth(pos.y + 1);
-          this.mapLayer.add(flag);
-        }
-        // Exit markers
-        const exit = this.mapData.exits.find(e => e.col === col && e.row === row);
-        if (exit) {
-          if (this.textures.exists('exit_portal')) {
-            const portal = this.add.image(pos.x, pos.y - 16, 'exit_portal');
-            portal.setDepth(pos.y + 2);
-            this.mapLayer.add(portal);
-          } else {
-            const marker = this.add.text(pos.x, pos.y - 16, '>>>', {
-              fontSize: '12px', color: '#00ff00', fontFamily: '"Cinzel", serif',
-            }).setOrigin(0.5).setDepth(pos.y + 2);
-            this.mapLayer.add(marker);
-          }
-        }
-      }
-    }
-  }
-
   private spawnMonsters(): void {
     const monsterDefs = MonstersByZone[this.currentMapId] || [];
     for (const spawn of this.mapData.spawns) {
       const def = monsterDefs.find(m => m.id === spawn.monsterId) || getMonsterDef(spawn.monsterId);
       if (!def) continue;
       for (let i = 0; i < spawn.count; i++) {
-        const c = Math.max(1, Math.min(this.mapData.cols - 2, spawn.col + randomInt(-2, 2)));
-        const r = Math.max(1, Math.min(this.mapData.rows - 2, spawn.row + randomInt(-2, 2)));
+        const c = Math.max(1, Math.min(this.mapData.cols - 2, spawn.col + randomInt(-3, 3)));
+        const r = Math.max(1, Math.min(this.mapData.rows - 2, spawn.row + randomInt(-3, 3)));
         if (this.mapData.collisions[r][c]) {
           this.monsters.push(new Monster(this, def, c, r));
         }
@@ -655,11 +746,21 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private spawnNPCs(): void {
+    // Pre-computed offsets to spread NPCs around the camp center
+    const npcOffsets: { dc: number; dr: number }[] = [
+      { dc: -2, dr: 0 },
+      { dc: 2, dr: 0 },
+      { dc: 0, dr: -2 },
+      { dc: 0, dr: 2 },
+      { dc: -2, dr: -2 },
+      { dc: 2, dr: 2 },
+    ];
     for (const camp of this.mapData.camps) {
       camp.npcs.forEach((npcId, i) => {
         const def = NPCDefinitions[npcId];
         if (!def) return;
-        const npc = new NPC(this, def, camp.col + (i % 2), camp.row + Math.floor(i / 2));
+        const offset = npcOffsets[i % npcOffsets.length];
+        const npc = new NPC(this, def, camp.col + offset.dc, camp.row + offset.dr);
         this.npcs.push(npc);
       });
     }
@@ -673,7 +774,6 @@ export class ZoneScene extends Phaser.Scene {
     this.monsters[idx] = new Monster(this, dead.definition, c, r);
   }
 
-  // --- Finders ---
   private findNearestAliveMonster(): Monster | null {
     let best: Monster | null = null, bestDist = Infinity;
     for (const m of this.monsters) {
@@ -703,10 +803,16 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private findNPCAt(col: number, row: number): NPC | null {
+    let best: NPC | null = null;
+    let bestDist = Infinity;
     for (const npc of this.npcs) {
-      if (Math.abs(npc.tileCol - col) < 1.5 && Math.abs(npc.tileRow - row) < 1.5) return npc;
+      const dist = Math.sqrt((npc.tileCol - col) ** 2 + (npc.tileRow - row) ** 2);
+      if (dist < 1.8 && dist < bestDist) {
+        bestDist = dist;
+        best = npc;
+      }
     }
-    return null;
+    return best;
   }
 
   private findLootAt(col: number, row: number): { sprite: Phaser.GameObjects.Container; item: ItemInstance; col: number; row: number } | null {
@@ -741,14 +847,7 @@ export class ZoneScene extends Phaser.Scene {
     const t = this.add.text(x + randomInt(-12, 12), y - 30, text, {
       fontSize: size, color, fontFamily: '"Cinzel", serif', fontStyle: isCrit ? 'bold' : 'normal', stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2000);
-    // Emit combat event for audio
     EventBus.emit(GameEvents.COMBAT_DAMAGE, { isCrit, isDodged, isPlayer });
     this.tweens.add({ targets: t, y: t.y - 50, alpha: 0, duration: 1200, ease: 'Power2', onComplete: () => t.destroy() });
-  }
-
-  private showSkillEffect(x: number, y: number, color: number): void {
-    audioSystem.playSFX('skill');
-    const c = this.add.circle(x, y - 16, 8, color, 0.7).setDepth(1500);
-    this.tweens.add({ targets: c, scaleX: 5, scaleY: 5, alpha: 0, duration: 500, ease: 'Power2', onComplete: () => c.destroy() });
   }
 }

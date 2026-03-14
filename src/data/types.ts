@@ -171,6 +171,8 @@ export interface TileData {
   type: 'grass' | 'dirt' | 'stone' | 'water' | 'wall' | 'camp';
 }
 
+export type MapTheme = 'plains' | 'forest' | 'mountain' | 'desert' | 'abyss';
+
 export interface MapData {
   id: string;
   name: string;
@@ -184,6 +186,9 @@ export interface MapData {
   exits: { col: number; row: number; targetMap: string; targetCol: number; targetRow: number }[];
   levelRange: [number, number];
   bgColor?: string;
+  theme?: MapTheme;
+  seed?: number;
+  decorations?: { col: number; row: number; type: string }[];
 }
 
 export interface QuestDefinition {

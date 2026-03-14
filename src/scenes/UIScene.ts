@@ -36,6 +36,8 @@ export class UIScene extends Phaser.Scene {
   private skillPanel: Phaser.GameObjects.Container | null = null;
   private charPanel: Phaser.GameObjects.Container | null = null;
   private homesteadPanel: Phaser.GameObjects.Container | null = null;
+  private dialoguePanel: Phaser.GameObjects.Container | null = null;
+  private dialogueBackdrop: Phaser.GameObjects.Rectangle | null = null;
   private minimap!: Phaser.GameObjects.Graphics;
 
   constructor() {
@@ -189,6 +191,9 @@ export class UIScene extends Phaser.Scene {
     EventBus.on(GameEvents.SHOP_OPEN, (data: { npcId: string; shopItems: string[]; type: string }) => {
       this.openShop(data);
     });
+    EventBus.on(GameEvents.NPC_INTERACT, (data: { npcName: string; dialogue: string; actions: { label: string; callback: () => void }[] }) => {
+      this.openDialogue(data);
+    });
     EventBus.on(GameEvents.UI_TOGGLE_PANEL, (data: { panel: string }) => {
       if (data.panel === 'inventory') this.toggleInventory();
       if (data.panel === 'map') this.toggleMap();
@@ -297,6 +302,15 @@ export class UIScene extends Phaser.Scene {
   private openShop(data: { npcId: string; shopItems: string[]; type: string }): void {
     this.closeAllPanels();
     audioSystem.playSFX('click');
+
+    // Backdrop for outside-click dismiss
+    this.dialogueBackdrop = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.3)
+      .setInteractive().setDepth(3999);
+    this.dialogueBackdrop.on('pointerdown', () => {
+      if (this.shopPanel) { this.shopPanel.destroy(); this.shopPanel = null; }
+      if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
+    });
+
     const pw = 340, ph = 380, px = (GAME_WIDTH - pw) / 2, py = 40;
     this.shopPanel = this.add.container(px, py).setDepth(4000);
     this.shopPanel.add(this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc0934a));
@@ -307,7 +321,10 @@ export class UIScene extends Phaser.Scene {
     const closeBtn = this.add.text(pw - 16, 8, 'X', {
       fontSize: '16px', color: '#e74c3c', fontFamily: FONT,
     }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => { this.shopPanel?.destroy(); this.shopPanel = null; });
+    closeBtn.on('pointerdown', () => {
+      if (this.shopPanel) { this.shopPanel.destroy(); this.shopPanel = null; }
+      if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
+    });
     this.shopPanel.add(closeBtn);
 
     data.shopItems.forEach((itemId, i) => {
@@ -352,7 +369,7 @@ export class UIScene extends Phaser.Scene {
     const pw = 480, ph = 220, px = (GAME_WIDTH - pw) / 2, py = 80;
     this.mapPanel = this.add.container(px, py).setDepth(4000);
     this.mapPanel.add(this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0x27ae60));
-    this.mapPanel.add(this.add.text(pw / 2, 10, '暗烬大陆', {
+    this.mapPanel.add(this.add.text(pw / 2, 10, '掠生大陆', {
       fontSize: '16px', color: '#27ae60', fontFamily: TITLE_FONT, fontStyle: 'bold',
     }).setOrigin(0.5, 0));
     const closeBtn = this.add.text(pw - 16, 8, 'X', {
@@ -629,6 +646,60 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
+  // --- NPC Dialogue Panel ---
+  private openDialogue(data: { npcName: string; dialogue: string; actions: { label: string; callback: () => void }[] }): void {
+    this.closeDialogue();
+    this.closeAllPanels();
+    audioSystem.playSFX('click');
+
+    // Full-screen transparent backdrop to catch outside clicks
+    this.dialogueBackdrop = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.3)
+      .setInteractive().setDepth(3999);
+    this.dialogueBackdrop.on('pointerdown', () => this.closeDialogue());
+
+    const pw = 360, ph = 60 + data.actions.length * 32 + 30;
+    const px = (GAME_WIDTH - pw) / 2, py = GAME_HEIGHT / 2 - ph / 2;
+    this.dialoguePanel = this.add.container(px, py).setDepth(4000);
+    const bg = this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc0934a);
+    this.dialoguePanel.add(bg);
+
+    // NPC name
+    this.dialoguePanel.add(this.add.text(pw / 2, 10, data.npcName, {
+      fontSize: '14px', color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
+    }).setOrigin(0.5, 0));
+
+    // Dialogue text
+    this.dialoguePanel.add(this.add.text(pw / 2, 32, data.dialogue, {
+      fontSize: '12px', color: '#e0d8cc', fontFamily: FONT, wordWrap: { width: pw - 30 },
+    }).setOrigin(0.5, 0));
+
+    // Action buttons
+    const btnStartY = 60;
+    data.actions.forEach((action, i) => {
+      const by = btnStartY + i * 32;
+      const btnBg = this.add.rectangle(pw / 2, by + 12, pw - 40, 26, 0x1a2a1a)
+        .setStrokeStyle(1, 0x27ae60).setInteractive({ useHandCursor: true });
+      btnBg.on('pointerdown', () => {
+        action.callback();
+        this.closeDialogue();
+      });
+      this.dialoguePanel!.add(btnBg);
+      this.dialoguePanel!.add(this.add.text(pw / 2, by + 12, action.label, {
+        fontSize: '12px', color: '#27ae60', fontFamily: FONT,
+      }).setOrigin(0.5));
+    });
+
+    // Close hint
+    this.dialoguePanel.add(this.add.text(pw / 2, ph - 16, '点击外部关闭', {
+      fontSize: '9px', color: '#555', fontFamily: FONT,
+    }).setOrigin(0.5));
+  }
+
+  private closeDialogue(): void {
+    if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
+    if (this.dialoguePanel) { this.dialoguePanel.destroy(); this.dialoguePanel = null; }
+  }
+
   private closeAllPanels(): void {
     if (this.inventoryPanel) { this.inventoryPanel.destroy(); this.inventoryPanel = null; }
     if (this.shopPanel) { this.shopPanel.destroy(); this.shopPanel = null; }
@@ -636,6 +707,7 @@ export class UIScene extends Phaser.Scene {
     if (this.skillPanel) { this.skillPanel.destroy(); this.skillPanel = null; }
     if (this.charPanel) { this.charPanel.destroy(); this.charPanel = null; }
     if (this.homesteadPanel) { this.homesteadPanel.destroy(); this.homesteadPanel = null; }
+    this.closeDialogue();
   }
 
   private getQualityColorNum(quality: string): number {

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { SkillEffectSystem } from '../systems/SkillEffectSystem';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -11,11 +12,56 @@ export class BootScene extends Phaser.Scene {
     const barY = height / 2;
     this.add.rectangle(width / 2, barY, barW, barH, 0x1a1a2e).setStrokeStyle(1, 0x333344);
     const fill = this.add.rectangle((width - barW) / 2 + 2, barY, 0, barH - 4, 0xc0934a).setOrigin(0, 0.5);
-    const loadingText = this.add.text(width / 2, barY - 24, '锻造暗烬大陆...', {
+    const loadingText = this.add.text(width / 2, barY - 24, '锻造掠生大陆...', {
       fontSize: '14px', color: '#c0934a', fontFamily: '"Cinzel", serif',
     }).setOrigin(0.5);
     this.load.on('progress', (v: number) => { fill.width = (barW - 4) * v; });
     this.load.on('complete', () => { loadingText.setText('准备就绪!'); });
+
+    // Silently handle missing asset files — procedural fallbacks will fill gaps
+    this.load.on('loaderror', (file: Phaser.Loader.File) => {
+      console.debug(`[BootScene] Asset not found, will use fallback: ${file.key}`);
+    });
+
+    // ── External assets (cartoon-style) ─────────────────────
+    // Tiles
+    const tiles = ['grass', 'dirt', 'stone', 'water', 'wall', 'camp'];
+    for (const t of tiles) {
+      this.load.image(`tile_${t}`, `assets/tiles/tile_${t}.png`);
+    }
+
+    // Player sprites
+    const classes = ['warrior', 'mage', 'rogue'];
+    for (const c of classes) {
+      this.load.image(`player_${c}`, `assets/sprites/players/player_${c}.png`);
+    }
+
+    // Monster sprites
+    const monsters = [
+      'slime', 'goblin', 'goblin_chief', 'skeleton', 'zombie', 'werewolf',
+      'werewolf_alpha', 'gargoyle', 'stone_golem', 'mountain_troll',
+      'fire_elemental', 'desert_scorpion', 'sandworm', 'phoenix',
+      'imp', 'lesser_demon', 'succubus', 'demon_lord',
+    ];
+    for (const m of monsters) {
+      this.load.image(`monster_${m}`, `assets/sprites/monsters/monster_${m}.png`);
+    }
+
+    // NPC sprites
+    const npcTypes = ['blacksmith', 'merchant', 'quest', 'stash'];
+    for (const n of npcTypes) {
+      this.load.image(`npc_${n}`, `assets/sprites/npcs/npc_${n}.png`);
+    }
+
+    // Decorations
+    const decors = ['tree', 'bush', 'rock', 'flower', 'mushroom', 'cactus', 'boulder', 'crystal', 'bones'];
+    for (const d of decors) {
+      this.load.image(`decor_${d}`, `assets/sprites/decorations/decor_${d}.png`);
+    }
+
+    // Effects
+    this.load.image('loot_bag', 'assets/sprites/effects/loot_bag.png');
+    this.load.image('exit_portal', 'assets/sprites/effects/exit_portal.png');
   }
 
   create(): void {
@@ -23,10 +69,12 @@ export class BootScene extends Phaser.Scene {
     this.generatePlayerSprites();
     this.generateMonsterSprites();
     this.generateEffects();
+    this.generateDecorations();
+    SkillEffectSystem.generateTextures(this);
     this.scene.start('MenuScene');
   }
 
-  // ── HD Isometric Tiles (128x64) ──────────────────────────
+  // ── HD Isometric Tiles (64x32) ───────────────────────────
   private generateTiles(): void {
     this.makeIsoTile('tile_grass', (g, w, h) => {
       // Base gradient
@@ -977,8 +1025,77 @@ export class BootScene extends Phaser.Scene {
   }
 
   // ── Helpers ──────────────────────────────────────────────
+  private generateDecorations(): void {
+    // Tree (24x36)
+    this.makeSprite('decor_tree', 24, 36, (g) => {
+      g.fillStyle(0x000000, 0.2); g.fillEllipse(12, 34, 16, 4);
+      g.fillStyle(0x5d4037); g.fillRect(10, 22, 4, 14);
+      g.fillStyle(0x4e342e); g.fillRect(11, 22, 2, 12);
+      g.fillStyle(0x2e7d32); g.fillEllipse(12, 14, 20, 22);
+      g.fillStyle(0x388e3c, 0.6); g.fillEllipse(10, 11, 12, 14);
+      g.fillStyle(0x43a047, 0.4); g.fillEllipse(14, 8, 8, 8);
+    });
+    // Bush (16x12)
+    this.makeSprite('decor_bush', 16, 12, (g) => {
+      g.fillStyle(0x000000, 0.15); g.fillEllipse(8, 11, 14, 3);
+      g.fillStyle(0x388e3c); g.fillEllipse(8, 7, 14, 10);
+      g.fillStyle(0x4caf50, 0.5); g.fillEllipse(6, 5, 8, 6);
+    });
+    // Rock (16x12)
+    this.makeSprite('decor_rock', 16, 12, (g) => {
+      g.fillStyle(0x000000, 0.15); g.fillEllipse(8, 11, 12, 3);
+      g.fillStyle(0x757575); g.fillEllipse(8, 7, 14, 10);
+      g.fillStyle(0x9e9e9e, 0.5); g.fillEllipse(6, 5, 6, 4);
+    });
+    // Flower (8x10)
+    this.makeSprite('decor_flower', 8, 10, (g) => {
+      g.fillStyle(0x388e3c); g.fillRect(3, 5, 2, 5);
+      const fc = [0xf44336, 0xffc107, 0xe91e63, 0x9c27b0][Math.floor(Math.random() * 4)];
+      g.fillStyle(fc); g.fillCircle(4, 4, 3);
+      g.fillStyle(0xffeb3b, 0.7); g.fillCircle(4, 4, 1.5);
+    });
+    // Mushroom (10x12)
+    this.makeSprite('decor_mushroom', 10, 12, (g) => {
+      g.fillStyle(0xbcaaa4); g.fillRect(4, 6, 3, 6);
+      g.fillStyle(0xe53935); g.fillEllipse(5, 5, 10, 8);
+      g.fillStyle(0xffffff, 0.6);
+      g.fillCircle(3, 4, 1.5); g.fillCircle(6, 3, 1); g.fillCircle(7, 5, 1);
+    });
+    // Cactus (12x20)
+    this.makeSprite('decor_cactus', 12, 20, (g) => {
+      g.fillStyle(0x000000, 0.15); g.fillEllipse(6, 19, 10, 3);
+      g.fillStyle(0x2e7d32); g.fillRoundedRect(4, 4, 5, 16, 2);
+      g.fillStyle(0x2e7d32); g.fillRoundedRect(0, 8, 5, 4, 2);
+      g.fillStyle(0x2e7d32); g.fillRoundedRect(8, 6, 4, 4, 2);
+      g.fillStyle(0x43a047, 0.4); g.fillRect(5, 5, 2, 14);
+    });
+    // Boulder (20x16)
+    this.makeSprite('decor_boulder', 20, 16, (g) => {
+      g.fillStyle(0x000000, 0.2); g.fillEllipse(10, 15, 18, 4);
+      g.fillStyle(0x616161); g.fillEllipse(10, 9, 18, 14);
+      g.fillStyle(0x757575, 0.5); g.fillEllipse(8, 7, 10, 8);
+      g.fillStyle(0x9e9e9e, 0.3); g.fillEllipse(6, 5, 6, 4);
+    });
+    // Crystal (10x16)
+    this.makeSprite('decor_crystal', 10, 16, (g) => {
+      g.fillStyle(0x000000, 0.15); g.fillEllipse(5, 15, 8, 3);
+      g.fillStyle(0x7b1fa2); g.fillTriangle(5, 0, 0, 14, 10, 14);
+      g.fillStyle(0xce93d8, 0.5); g.fillTriangle(5, 2, 2, 12, 6, 12);
+      g.fillStyle(0xffffff, 0.3); g.fillTriangle(4, 4, 3, 8, 5, 8);
+    });
+    // Bones (14x10)
+    this.makeSprite('decor_bones', 14, 10, (g) => {
+      g.fillStyle(0xe0e0e0, 0.8);
+      g.fillRoundedRect(1, 3, 12, 2, 1);
+      g.fillRoundedRect(3, 1, 2, 8, 1);
+      g.fillCircle(2, 4, 2); g.fillCircle(12, 4, 2);
+      g.fillCircle(4, 1, 1.5); g.fillCircle(4, 9, 1.5);
+    });
+  }
+
   private makeIsoTile(key: string, draw: (g: Phaser.GameObjects.Graphics, w: number, h: number) => void): void {
-    const w = 128, h = 64;
+    if (this.textures.exists(key)) return;
+    const w = 64, h = 32;
     const g = this.add.graphics();
     draw(g, w, h);
     g.generateTexture(key, w, h);
@@ -1027,6 +1144,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   private makeSprite(key: string, w: number, h: number, draw: (g: Phaser.GameObjects.Graphics) => void): void {
+    if (this.textures.exists(key)) return;
     const g = this.add.graphics();
     draw(g);
     g.generateTexture(key, w, h);

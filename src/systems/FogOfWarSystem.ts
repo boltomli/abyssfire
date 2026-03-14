@@ -10,7 +10,7 @@ export class FogOfWarSystem {
   private rows: number;
   private viewRadius: number;
 
-  constructor(scene: Phaser.Scene, cols: number, rows: number, viewRadius = 5) {
+  constructor(scene: Phaser.Scene, cols: number, rows: number, viewRadius = 10) {
     this.scene = scene;
     this.cols = cols;
     this.rows = rows;
@@ -21,7 +21,6 @@ export class FogOfWarSystem {
   }
 
   update(playerCol: number, playerRow: number): void {
-    // Mark tiles in view as explored
     for (let r = 0; r < this.rows; r++) {
       for (let c = 0; c < this.cols; c++) {
         const dist = Math.sqrt((c - playerCol) ** 2 + (r - playerRow) ** 2);
@@ -36,17 +35,28 @@ export class FogOfWarSystem {
   private render(playerCol: number, playerRow: number): void {
     this.fogLayer.clear();
 
+    // Only render fog for tiles within camera viewport + margin
+    const cam = this.scene.cameras.main;
+    const camCX = cam.scrollX + cam.width / 2 / cam.zoom;
+    const camCY = cam.scrollY + cam.height / 2 / cam.zoom;
+    const viewW = cam.width / cam.zoom / 2;
+    const viewH = cam.height / cam.zoom / 2;
+    const margin = 4;
+
     for (let r = 0; r < this.rows; r++) {
       for (let c = 0; c < this.cols; c++) {
-        const dist = Math.sqrt((c - playerCol) ** 2 + (r - playerRow) ** 2);
         const pos = cartToIso(c, r);
+        const dx = Math.abs(pos.x - camCX);
+        const dy = Math.abs(pos.y - camCY);
+
+        if (dx > viewW + TILE_WIDTH * margin || dy > viewH + TILE_HEIGHT * margin) continue;
+
+        const dist = Math.sqrt((c - playerCol) ** 2 + (r - playerRow) ** 2);
 
         if (dist > this.viewRadius && !this.explored[r][c]) {
-          // Unexplored: full black fog
           this.fogLayer.fillStyle(0x000000, 0.85);
           this.drawIsoTile(pos.x, pos.y);
         } else if (dist > this.viewRadius && this.explored[r][c]) {
-          // Explored but out of view: dimmed
           this.fogLayer.fillStyle(0x000000, 0.45);
           this.drawIsoTile(pos.x, pos.y);
         }
@@ -75,6 +85,8 @@ export class FogOfWarSystem {
   }
 
   loadExploredData(data: boolean[][]): void {
-    this.explored = data.map(row => [...row]);
+    if (data.length === this.rows && data[0]?.length === this.cols) {
+      this.explored = data.map(row => [...row]);
+    }
   }
 }
