@@ -4,6 +4,7 @@ import { euclideanDistance } from '../utils/IsometricUtils';
 import { randomInt } from '../utils/MathUtils';
 import type { MonsterDefinition, Stats } from '../data/types';
 import type { CombatEntity, ActiveBuff } from '../systems/CombatSystem';
+import { CharacterAnimator, getAnimConfig } from '../systems/CharacterAnimator';
 
 type MonsterState = 'idle' | 'patrol' | 'chase' | 'attack' | 'dead';
 
@@ -32,6 +33,7 @@ export class Monster {
 
   patrolTarget: { col: number; row: number } | null = null;
   patrolTimer: number = 0;
+  animator: CharacterAnimator;
   leashRange: number = 8;
 
   private static idCounter = 0;
@@ -91,6 +93,9 @@ export class Monster {
       const crown = scene.add.rectangle(0, -size - 16, 12, 5, 0xf1c40f);
       this.sprite.add(crown);
     }
+
+    const animCategory = definition.animCategory ?? 'humanoid';
+    this.animator = new CharacterAnimator(scene, this.sprite, getAnimConfig(animCategory));
   }
 
   private getMonsterColor(id: string): number {
@@ -121,11 +126,12 @@ export class Monster {
           this.state = 'chase';
         } else if (this.patrolTimer > 3000) {
           this.patrolTimer = 0;
-          this.state = 'patrol';
-          this.patrolTarget = {
-            col: this.spawnCol + randomInt(-2, 2),
-            row: this.spawnRow + randomInt(-2, 2),
-          };
+          const pc = this.spawnCol + randomInt(-2, 2);
+          const pr = this.spawnRow + randomInt(-2, 2);
+          if (pc >= 0 && pc < collisions[0].length && pr >= 0 && pr < collisions.length && collisions[pr][pc]) {
+            this.state = 'patrol';
+            this.patrolTarget = { col: pc, row: pr };
+          }
         }
         break;
 
@@ -161,6 +167,14 @@ export class Monster {
         // Attack timing handled by ZoneScene
         break;
     }
+
+    // Drive animation states
+    if (this.state === 'idle') {
+      this.animator.setIdle();
+    } else if (this.state === 'patrol' || this.state === 'chase') {
+      this.animator.setWalk();
+    }
+    this.animator.update(delta);
   }
 
   private moveToward(targetCol: number, targetRow: number, delta: number, collisions: boolean[][]): boolean {
@@ -193,30 +207,11 @@ export class Monster {
     return false;
   }
 
-  takeDamage(amount: number): void {
+  takeDamage(amount: number, sourceX?: number, sourceY?: number): void {
     this.hp = Math.max(0, this.hp - amount);
     this.updateHpBar();
 
-    // Flash red - tint the whole sprite container
-    this.sprite.list.forEach(child => {
-      if (child instanceof Phaser.GameObjects.Image) {
-        (child as Phaser.GameObjects.Image).setTint(0xff4444);
-      }
-    });
-    if (this.body.visible) this.body.setFillStyle(0xff0000);
-    this.scene.time.delayedCall(100, () => {
-      if (this.state !== 'dead') {
-        this.sprite.list.forEach(child => {
-          if (child instanceof Phaser.GameObjects.Image) {
-            (child as Phaser.GameObjects.Image).clearTint();
-          }
-        });
-        if (this.body.visible) {
-          const color = this.definition.elite ? 0xe74c3c : this.getMonsterColor(this.definition.id);
-          this.body.setFillStyle(color);
-        }
-      }
-    });
+    this.animator.playHurt(sourceX ?? this.sprite.x, sourceY ?? (this.sprite.y - 40));
 
     if (this.hp <= 0) {
       this.die();
@@ -232,10 +227,13 @@ export class Monster {
 
   die(): void {
     this.state = 'dead';
-    this.sprite.setAlpha(0.3);
-    this.scene.time.delayedCall(1500, () => {
+    this.animator.playDeath(() => {
       this.sprite.destroy();
     });
+  }
+
+  playAttack(targetX: number, targetY: number): void {
+    this.animator.playAttack(targetX, targetY);
   }
 
   toCombatEntity(): CombatEntity {
