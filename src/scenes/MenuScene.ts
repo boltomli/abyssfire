@@ -45,7 +45,7 @@ export class MenuScene extends Phaser.Scene {
     lineGfx.fillCircle(cx + 200, lineY, 2);
 
     // Title
-    this.add.text(cx, 130, 'LOOTBORN', {
+    this.add.text(cx, 130, 'ABYSSFIRE', {
       fontSize: '52px',
       color: '#c0934a',
       fontFamily: '"Cinzel", serif',
@@ -54,7 +54,7 @@ export class MenuScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5);
 
-    this.add.text(cx, 188, '掠 生 大 陆', {
+    this.add.text(cx, 188, '渊   火', {
       fontSize: '26px',
       color: '#d4a84b',
       fontFamily: '"Noto Sans SC", sans-serif',
