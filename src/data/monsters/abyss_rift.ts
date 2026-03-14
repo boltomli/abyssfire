@@ -20,6 +20,7 @@ export const AbyssRiftMonsters: MonsterDefinition[] = [
       { quality: 'magic', dropRate: 0.22 },
       { quality: 'rare', dropRate: 0.06 },
     ],
+    animCategory: 'flying',
   },
   {
     id: 'lesser_demon',
@@ -40,6 +41,7 @@ export const AbyssRiftMonsters: MonsterDefinition[] = [
       { quality: 'magic', dropRate: 0.25 },
       { quality: 'rare', dropRate: 0.08 },
     ],
+    animCategory: 'demonic',
   },
   {
     id: 'succubus',
@@ -60,6 +62,7 @@ export const AbyssRiftMonsters: MonsterDefinition[] = [
       { quality: 'rare', dropRate: 0.1 },
       { quality: 'legendary', dropRate: 0.02 },
     ],
+    animCategory: 'demonic',
   },
   {
     id: 'demon_lord',
@@ -82,5 +85,6 @@ export const AbyssRiftMonsters: MonsterDefinition[] = [
       { quality: 'legendary', dropRate: 0.1 },
       { quality: 'set', dropRate: 0.03 },
     ],
+    animCategory: 'large',
   },
 ];

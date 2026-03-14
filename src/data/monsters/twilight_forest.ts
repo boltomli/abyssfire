@@ -19,6 +19,7 @@ export const TwilightForestMonsters: MonsterDefinition[] = [
       { quality: 'normal', dropRate: 0.4 },
       { quality: 'magic', dropRate: 0.08 },
     ],
+    animCategory: 'humanoid',
   },
   {
     id: 'zombie',
@@ -38,6 +39,7 @@ export const TwilightForestMonsters: MonsterDefinition[] = [
       { quality: 'normal', dropRate: 0.45 },
       { quality: 'magic', dropRate: 0.1 },
     ],
+    animCategory: 'humanoid',
   },
   {
     id: 'werewolf',
@@ -58,6 +60,7 @@ export const TwilightForestMonsters: MonsterDefinition[] = [
       { quality: 'magic', dropRate: 0.15 },
       { quality: 'rare', dropRate: 0.03 },
     ],
+    animCategory: 'beast',
   },
   {
     id: 'werewolf_alpha',
@@ -79,5 +82,6 @@ export const TwilightForestMonsters: MonsterDefinition[] = [
       { quality: 'rare', dropRate: 0.12 },
       { quality: 'legendary', dropRate: 0.01 },
     ],
+    animCategory: 'beast',
   },
 ];

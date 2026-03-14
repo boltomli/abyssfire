@@ -20,6 +20,7 @@ export const AnvilMountainsMonsters: MonsterDefinition[] = [
       { quality: 'magic', dropRate: 0.15 },
       { quality: 'rare', dropRate: 0.03 },
     ],
+    animCategory: 'flying',
   },
   {
     id: 'stone_golem',
@@ -40,6 +41,7 @@ export const AnvilMountainsMonsters: MonsterDefinition[] = [
       { quality: 'magic', dropRate: 0.18 },
       { quality: 'rare', dropRate: 0.05 },
     ],
+    animCategory: 'large',
   },
   {
     id: 'mountain_troll',
@@ -61,5 +63,6 @@ export const AnvilMountainsMonsters: MonsterDefinition[] = [
       { quality: 'rare', dropRate: 0.15 },
       { quality: 'legendary', dropRate: 0.02 },
     ],
+    animCategory: 'large',
   },
 ];

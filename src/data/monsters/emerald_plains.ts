@@ -15,6 +15,7 @@ export const EmeraldPlainsMonsters: MonsterDefinition[] = [
     expReward: 10,
     goldReward: [1, 3],
     spriteKey: 'monster_slime',
+    animCategory: 'slime',
   },
   {
     id: 'goblin',
@@ -30,6 +31,7 @@ export const EmeraldPlainsMonsters: MonsterDefinition[] = [
     expReward: 20,
     goldReward: [2, 5],
     spriteKey: 'monster_goblin',
+    animCategory: 'humanoid',
   },
   {
     id: 'goblin_chief',
@@ -46,5 +48,6 @@ export const EmeraldPlainsMonsters: MonsterDefinition[] = [
     goldReward: [8, 15],
     spriteKey: 'monster_goblin_chief',
     elite: true,
+    animCategory: 'humanoid',
   },
 ];

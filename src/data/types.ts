@@ -40,6 +40,8 @@ export interface ClassDefinition {
   skills: SkillDefinition[];
 }
 
+export type MonsterAnimCategory = 'humanoid' | 'slime' | 'beast' | 'large' | 'flying' | 'serpentine' | 'demonic';
+
 export interface MonsterDefinition {
   id: string;
   name: string;
@@ -57,6 +59,7 @@ export interface MonsterDefinition {
   elite?: boolean;
   lootTable?: LootEntry[];
   bossSkills?: string[];
+  animCategory?: MonsterAnimCategory;
 }
 
 export interface LootEntry {

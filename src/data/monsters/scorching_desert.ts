@@ -20,6 +20,7 @@ export const ScorchingDesertMonsters: MonsterDefinition[] = [
       { quality: 'magic', dropRate: 0.2 },
       { quality: 'rare', dropRate: 0.06 },
     ],
+    animCategory: 'flying',
   },
   {
     id: 'desert_scorpion',
@@ -40,6 +41,7 @@ export const ScorchingDesertMonsters: MonsterDefinition[] = [
       { quality: 'magic', dropRate: 0.2 },
       { quality: 'rare', dropRate: 0.06 },
     ],
+    animCategory: 'beast',
   },
   {
     id: 'sandworm',
@@ -60,6 +62,7 @@ export const ScorchingDesertMonsters: MonsterDefinition[] = [
       { quality: 'magic', dropRate: 0.22 },
       { quality: 'rare', dropRate: 0.07 },
     ],
+    animCategory: 'serpentine',
   },
   {
     id: 'phoenix',
@@ -81,5 +84,6 @@ export const ScorchingDesertMonsters: MonsterDefinition[] = [
       { quality: 'rare', dropRate: 0.2 },
       { quality: 'legendary', dropRate: 0.04 },
     ],
+    animCategory: 'flying',
   },
 ];
