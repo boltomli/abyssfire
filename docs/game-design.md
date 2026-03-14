@@ -1,4 +1,4 @@
-# Lootborn Game Design Document
+# Abyssfire Game Design Document
 
 Cartoon-style isometric MUD web game. DnD-inspired world, Diablo II-style loot and classes, real-time auto-combat with manual skill override.
 
@@ -32,7 +32,7 @@ Cartoon-style isometric MUD web game. DnD-inspired world, Diablo II-style loot a
 5. Cocos Creator's strengths (visual editor, WeChat mini-games, native mobile) are not relevant here
 6. PixiJS would require building all game systems from scratch for no rendering gain
 
-## World — Lootborn (掠生大陆)
+## World — Abyssfire (渊火)
 
 Ancient seals shattered, darkness pours from the Abyss. Player awakens as a chosen hero.
 

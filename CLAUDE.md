@@ -1,4 +1,4 @@
-# Lootborn (掠生大陆)
+# Abyssfire (渊火)
 
 Isometric ARPG web game with DnD-style world, Diablo II loot system, real-time auto-combat. Built with Phaser 3, TypeScript, Vite. Runs entirely in the browser — no server.
 
