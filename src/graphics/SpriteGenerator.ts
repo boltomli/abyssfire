@@ -1510,28 +1510,17 @@ export class SpriteGenerator {
       this.fillEllipse(ctx, w / 2, h * 0.58, 6 * s, 3 * s);
     });
 
-    // camp_torch — 16x24: vertical pole, triangular flame on top
-    this.makeSprite('camp_torch', 16 * s, 24 * s, (ctx, w, h) => {
+    // camp_torch — 24x40: vertical pole + bracket (flame rendered as particles in ZoneScene)
+    this.makeSprite('camp_torch', 24 * s, 40 * s, (ctx, w, h) => {
       // Pole
       ctx.fillStyle = '#3a2010';
-      ctx.fillRect(w / 2 - 1.5 * s, h * 0.35, 3 * s, h * 0.6);
+      ctx.fillRect(w / 2 - 2 * s, h * 0.35, 4 * s, h * 0.62);
       // Bracket at top
       ctx.fillStyle = '#555560';
-      ctx.fillRect(w / 2 - 2.5 * s, h * 0.32, 5 * s, 2 * s);
-      // Outer flame (orange)
-      ctx.fillStyle = 'rgba(220,100,20,0.85)';
-      ctx.beginPath();
-      ctx.moveTo(w / 2, h * 0.02);
-      ctx.lineTo(w * 0.78, h * 0.32);
-      ctx.lineTo(w * 0.22, h * 0.32);
-      ctx.closePath(); ctx.fill();
-      // Inner flame (yellow)
-      ctx.fillStyle = 'rgba(255,220,50,0.9)';
-      ctx.beginPath();
-      ctx.moveTo(w / 2, h * 0.10);
-      ctx.lineTo(w * 0.65, h * 0.30);
-      ctx.lineTo(w * 0.35, h * 0.30);
-      ctx.closePath(); ctx.fill();
+      ctx.fillRect(w / 2 - 3.5 * s, h * 0.32, 7 * s, 2.5 * s);
+      // Ember glow hint (static — particles do the real flame)
+      ctx.fillStyle = 'rgba(220,100,20,0.25)';
+      this.fillEllipse(ctx, w / 2, h * 0.28, 4 * s, 3 * s);
     });
 
     // camp_tent — 64x56: triangular pitched tent shape (roughly 1 tile footprint)

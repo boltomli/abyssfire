@@ -510,16 +510,21 @@ export class ZoneScene extends Phaser.Scene {
       sprite.setDepth(pos.y + 10);
       this.campDecorSprites.set(key, sprite);
 
-      // Torch flicker animation
+      // Torch: small particle flame on top of pole
       if (decor.type === 'torch') {
-        this.tweens.add({
-          targets: sprite,
-          alpha: { from: 0.85, to: 1 },
-          scaleX: { from: sprite.scaleX * 0.95, to: sprite.scaleX * 1.05 },
-          scaleY: { from: sprite.scaleY * 0.95, to: sprite.scaleY * 1.05 },
-          duration: 300 + Math.random() * 200,
-          yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+        const torchFire = this.add.particles(pos.x, pos.y - 28, 'particle_flame', {
+          speed: { min: 5, max: 20 },
+          angle: { min: 255, max: 285 },
+          scale: { start: 0.5, end: 0.05 },
+          alpha: { start: 0.85, end: 0 },
+          lifespan: { min: 250, max: 500 },
+          frequency: 80,
+          tint: [0xff6600, 0xff8800, 0xffaa00],
+          blendMode: Phaser.BlendModes.ADD,
+          emitting: true,
         });
+        torchFire.setDepth(pos.y + 12);
+        this.campParticles.set(key, torchFire);
       }
       // Campfire: particle fire + glow
       if (decor.type === 'campfire') {
