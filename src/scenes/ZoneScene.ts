@@ -47,6 +47,7 @@ export class ZoneScene extends Phaser.Scene {
   private tileSprites: (Phaser.GameObjects.Image | null)[][] = [];
   private decorSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private campDecorSprites: Map<string, Phaser.GameObjects.Image | Phaser.GameObjects.Container> = new Map();
+  private campParticles: Map<string, Phaser.GameObjects.Particles.ParticleEmitter> = new Map();
   private campDecorPositions: { col: number; row: number; type: string }[] = [];
   private visibleTiles: Set<string> = new Set();
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -509,8 +510,8 @@ export class ZoneScene extends Phaser.Scene {
       sprite.setDepth(pos.y + 10);
       this.campDecorSprites.set(key, sprite);
 
-      // Torch/campfire flicker animation
-      if (decor.type === 'torch' || decor.type === 'campfire') {
+      // Torch flicker animation
+      if (decor.type === 'torch') {
         this.tweens.add({
           targets: sprite,
           alpha: { from: 0.85, to: 1 },
@@ -520,14 +521,44 @@ export class ZoneScene extends Phaser.Scene {
           yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
         });
       }
-      // Campfire glow (stored alongside sprite for cleanup)
+      // Campfire: particle fire + glow
       if (decor.type === 'campfire') {
-        const glow = this.add.circle(pos.x, pos.y, 60, 0xff8800, 0.08);
+        // Fire particles
+        const fireEmitter = this.add.particles(pos.x, pos.y - 20, 'particle_flame', {
+          speed: { min: 10, max: 40 },
+          angle: { min: 250, max: 290 },
+          scale: { start: 0.8, end: 0.1 },
+          alpha: { start: 0.9, end: 0 },
+          lifespan: { min: 400, max: 800 },
+          frequency: 50,
+          tint: [0xff6600, 0xff8800, 0xffaa00, 0xffcc22],
+          blendMode: Phaser.BlendModes.ADD,
+          emitting: true,
+        });
+        fireEmitter.setDepth(pos.y + 12);
+        this.campParticles.set(key, fireEmitter);
+        // Spark particles (smaller, faster)
+        const sparkKey = `${key}_spark`;
+        const sparkEmitter = this.add.particles(pos.x, pos.y - 18, 'particle_circle', {
+          speed: { min: 15, max: 50 },
+          angle: { min: 240, max: 300 },
+          scale: { start: 0.4, end: 0 },
+          alpha: { start: 1, end: 0 },
+          lifespan: { min: 300, max: 600 },
+          frequency: 150,
+          tint: [0xffdd44, 0xff8800],
+          blendMode: Phaser.BlendModes.ADD,
+          emitting: true,
+        });
+        sparkEmitter.setDepth(pos.y + 13);
+        this.campParticles.set(sparkKey, sparkEmitter);
+        // Glow circle (pulsing)
+        const glow = this.add.circle(pos.x, pos.y - 8, 60, 0xff8800, 0.08);
         glow.setBlendMode(Phaser.BlendModes.ADD);
         glow.setDepth(pos.y + 5);
         this.tweens.add({
           targets: glow,
-          alpha: { from: 0.06, to: 0.12 },
+          alpha: { from: 0.06, to: 0.14 },
           scaleX: { from: 0.9, to: 1.1 }, scaleY: { from: 0.9, to: 1.1 },
           duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
         });
@@ -549,6 +580,14 @@ export class ZoneScene extends Phaser.Scene {
       if (!visibleKeys.has(key)) {
         sprite.destroy();
         this.campDecorSprites.delete(key);
+      }
+    }
+    // Clean up particle emitters for off-screen campfires
+    for (const [key, emitter] of this.campParticles) {
+      const baseKey = key.replace(/_spark$/, '');
+      if (!visibleKeys.has(baseKey)) {
+        emitter.destroy();
+        this.campParticles.delete(key);
       }
     }
   }
@@ -1282,5 +1321,7 @@ export class ZoneScene extends Phaser.Scene {
   shutdown(): void {
     for (const sprite of this.campDecorSprites.values()) sprite.destroy();
     this.campDecorSprites.clear();
+    for (const emitter of this.campParticles.values()) emitter.destroy();
+    this.campParticles.clear();
   }
 }

@@ -1489,39 +1489,25 @@ export class SpriteGenerator {
   private generateCampDecorations(): void {
     const s = TEXTURE_SCALE;
 
-    // camp_campfire — 32x32: stone ring base, crossed logs, triangular fire
-    this.makeSprite('camp_campfire', 32 * s, 32 * s, (ctx, w, h) => {
+    // camp_campfire — 48x40: stone ring base + crossed logs (fire rendered as particles in ZoneScene)
+    this.makeSprite('camp_campfire', 48 * s, 40 * s, (ctx, w, h) => {
       // Shadow
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      this.fillEllipse(ctx, w / 2, h - 2 * s, 10 * s, 3 * s);
+      this.fillEllipse(ctx, w / 2, h - 2 * s, 16 * s, 5 * s);
       // Stone ring base
       ctx.fillStyle = '#555560';
-      this.fillEllipse(ctx, w / 2, h * 0.72, 10 * s, 4 * s);
+      this.fillEllipse(ctx, w / 2, h * 0.72, 16 * s, 6 * s);
       ctx.fillStyle = '#404045';
-      this.fillEllipse(ctx, w / 2, h * 0.72, 7 * s, 2.5 * s);
+      this.fillEllipse(ctx, w / 2, h * 0.72, 11 * s, 4 * s);
       // Crossed logs
       ctx.strokeStyle = '#3a2010';
-      ctx.lineWidth = 2.5 * s;
+      ctx.lineWidth = 3 * s;
       ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(w * 0.25, h * 0.75); ctx.lineTo(w * 0.75, h * 0.55); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(w * 0.75, h * 0.75); ctx.lineTo(w * 0.25, h * 0.55); ctx.stroke();
-      // Outer fire (orange)
-      ctx.fillStyle = 'rgba(220,100,20,0.85)';
-      ctx.beginPath();
-      ctx.moveTo(w / 2, h * 0.15);
-      ctx.lineTo(w * 0.72, h * 0.65);
-      ctx.lineTo(w * 0.28, h * 0.65);
-      ctx.closePath(); ctx.fill();
-      // Inner fire (yellow)
-      ctx.fillStyle = 'rgba(255,220,50,0.9)';
-      ctx.beginPath();
-      ctx.moveTo(w / 2, h * 0.28);
-      ctx.lineTo(w * 0.60, h * 0.62);
-      ctx.lineTo(w * 0.40, h * 0.62);
-      ctx.closePath(); ctx.fill();
-      // Bright core
-      ctx.fillStyle = 'rgba(255,255,180,0.7)';
-      this.fillEllipse(ctx, w / 2, h * 0.5, 3 * s, 4 * s);
+      ctx.beginPath(); ctx.moveTo(w * 0.25, h * 0.78); ctx.lineTo(w * 0.75, h * 0.55); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(w * 0.75, h * 0.78); ctx.lineTo(w * 0.25, h * 0.55); ctx.stroke();
+      // Embers glow (static hint — particles do the real fire)
+      ctx.fillStyle = 'rgba(220,100,20,0.3)';
+      this.fillEllipse(ctx, w / 2, h * 0.58, 6 * s, 3 * s);
     });
 
     // camp_torch — 16x24: vertical pole, triangular flame on top
@@ -1548,11 +1534,11 @@ export class SpriteGenerator {
       ctx.closePath(); ctx.fill();
     });
 
-    // camp_tent — 40x36: triangular pitched tent shape
-    this.makeSprite('camp_tent', 40 * s, 36 * s, (ctx, w, h) => {
+    // camp_tent — 64x56: triangular pitched tent shape (roughly 1 tile footprint)
+    this.makeSprite('camp_tent', 64 * s, 56 * s, (ctx, w, h) => {
       // Shadow
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
-      this.fillEllipse(ctx, w / 2, h - 2 * s, 16 * s, 3 * s);
+      this.fillEllipse(ctx, w / 2, h - 2 * s, 26 * s, 5 * s);
       // Tent body (dark base)
       ctx.fillStyle = '#3a2a1a';
       ctx.beginPath();
@@ -1585,11 +1571,11 @@ export class SpriteGenerator {
       this.fillCircle(ctx, w / 2, h * 0.05, 1.5 * s);
     });
 
-    // camp_barrel — 16x20: rectangular body, horizontal band lines, elliptical top
-    this.makeSprite('camp_barrel', 16 * s, 20 * s, (ctx, w, h) => {
+    // camp_barrel — 24x32: rectangular body, horizontal band lines, elliptical top
+    this.makeSprite('camp_barrel', 24 * s, 32 * s, (ctx, w, h) => {
       // Shadow
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
-      this.fillEllipse(ctx, w / 2, h - s, 6 * s, 1.5 * s);
+      this.fillEllipse(ctx, w / 2, h - s, 9 * s, 2.5 * s);
       // Body
       const bGrad = ctx.createLinearGradient(w * 0.15, 0, w * 0.85, 0);
       bGrad.addColorStop(0, '#3a2a18');
@@ -1617,11 +1603,11 @@ export class SpriteGenerator {
       ctx.stroke();
     });
 
-    // camp_crate — 18x16: box with cross-plank detail, flat top
-    this.makeSprite('camp_crate', 18 * s, 16 * s, (ctx, w, h) => {
+    // camp_crate — 28x24: box with cross-plank detail, flat top
+    this.makeSprite('camp_crate', 28 * s, 24 * s, (ctx, w, h) => {
       // Shadow
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
-      this.fillEllipse(ctx, w / 2, h - s, 7 * s, 1.5 * s);
+      this.fillEllipse(ctx, w / 2, h - s, 11 * s, 2.5 * s);
       // Box body
       const cGrad = ctx.createLinearGradient(0, h * 0.1, 0, h * 0.9);
       cGrad.addColorStop(0, '#7a6040');
@@ -1642,8 +1628,8 @@ export class SpriteGenerator {
       ctx.fill();
     });
 
-    // camp_banner — 12x32: vertical pole, triangular flag hanging from top
-    this.makeSprite('camp_banner', 12 * s, 32 * s, (ctx, w, h) => {
+    // camp_banner — 18x48: vertical pole, triangular flag hanging from top
+    this.makeSprite('camp_banner', 18 * s, 48 * s, (ctx, w, h) => {
       // Pole
       ctx.fillStyle = '#3a2a10';
       ctx.fillRect(w / 2 - s, 0, 2 * s, h);
@@ -1670,11 +1656,11 @@ export class SpriteGenerator {
       ctx.closePath(); ctx.fill();
     });
 
-    // camp_well — 28x24: stone ring base, dark inner hole, two posts, crossbar
-    this.makeSprite('camp_well', 28 * s, 24 * s, (ctx, w, h) => {
+    // camp_well — 44x36: stone ring base, dark inner hole, two posts, crossbar
+    this.makeSprite('camp_well', 44 * s, 36 * s, (ctx, w, h) => {
       // Shadow
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
-      this.fillEllipse(ctx, w / 2, h - 1.5 * s, 10 * s, 2.5 * s);
+      this.fillEllipse(ctx, w / 2, h - 1.5 * s, 16 * s, 4 * s);
       // Stone ring base
       ctx.fillStyle = '#585860';
       this.fillEllipse(ctx, w / 2, h * 0.62, 11 * s, 5 * s);
