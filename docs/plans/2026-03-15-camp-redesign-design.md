@@ -15,30 +15,30 @@ Upgrade camps from bare 5x5 floor tiles to immersive Diablo II-style encampments
 ## Camp Layout
 
 ```
-  W W W G G W W W W W W
+  W W W W G G W W W W W
   W . . . . . . . . . W
   W . T . . . . . T . W
   W . . . . . . . . . W
-  W . . . B . W . . . W
+  W . . . B . P . . . W
   W . C . . F . . C . W
   W . . . . . . . . . W
   W . . T . . . T . . W
   W . . . . . . . . . W
-  T . . . . . . . . . T
+  t . . . . . . . . . t
   . . . . . . . . . . .
 
-  W = wall tile (collision)
+  W = wall tile (non-walkable, collisions[r][c] = false)
   F = campfire (center)
-  T = tent
-  B = banner
-  C = crates/barrels
-  W (interior) = well/waypoint
-  G = gate opening (3 tiles wide)
+  T = tent (decoration, walkable)
+  B = banner (decoration, walkable)
+  C = crates/barrels (non-walkable)
+  P = well/waypoint (decoration, walkable)
+  G = gate opening (2 tiles wide, walkable)
   . = camp ground tile (walkable)
-  T (bottom corners) = entrance torches
+  t = entrance torches (decoration, walkable)
 ```
 
-Walls occupy the outer ring on top, left, and right sides. The south side is fully open as the entrance, flanked by torches. The gate opening on the north wall is 2 tiles wide for visual interest (not a functional gate).
+Walls occupy the outer ring on top, left, and right sides. The south side is fully open as the entrance, flanked by torches. The north wall has a 2-tile gap as a decorative gate.
 
 ## Camp Boundary & Monster Safe Zone
 
@@ -46,21 +46,31 @@ Walls occupy the outer ring on top, left, and right sides. The south side is ful
 - Wall tiles placed on the outer ring of the 11x11 area (top, left, right sides)
 - South side open — no wall tiles, just entrance torches
 - North wall has a 2-tile gap (decorative gate)
-- Walls use `collision = false` (non-walkable) — physically blocks both player and monster movement
-- Wall rendering reuses the existing 3D elevated wall tile style, themed per zone
+- Camp walls use a new tile type `TILE_CAMP_WALL = 6` to distinguish from terrain walls (`TILE_WALL = 4`)
+  - `collisions[r][c] = false` for camp walls (non-walkable, blocks movement)
+  - Rendered with zone-themed 3D elevated tile style (like `TILE_WALL` but with themed colors)
+  - Requires adding to `TileData.type` union, `TILE_KEYS` array, and `SpriteGenerator`
+  - `drunkWalk` and all post-generation passes must protect `TILE_CAMP_WALL` tiles from overwrite, same as `TILE_CAMP` (update all `tiles[r][c] !== TILE_CAMP` guards to also check `!== TILE_CAMP_WALL`)
+- Camp interior floor uses existing `TILE_CAMP = 5`, with zone-themed coloring
 
 ### Safe Zone
-- Radius: 7 tiles from camp center (euclidean distance)
-- Extends beyond walls to cover the open entrance and surroundings
+- Radius: 9 tiles from camp center (euclidean distance)
+  - Camp corners are ~7.07 tiles from center; radius 9 gives ~4 tiles of coverage beyond the south entrance
+  - Enough to prevent monsters from aggroing at the doorstep
+- `safeZoneRadius` is stored per-map on `MapData` (default: 9). Allows future per-zone tuning.
 - Monster behavior when inside safe zone:
   - If in `chase` or `attack` state: immediately set to `idle`, move toward spawn
   - If in `idle` or `patrol` state: patrol target generation rejects tiles inside any safe zone
 - Spawn rejection: `spawnMonsters()` skips any spawn tile within a camp's safe zone radius
-- Camp centers passed to `Monster` constructor as `readonly` array — cheap distance check, no per-frame lookup
+- Safe zone check lives in `ZoneScene.updateMonsters()`, before calling `monster.update()`:
+  - `ZoneScene` checks each monster's distance to all camp centers
+  - If inside safe zone and monster is aggro: reset monster state to `idle`
+  - This avoids changing `Monster` constructor signature — `Monster` does not need to know about camps
+  - `this.campPositions` already exists on `ZoneScene` (set in `init()` from `mapData.camps`)
 
 ### Edge Cases
 - Leashing monsters pass through safe zone briefly to reach spawn — acceptable
-- Multiple camps: check distance to all camp centers (max 2 per zone currently)
+- Multiple camps: check distance to all camp centers (max 2-3 per zone currently)
 
 ## Interior Elements
 
@@ -79,7 +89,6 @@ Walls occupy the outer ring on top, left, and right sides. The south side is ful
 ### Tents (corners, along walls)
 - 2-3 per camp, placed in corners or along wall interiors
 - Procedurally drawn as triangular/pitched shapes
-- NPCs positioned near their tent (replacing arbitrary offset system)
 - Non-collidable decoration
 
 ### Barrels & Crates (near walls and NPCs)
@@ -102,6 +111,26 @@ Walls occupy the outer ring on top, left, and right sides. The south side is ful
 - All positions computed relative to camp center by `MapGenerator`
 - Deterministic layout template per camp size — no random scatter
 - Elements have fixed logical positions so camps feel designed
+- Camp decorations are computed at runtime by `ZoneScene` from camp center positions, NOT stored in `MapData.decorations`
+  - `ZoneScene` has a new method `buildCampDecorations(camp)` that returns an array of `{ col, row, type }` for each camp
+  - Decoration types: `'campfire'`, `'camp_torch'`, `'tent'`, `'barrel'`, `'crate'`, `'banner'`, `'well'`
+  - These are rendered in `updateVisibleTiles()` alongside tile rendering, with dedicated sprite creation per type
+  - Separate from terrain decorations (trees, rocks) which remain in `MapData.decorations`
+
+### NPC Placement (11x11 layout)
+
+NPCs are positioned near tents using a fixed offset table relative to camp center. The table supports up to 4 NPCs per camp (matching the max in current map data):
+
+| NPC Index | Offset (dc, dr) | Tent Location | Role (typical) |
+|-----------|-----------------|---------------|----------------|
+| 0 | (-3, -2) | Upper-left tent | Blacksmith |
+| 1 | (+3, -2) | Upper-right tent | Merchant |
+| 2 | (-3, +2) | Lower-left tent | Quest giver |
+| 3 | (+3, +2) | Lower-right tent | Stash / Extra |
+
+If a camp has fewer NPCs, only the first N offsets are used. If more than 4 (unlikely), extras use fallback offsets along the walls: `(0, -3)`, `(0, +3)`.
+
+This replaces the current `npcOffsets` array in `ZoneScene.spawnNPCs()`.
 
 ## Zone-Themed Camp Variants
 
@@ -118,16 +147,30 @@ Walls occupy the outer ring on top, left, and right sides. The south side is ful
 - Defines: wall color, ground color, banner tint, torch flame color, tent fabric color
 - `SpriteGenerator` uses these when generating camp tiles and decoration sprites
 - `drawCamp()` splits into `drawCampGround(theme)` and `drawCampWall(theme)`
+- Each zone generates themed tile textures at boot: `tile_camp_wall_plains`, `tile_camp_ground_plains`, etc.
+
+## Map Data Fixes
+
+The 11x11 camp footprint requires 5 tiles clearance from center to border. All camp centers must satisfy: `col >= 6 && col <= 73 && row >= 6 && row <= 73` (on 80x80 maps).
+
+**Abyss Rift primary camp** at `(col: 6, row: 16)` fails — left edge would be at col 1 (border wall). Fix: move to `(col: 10, row: 16)`. Update `playerStart` accordingly if it references the old position.
+
+All other camp positions have sufficient clearance:
+- Emerald Plains: (12,12), (64,68) — OK
+- Twilight Forest: (13,35), (70,67), (66,42) — OK
+- Anvil Mountains: (10,32), (58,67) — OK
+- Scorching Desert: (10,10), (64,64) — OK
+- Abyss Rift: (58,67) — OK
 
 ## Files Changed
 
 ### Modified
-- **`src/systems/MapGenerator.ts`** — expanded camp placement: 11x11 layout with walls, ground tiles, decoration positions, themed tiles
-- **`src/entities/Monster.ts`** — safe zone proximity check in `update()`, patrol target rejection inside safe zones
-- **`src/scenes/ZoneScene.ts`** — pass camp centers to monsters, render camp decorations (campfire particles/glow, torches, tents, crates, banners, well), spawn rejection
-- **`src/graphics/SpriteGenerator.ts`** — `drawCampWall(theme)`, `drawCampGround(theme)`, decoration sprite generators (torch, tent, barrel, crate, banner, well, campfire)
-- **`src/data/types.ts`** — add `CampTheme` interface, add `safeZoneRadius` to `MapData`
-- **`src/data/maps/*.ts`** — verify camp positions have 11x11 clearance, no map data conflicts
+- **`src/systems/MapGenerator.ts`** — expanded camp placement: 11x11 layout with `TILE_CAMP_WALL` (6) for walls, `TILE_CAMP` (5) for ground, themed tiles. Add `TILE_CAMP_WALL = 6` constant. Update collision generation to treat `TILE_CAMP_WALL` as non-walkable.
+- **`src/entities/Monster.ts`** — patrol target generation rejects tiles inside any safe zone radius (passed via `update()` params or checked externally)
+- **`src/scenes/ZoneScene.ts`** — safe zone check in monster update loop, `buildCampDecorations()` method, render camp decorations (campfire particles/glow, torches, tents, crates, banners, well), spawn rejection in `spawnMonsters()`, updated NPC offset table in `spawnNPCs()`. Add `'tile_camp_wall'` to `TILE_KEYS`.
+- **`src/graphics/SpriteGenerator.ts`** — `drawCampWall(theme)`, `drawCampGround(theme)`, decoration sprite generators (torch, tent, barrel, crate, banner, well, campfire). Add camp wall to `TILE_BASE_COLORS` and `TILE_NAMES`.
+- **`src/data/types.ts`** — add `CampTheme` interface, add `safeZoneRadius?: number` to `MapData`, add `'camp_wall'` to `TileData.type` union
+- **`src/data/maps/abyss_rift.ts`** — move primary camp from (6,16) to (10,16)
 
 ### New
 - **`src/data/camp-themes.ts`** — `CampTheme` configs keyed by `MapTheme`
