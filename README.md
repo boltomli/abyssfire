@@ -45,6 +45,11 @@ npm run build    # production build to dist/
 | C | Character stats |
 | Space | Toggle auto-combat |
 
+## Credits
+
+- **Tile Art** — [Isometric Landscape](https://kenney.nl/) by Kenney (CC0) · [License](public/assets/tiles/LICENSE-kenney-CC0.txt)
+- **BGM** — Various artists from [OpenGameArt.org](https://opengameart.org/) (CC0 / GPL) · [Full credits](public/assets/audio/bgm/CREDITS.md)
+
 ## License
 
 All rights reserved.
