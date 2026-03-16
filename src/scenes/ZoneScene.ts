@@ -745,6 +745,7 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private handleCombat(time: number): void {
+    if (this.player.hp <= 0) return;
     this.player.buffs = this.player.buffs.filter(b => time - b.startTime < b.duration);
 
     for (const monster of this.monsters) {
@@ -762,7 +763,7 @@ export class ZoneScene extends Phaser.Scene {
           this.player.playHurt(monster.sprite.x, monster.sprite.y);
           this.showDamageText(this.player.sprite.x, this.player.sprite.y, finalDmg, result.isCrit, false, true);
           this.skillEffects.playMonsterAttack(this.player.sprite.x, this.player.sprite.y);
-          if (this.player.hp <= 0) this.player.die();
+          if (this.player.hp <= 0) { this.player.die(); break; }
         }
       }
     }
