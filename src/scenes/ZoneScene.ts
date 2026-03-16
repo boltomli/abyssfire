@@ -954,12 +954,15 @@ export class ZoneScene extends Phaser.Scene {
         target.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
         this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
         this.skillEffects.playAttack(this.player.sprite.x, this.player.sprite.y, target.sprite.x, target.sprite.y, true);
-        // VFX for player attacks — crit flash
+        // VFX for player attacks — crit flash + hit sparks
         if (result.isCrit || result.damage > 0) {
           EventBus.emit(GameEvents.COMBAT_DAMAGE, {
             targetId: target.id, damage: result.damage, isDodged: false,
             isCrit: result.isCrit, isPlayerTarget: false,
           });
+          if (result.isCrit && this.vfx) {
+            this.vfx.hitSparks(target.sprite.x, target.sprite.y - 16, 12);
+          }
         }
         // Weapon slash trail on basic attack
         if (this.trails) {
@@ -1110,6 +1113,11 @@ export class ZoneScene extends Phaser.Scene {
     this.player.addExp(exp);
     this.player.gold += gold;
 
+    // Gold/exp pickup particle burst at monster death location
+    if (this.vfx) {
+      this.vfx.goldBurst(monster.sprite.x, monster.sprite.y - 10, 6);
+    }
+
     this.totalKills++;
     this.achievementSystem.update('kill', undefined, 1);
     this.achievementSystem.update('kill', monster.definition.id, 1);
@@ -1213,6 +1221,10 @@ export class ZoneScene extends Phaser.Scene {
       EventBus.emit(GameEvents.ITEM_PICKED, { item: lootDrop.item });
       if (lootDrop.item.quality === 'legendary') {
         this.achievementSystem.update('collect');
+      }
+      // Particle burst on pickup
+      if (this.vfx) {
+        this.vfx.goldBurst(lootDrop.sprite.x, lootDrop.sprite.y, 8);
       }
       lootDrop.sprite.destroy();
       const idx = this.lootDrops.indexOf(lootDrop);

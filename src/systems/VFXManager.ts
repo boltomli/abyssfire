@@ -48,10 +48,18 @@ export class VFXManager {
       }
     });
 
-    // Level up — gold flash
+    // Level up — gold flash + zoom pulse + celebration particles
     EventBus.on(GameEvents.PLAYER_LEVEL_UP, () => {
       this.cameraFlash(200, 0.5, 0xffd700);
       this.cameraShake(100, 0.004);
+      this.cameraZoomPulse(1.5, 200, 1.8);
+      // Delayed particle burst (after flash starts)
+      this.scene.time.delayedCall(100, () => {
+        const cam = this.scene.cameras.main;
+        const centerX = cam.scrollX + cam.width / 2 / cam.zoom;
+        const centerY = cam.scrollY + cam.height / 2 / cam.zoom;
+        this.levelUpBurst(centerX, centerY);
+      });
     });
 
     // Player death — fade to red
@@ -230,6 +238,95 @@ export class VFXManager {
     });
   }
 
+  // ── Particle Burst Effects (pooled emitters) ─────────────
+
+  private hitSparkEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+  private goldBurstEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+  private healEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+  private levelUpEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+
+  private ensureEmitters(): void {
+    if (this.hitSparkEmitter) return;
+
+    // Hit spark emitter — white/yellow explode burst on player crit
+    this.hitSparkEmitter = this.scene.add.particles(0, 0, 'particle_spark', {
+      speed: { min: 40, max: 100 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.8, end: 0.1 },
+      alpha: { start: 0.9, end: 0 },
+      lifespan: { min: 200, max: 400 },
+      tint: [0xffffff, 0xffffaa, 0xffd700],
+      blendMode: Phaser.BlendModes.ADD,
+      emitting: false,
+    });
+    this.hitSparkEmitter.setDepth(1501);
+
+    // Gold burst emitter — gold coins on pickup
+    this.goldBurstEmitter = this.scene.add.particles(0, 0, 'particle_circle', {
+      speed: { min: 30, max: 80 },
+      angle: { min: 220, max: 320 },
+      scale: { start: 0.6, end: 0.1 },
+      alpha: { start: 0.9, end: 0 },
+      lifespan: { min: 300, max: 600 },
+      gravityY: 100,
+      tint: [0xffd700, 0xffaa00, 0xffcc33],
+      blendMode: Phaser.BlendModes.ADD,
+      emitting: false,
+    });
+    this.goldBurstEmitter.setDepth(1501);
+
+    // Heal convergence emitter — green particles
+    this.healEmitter = this.scene.add.particles(0, 0, 'particle_circle', {
+      speed: { min: 20, max: 60 },
+      angle: { min: 220, max: 320 },
+      scale: { start: 0.5, end: 0.2 },
+      alpha: { start: 0.8, end: 0 },
+      lifespan: { min: 400, max: 800 },
+      tint: [0x2ecc71, 0x27ae60, 0x66ff66],
+      blendMode: Phaser.BlendModes.ADD,
+      emitting: false,
+    });
+    this.healEmitter.setDepth(1501);
+
+    // Level-up celebration emitter — multi-colored star burst
+    this.levelUpEmitter = this.scene.add.particles(0, 0, 'particle_star', {
+      speed: { min: 60, max: 150 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.8, end: 0 },
+      alpha: { start: 1, end: 0 },
+      lifespan: { min: 500, max: 1000 },
+      gravityY: 50,
+      tint: [0xffd700, 0xff8800, 0xffcc33, 0xffffff],
+      blendMode: Phaser.BlendModes.ADD,
+      emitting: false,
+    });
+    this.levelUpEmitter.setDepth(1501);
+  }
+
+  /** Explode hit sparks at a world position */
+  hitSparks(x: number, y: number, count: number = 8): void {
+    this.ensureEmitters();
+    this.hitSparkEmitter!.explode(count, x, y);
+  }
+
+  /** Explode gold particles at a world position (loot/gold pickup) */
+  goldBurst(x: number, y: number, count: number = 6): void {
+    this.ensureEmitters();
+    this.goldBurstEmitter!.explode(count, x, y);
+  }
+
+  /** Explode heal particles at a world position */
+  healBurst(x: number, y: number, count: number = 8): void {
+    this.ensureEmitters();
+    this.healEmitter!.explode(count, x, y);
+  }
+
+  /** Explode level-up celebration particles */
+  levelUpBurst(x: number, y: number): void {
+    this.ensureEmitters();
+    this.levelUpEmitter!.explode(20, x, y);
+  }
+
   // ── Cleanup ─────────────────────────────────────────────
 
   destroy(): void {
@@ -237,5 +334,9 @@ export class VFXManager {
     EventBus.off(GameEvents.PLAYER_LEVEL_UP);
     EventBus.off(GameEvents.PLAYER_DIED);
     EventBus.off(GameEvents.ITEM_DROPPED);
+    this.hitSparkEmitter?.destroy();
+    this.goldBurstEmitter?.destroy();
+    this.healEmitter?.destroy();
+    this.levelUpEmitter?.destroy();
   }
 }
