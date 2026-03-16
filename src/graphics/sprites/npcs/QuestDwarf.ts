@@ -77,7 +77,7 @@ export const QuestDwarfDrawer: EntityDrawer = {
         bodyLean = Math.sin(phase * 0.5) * 1.5 * s;
         leftArmY = Math.sin(phase) * 1.5 * s;
         pickY = -12 * s;
-        pickRot = 0.4;
+        pickRot = 0.3;
         headTilt = Math.sin(phase + 1) * 0.015;
         break;
       }
@@ -87,7 +87,7 @@ export const QuestDwarfDrawer: EntityDrawer = {
         bodyLean = -1 * s + Math.sin(phase) * 1.5 * s;
         leftArmY = Math.sin(phase * 2) * 8 * s;
         pickY = -12 * s + Math.sin(phase) * 2 * s;
-        pickRot = 0.3 + Math.sin(phase * 0.5) * 0.15;
+        pickRot = 0.2 + Math.sin(phase * 0.5) * 0.1;
         headTilt = Math.sin(phase * 1.5) * 0.03;
         mouthOpen = Math.sin(phase * 3) > 0.15;
         eyebrowRaise = Math.sin(phase * 2) > 0 ? 2 : 0;
