@@ -4,6 +4,10 @@ import { CAMP_THEMES } from '../data/camp-themes';
 import { DrawUtils } from './DrawUtils';
 import type { EntityDrawer } from './sprites/types';
 import { SlimeDrawer } from './sprites/monsters/Slime';
+import { SkeletonDrawer } from './sprites/monsters/Skeleton';
+import { WerewolfDrawer } from './sprites/monsters/Werewolf';
+import { FireElementalDrawer } from './sprites/monsters/FireElemental';
+import { DesertScorpionDrawer } from './sprites/monsters/DesertScorpion';
 
 // ── Frame Layout Constants ──────────────────────────────────────────────────
 const IDLE_START = 0, IDLE_COUNT = 4;
@@ -713,6 +717,10 @@ export class SpriteGenerator {
   private generateMonsterSheets(): void {
     // New per-entity drawers
     this.generateFromDrawer(SlimeDrawer);
+    this.generateFromDrawer(SkeletonDrawer);
+    this.generateFromDrawer(WerewolfDrawer);
+    this.generateFromDrawer(FireElementalDrawer);
+    this.generateFromDrawer(DesertScorpionDrawer);
 
     // Existing template-based generation (skip if drawer already handled it)
     for (const cfg of MONSTER_CONFIGS) {
