@@ -24,3 +24,44 @@ export interface EntityDrawer {
 
 /** Map of texture key → {frameWidth, frameHeight} for BootScene spritesheet loading */
 export type FrameSizeRegistry = Record<string, { frameWidth: number; frameHeight: number }>;
+
+/** Build frame-size registry from the existing configs. Used by BootScene for spritesheet loading. */
+export function buildFrameSizeRegistry(): FrameSizeRegistry {
+  return {
+    // Players (64x96, 24 frames)
+    player_warrior: { frameWidth: 64, frameHeight: 96 },
+    player_mage: { frameWidth: 64, frameHeight: 96 },
+    player_rogue: { frameWidth: 64, frameHeight: 96 },
+    // Monsters (various sizes, 20 frames)
+    monster_slime: { frameWidth: 48, frameHeight: 40 },
+    monster_goblin: { frameWidth: 48, frameHeight: 56 },
+    monster_goblin_chief: { frameWidth: 60, frameHeight: 68 },
+    monster_skeleton: { frameWidth: 44, frameHeight: 64 },
+    monster_zombie: { frameWidth: 44, frameHeight: 60 },
+    monster_werewolf: { frameWidth: 52, frameHeight: 64 },
+    monster_werewolf_alpha: { frameWidth: 56, frameHeight: 68 },
+    monster_gargoyle: { frameWidth: 52, frameHeight: 60 },
+    monster_stone_golem: { frameWidth: 60, frameHeight: 68 },
+    monster_mountain_troll: { frameWidth: 64, frameHeight: 72 },
+    monster_fire_elemental: { frameWidth: 48, frameHeight: 60 },
+    monster_desert_scorpion: { frameWidth: 52, frameHeight: 44 },
+    monster_sandworm: { frameWidth: 56, frameHeight: 48 },
+    monster_phoenix: { frameWidth: 56, frameHeight: 56 },
+    monster_imp: { frameWidth: 40, frameHeight: 48 },
+    monster_lesser_demon: { frameWidth: 52, frameHeight: 64 },
+    monster_succubus: { frameWidth: 48, frameHeight: 64 },
+    monster_demon_lord: { frameWidth: 72, frameHeight: 84 },
+    // NPCs (80x120, 24 frames)
+    npc_blacksmith: { frameWidth: 80, frameHeight: 120 },
+    npc_blacksmith_advanced: { frameWidth: 80, frameHeight: 120 },
+    npc_merchant: { frameWidth: 80, frameHeight: 120 },
+    npc_merchant_desert: { frameWidth: 80, frameHeight: 120 },
+    npc_stash: { frameWidth: 80, frameHeight: 120 },
+    npc_quest_elder: { frameWidth: 80, frameHeight: 120 },
+    npc_quest_scout: { frameWidth: 80, frameHeight: 120 },
+    npc_forest_hermit: { frameWidth: 80, frameHeight: 120 },
+    npc_quest_dwarf: { frameWidth: 80, frameHeight: 120 },
+    npc_quest_nomad: { frameWidth: 80, frameHeight: 120 },
+    npc_quest_warden: { frameWidth: 80, frameHeight: 120 },
+  };
+}

@@ -308,6 +308,14 @@ export class SpriteGenerator {
     this.utils = new DrawUtils();
   }
 
+  /** Returns true if the texture was loaded from an external image file (HTMLImageElement),
+   *  meaning procedural generation should be skipped in favour of the loaded asset. */
+  private shouldSkipGeneration(key: string): boolean {
+    if (!this.scene.textures.exists(key)) return false;
+    const tex = this.scene.textures.get(key);
+    return tex.source[0]?.source instanceof HTMLImageElement;
+  }
+
   generateAll(): void {
     this.generateTiles();
     this.generatePlayerSheets();
@@ -669,6 +677,7 @@ export class SpriteGenerator {
   }
 
   private makeCharSheet(cfg: SpriteConfig, totalFrames: number): void {
+    if (this.shouldSkipGeneration(cfg.textureKey)) return;
     const s = TEXTURE_SCALE;
     const fw = cfg.baseW * s, fh = cfg.baseH * s;
     const [canvas, ctx] = this.createCanvas(fw * totalFrames, fh);
@@ -1243,6 +1252,7 @@ export class SpriteGenerator {
   }
 
   private makeNPCSheet(npc: NPCConfig): void {
+    if (this.shouldSkipGeneration(npc.key)) return;
     const s = TEXTURE_SCALE;
     const fw = NPC_FW * s, fh = NPC_FH * s;
     const [canvas, ctx] = this.createCanvas(fw * NPC_TOTAL_FRAMES, fh);
@@ -1926,6 +1936,7 @@ export class SpriteGenerator {
     ];
 
     for (const [key, bw, bh, drawFn] of defs) {
+      if (this.shouldSkipGeneration(key)) continue;
       const w = bw * s, h = bh * s;
       const [canvas, ctx] = this.createCanvas(w, h);
       drawFn(ctx, w, h);
@@ -2149,34 +2160,38 @@ export class SpriteGenerator {
     const s = TEXTURE_SCALE;
 
     // Loot bag
-    const lbW = 24 * s, lbH = 24 * s;
-    const [lbCanvas, lbCtx] = this.createCanvas(lbW, lbH);
-    lbCtx.fillStyle = 'rgba(0,0,0,0.2)';
-    this.fillEllipse(lbCtx, lbW / 2, lbH - 2 * s, 8 * s, 2.5 * s);
-    this.drawPart(lbCtx, lbW / 2 - 6 * s, 4 * s, 12 * s, 14 * s, 0x4a3020, 2 * s);
-    this.drawPart(lbCtx, lbW / 2 - 5 * s, 2 * s, 10 * s, 4 * s, 0x5a4030, 2 * s);
-    lbCtx.fillStyle = this.rgb(0x3a2010);
-    lbCtx.fillRect(lbW / 2 - 5.5 * s, 6 * s, 11 * s, 2 * s);
-    lbCtx.fillStyle = this.rgb(0x8a7020, 0.8);
-    this.fillCircle(lbCtx, lbW / 2, 12 * s, 2.5 * s);
-    if (this.scene.textures.exists('loot_bag')) this.scene.textures.remove('loot_bag');
-    this.scene.textures.addCanvas('loot_bag', lbCanvas);
+    if (!this.shouldSkipGeneration('loot_bag')) {
+      const lbW = 24 * s, lbH = 24 * s;
+      const [lbCanvas, lbCtx] = this.createCanvas(lbW, lbH);
+      lbCtx.fillStyle = 'rgba(0,0,0,0.2)';
+      this.fillEllipse(lbCtx, lbW / 2, lbH - 2 * s, 8 * s, 2.5 * s);
+      this.drawPart(lbCtx, lbW / 2 - 6 * s, 4 * s, 12 * s, 14 * s, 0x4a3020, 2 * s);
+      this.drawPart(lbCtx, lbW / 2 - 5 * s, 2 * s, 10 * s, 4 * s, 0x5a4030, 2 * s);
+      lbCtx.fillStyle = this.rgb(0x3a2010);
+      lbCtx.fillRect(lbW / 2 - 5.5 * s, 6 * s, 11 * s, 2 * s);
+      lbCtx.fillStyle = this.rgb(0x8a7020, 0.8);
+      this.fillCircle(lbCtx, lbW / 2, 12 * s, 2.5 * s);
+      if (this.scene.textures.exists('loot_bag')) this.scene.textures.remove('loot_bag');
+      this.scene.textures.addCanvas('loot_bag', lbCanvas);
+    }
 
     // Exit portal
-    const pW = 32 * s, pH = 32 * s;
-    const [pCanvas, pCtx] = this.createCanvas(pW, pH);
-    const pGrad = pCtx.createRadialGradient(pW / 2, pH / 2, 0, pW / 2, pH / 2, pW * 0.45);
-    pGrad.addColorStop(0, 'rgba(255,255,255,0.3)');
-    pGrad.addColorStop(0.3, 'rgba(100,220,140,0.5)');
-    pGrad.addColorStop(0.6, 'rgba(0,180,80,0.3)');
-    pGrad.addColorStop(1, 'rgba(0,80,40,0)');
-    pCtx.fillStyle = pGrad;
-    this.fillCircle(pCtx, pW / 2, pH / 2, pW * 0.45);
-    pCtx.strokeStyle = 'rgba(0,220,100,0.4)';
-    pCtx.lineWidth = 1.5 * s;
-    pCtx.beginPath(); pCtx.arc(pW / 2, pH / 2, pW * 0.35, 0, Math.PI * 2); pCtx.stroke();
-    if (this.scene.textures.exists('exit_portal')) this.scene.textures.remove('exit_portal');
-    this.scene.textures.addCanvas('exit_portal', pCanvas);
+    if (!this.shouldSkipGeneration('exit_portal')) {
+      const pW = 32 * s, pH = 32 * s;
+      const [pCanvas, pCtx] = this.createCanvas(pW, pH);
+      const pGrad = pCtx.createRadialGradient(pW / 2, pH / 2, 0, pW / 2, pH / 2, pW * 0.45);
+      pGrad.addColorStop(0, 'rgba(255,255,255,0.3)');
+      pGrad.addColorStop(0.3, 'rgba(100,220,140,0.5)');
+      pGrad.addColorStop(0.6, 'rgba(0,180,80,0.3)');
+      pGrad.addColorStop(1, 'rgba(0,80,40,0)');
+      pCtx.fillStyle = pGrad;
+      this.fillCircle(pCtx, pW / 2, pH / 2, pW * 0.45);
+      pCtx.strokeStyle = 'rgba(0,220,100,0.4)';
+      pCtx.lineWidth = 1.5 * s;
+      pCtx.beginPath(); pCtx.arc(pW / 2, pH / 2, pW * 0.35, 0, Math.PI * 2); pCtx.stroke();
+      if (this.scene.textures.exists('exit_portal')) this.scene.textures.remove('exit_portal');
+      this.scene.textures.addCanvas('exit_portal', pCanvas);
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
