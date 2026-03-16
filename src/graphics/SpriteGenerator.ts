@@ -15,6 +15,12 @@ import { WerewolfAlphaDrawer } from './sprites/monsters/WerewolfAlpha';
 import { GargoyleDrawer } from './sprites/monsters/Gargoyle';
 import { StoneGolemDrawer } from './sprites/monsters/StoneGolem';
 import { MountainTrollDrawer } from './sprites/monsters/MountainTroll';
+import { SandwormDrawer } from './sprites/monsters/Sandworm';
+import { PhoenixDrawer } from './sprites/monsters/Phoenix';
+import { ImpDrawer } from './sprites/monsters/Imp';
+import { LesserDemonDrawer } from './sprites/monsters/LesserDemon';
+import { SuccubusDrawer } from './sprites/monsters/Succubus';
+import { DemonLordDrawer } from './sprites/monsters/DemonLord';
 
 // ── Frame Layout Constants ──────────────────────────────────────────────────
 const IDLE_START = 0, IDLE_COUNT = 4;
@@ -735,6 +741,12 @@ export class SpriteGenerator {
     this.generateFromDrawer(GargoyleDrawer);
     this.generateFromDrawer(StoneGolemDrawer);
     this.generateFromDrawer(MountainTrollDrawer);
+    this.generateFromDrawer(SandwormDrawer);
+    this.generateFromDrawer(PhoenixDrawer);
+    this.generateFromDrawer(ImpDrawer);
+    this.generateFromDrawer(LesserDemonDrawer);
+    this.generateFromDrawer(SuccubusDrawer);
+    this.generateFromDrawer(DemonLordDrawer);
 
     // Existing template-based generation (skip if drawer already handled it)
     for (const cfg of MONSTER_CONFIGS) {
