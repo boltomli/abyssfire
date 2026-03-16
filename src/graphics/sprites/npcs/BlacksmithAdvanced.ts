@@ -147,30 +147,30 @@ export const BlacksmithAdvancedDrawer: EntityDrawer = {
     ctx.fillStyle = utils.rgb(SKIN);
     utils.fillCircle(ctx, armEndX, armEndY, 4.5 * s);
 
-    // ── Ornate hammer ──
+    // ── Ornate hammer (drawn so handle extends AWAY from body) ──
     ctx.save();
     ctx.translate(armEndX, armEndY);
     ctx.rotate(hammerRot - 0.3);
-    // Handle
+    // Handle — extends only upward from hand, not through body
     ctx.fillStyle = utils.rgb(WOOD_HANDLE);
-    ctx.fillRect(-1.5 * s, -15 * s, 3 * s, 22 * s);
+    ctx.fillRect(-1.5 * s, -22 * s, 3 * s, 22 * s);
     // Ornate metal head
-    utils.drawMetalSurface(ctx, -7 * s, -24 * s, 14 * s, 9 * s, METAL_HEAD);
+    utils.drawMetalSurface(ctx, -7 * s, -31 * s, 14 * s, 9 * s, METAL_HEAD);
     // Engravings on head
     ctx.strokeStyle = utils.rgb(utils.darken(METAL_HEAD, 30), 0.6);
     ctx.lineWidth = 0.5 * s;
     ctx.beginPath();
-    ctx.moveTo(-5 * s, -23 * s); ctx.lineTo(5 * s, -23 * s);
+    ctx.moveTo(-5 * s, -30 * s); ctx.lineTo(5 * s, -30 * s);
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(-5 * s, -21 * s); ctx.lineTo(5 * s, -21 * s);
+    ctx.moveTo(-5 * s, -28 * s); ctx.lineTo(5 * s, -28 * s);
     ctx.stroke();
     // Ornate orb accent on hammer
-    const orbGrad = ctx.createRadialGradient(0, -28 * s, 0, 0, -28 * s, 3 * s);
+    const orbGrad = ctx.createRadialGradient(0, -35 * s, 0, 0, -35 * s, 3 * s);
     orbGrad.addColorStop(0, utils.rgb(utils.lighten(ORB_COLOR, 40)));
     orbGrad.addColorStop(1, utils.rgb(ORB_COLOR));
     ctx.fillStyle = orbGrad;
-    utils.fillCircle(ctx, 0, -28 * s, 3 * s);
+    utils.fillCircle(ctx, 0, -35 * s, 3 * s);
     ctx.restore();
 
     // ── Neck ──

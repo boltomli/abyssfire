@@ -147,20 +147,20 @@ export const BlacksmithDrawer: EntityDrawer = {
     ctx.fillStyle = utils.rgb(SKIN);
     utils.fillCircle(ctx, armEndX, armEndY, 4 * s);
 
-    // ── Hammer in right hand ──
+    // ── Hammer in right hand (handle extends upward, not through body) ──
     ctx.save();
     ctx.translate(armEndX, armEndY);
     ctx.rotate(hammerRot - 0.3);
-    // Handle
+    // Handle — only extends upward from hand
     ctx.fillStyle = utils.rgb(WOOD_HANDLE);
-    ctx.fillRect(-1.5 * s, -14 * s, 3 * s, 20 * s);
+    ctx.fillRect(-1.5 * s, -20 * s, 3 * s, 20 * s);
     // Head
-    utils.drawMetalSurface(ctx, -6 * s, -22 * s, 12 * s, 8 * s, METAL_HEAD);
+    utils.drawMetalSurface(ctx, -6 * s, -28 * s, 12 * s, 8 * s, METAL_HEAD);
     // Metal highlight
     ctx.strokeStyle = utils.rgb(METAL_LIGHT, 0.4);
     ctx.lineWidth = 0.8 * s;
     ctx.beginPath();
-    ctx.moveTo(-5 * s, -21 * s); ctx.lineTo(5 * s, -21 * s);
+    ctx.moveTo(-5 * s, -27 * s); ctx.lineTo(5 * s, -27 * s);
     ctx.stroke();
     ctx.restore();
 

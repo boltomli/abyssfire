@@ -91,10 +91,10 @@ export const PlayerWarriorDrawer: EntityDrawer = {
     // ── Legs / Greaves ─────────────────────────────────────────────────────
     for (const side of [-1, 1]) {
       const legPhase = act === 'walk' ? phase + (side === -1 ? 0 : Math.PI) : 0;
-      const hipX = cx + side * 7 * s;
-      const hipY = baseY - 26 * s + bodyOffsetY;
+      const hipX = cx + side * 9 * s;
+      const hipY = baseY - 28 * s + bodyOffsetY;
       const kneeX = hipX + side * 1 * s + Math.sin(legPhase) * 2.5 * s;
-      const kneeY = hipY + 12 * s;
+      const kneeY = hipY + 13 * s;
       const footX = hipX + side * 2 * s + Math.sin(legPhase) * 1.5 * s;
       const footY = baseY - 2 * s;
 
@@ -102,102 +102,112 @@ export const PlayerWarriorDrawer: EntityDrawer = {
         { x: hipX, y: hipY },
         { x: kneeX, y: kneeY },
         { x: footX, y: footY },
-      ], 5 * s, ARMOR_DARK);
+      ], 7 * s, ARMOR_DARK);
 
       // Greave plate
-      utils.drawMetalSurface(ctx, footX - 4 * s, footY - 10 * s, 8 * s, 10 * s, ARMOR_LIGHT);
+      utils.drawMetalSurface(ctx, footX - 5.5 * s, footY - 11 * s, 11 * s, 11 * s, ARMOR_LIGHT);
       // Boot
-      utils.drawMetalSurface(ctx, footX - 5 * s, footY - 2 * s, 10 * s, 4 * s, ARMOR_BASE);
+      utils.drawMetalSurface(ctx, footX - 6 * s, footY - 2 * s, 12 * s, 5 * s, ARMOR_BASE);
       // Boot toe cap highlight
       ctx.fillStyle = utils.rgb(ARMOR_LIGHT, 0.5);
-      ctx.fillRect(footX + 2 * s, footY - 2 * s, 3 * s, 2 * s);
+      ctx.fillRect(footX + 3 * s, footY - 2 * s, 3 * s, 2.5 * s);
     }
 
-    // ── Torso ──────────────────────────────────────────────────────────────
+    // ── Torso (STOCKY, WIDE) ────────────────────────────────────────────
     const torsoX = cx + lunge * 6 * s;
     const torsoY = baseY - 52 * s + bodyOffsetY;
 
-    // Body armor (plate chest)
-    utils.drawMetalSurface(ctx, torsoX - 10 * s, torsoY - 12 * s, 20 * s, 26 * s, ARMOR_BASE);
+    // Body armor (plate chest) — wide, beefy
+    utils.drawMetalSurface(ctx, torsoX - 16 * s, torsoY - 14 * s, 32 * s, 30 * s, ARMOR_BASE);
     // Chest highlight plate
-    utils.drawMetalSurface(ctx, torsoX - 7 * s, torsoY - 10 * s, 14 * s, 14 * s, ARMOR_LIGHT);
+    utils.drawMetalSurface(ctx, torsoX - 12 * s, torsoY - 12 * s, 24 * s, 18 * s, ARMOR_LIGHT);
     // Chest center crease
     ctx.strokeStyle = utils.rgb(ARMOR_DARK, 0.6);
+    ctx.lineWidth = 1 * s;
+    ctx.beginPath();
+    ctx.moveTo(torsoX, torsoY - 12 * s);
+    ctx.lineTo(torsoX, torsoY + 6 * s);
+    ctx.stroke();
+    // Pectoral lines
+    ctx.strokeStyle = utils.rgb(ARMOR_DARK, 0.3);
     ctx.lineWidth = 0.8 * s;
     ctx.beginPath();
-    ctx.moveTo(torsoX, torsoY - 10 * s);
-    ctx.lineTo(torsoX, torsoY + 4 * s);
+    ctx.moveTo(torsoX - 10 * s, torsoY - 4 * s);
+    ctx.quadraticCurveTo(torsoX, torsoY - 1 * s, torsoX + 10 * s, torsoY - 4 * s);
     ctx.stroke();
-    // Pauldron left (chain mail gap then shoulder plate)
-    utils.drawMetalSurface(ctx, torsoX - 17 * s, torsoY - 14 * s, 10 * s, 8 * s, ARMOR_LIGHT);
+    // Pauldron left (large, imposing)
+    utils.drawMetalSurface(ctx, torsoX - 22 * s, torsoY - 16 * s, 12 * s, 10 * s, ARMOR_LIGHT);
     // Pauldron right
-    utils.drawMetalSurface(ctx, torsoX + 7 * s, torsoY - 14 * s, 10 * s, 8 * s, ARMOR_LIGHT);
+    utils.drawMetalSurface(ctx, torsoX + 10 * s, torsoY - 16 * s, 12 * s, 10 * s, ARMOR_LIGHT);
+    // Pauldron rivets
+    ctx.fillStyle = utils.rgb(ARMOR_DARK, 0.6);
+    for (const px of [torsoX - 20 * s, torsoX - 16 * s, torsoX + 12 * s, torsoX + 16 * s]) {
+      utils.fillCircle(ctx, px, torsoY - 14 * s, 1 * s);
+    }
     // Chain mail cross-hatch at shoulder joints
     ctx.strokeStyle = utils.rgb(ARMOR_DARK, 0.35);
     ctx.lineWidth = 0.5 * s;
-    for (const sx of [torsoX - 13 * s, torsoX + 11 * s]) {
-      for (let i = 0; i < 4; i++) {
+    for (const sx of [torsoX - 17 * s, torsoX + 14 * s]) {
+      for (let i = 0; i < 5; i++) {
         ctx.beginPath();
         ctx.moveTo(sx + i * 1.5 * s, torsoY - 12 * s);
         ctx.lineTo(sx + i * 1.5 * s, torsoY - 7 * s);
         ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(sx, torsoY - 12 * s + i * 1.5 * s);
-        ctx.lineTo(sx + 5 * s, torsoY - 12 * s + i * 1.5 * s);
+        ctx.lineTo(sx + 6 * s, torsoY - 12 * s + i * 1.5 * s);
         ctx.stroke();
       }
     }
     // Belt / waist armor
-    utils.drawMetalSurface(ctx, torsoX - 9 * s, torsoY + 12 * s, 18 * s, 5 * s, ARMOR_DARK);
+    utils.drawMetalSurface(ctx, torsoX - 14 * s, torsoY + 14 * s, 28 * s, 6 * s, ARMOR_DARK);
     ctx.fillStyle = utils.rgb(GUARD_COLOR);
-    ctx.fillRect(torsoX - 2 * s, torsoY + 12 * s, 4 * s, 5 * s);
+    ctx.fillRect(torsoX - 2.5 * s, torsoY + 14 * s, 5 * s, 6 * s);
 
-    // ── Arms ────────────────────────────────────────────────────────────────
+    // ── Arms (THICK, armored) ───────────────────────────────────────────
     for (const side of [-1, 1]) {
       const isRight = side === 1;
       const armPhase = act === 'walk' ? phase + (isRight ? Math.PI : 0) : 0;
-      const shoulderX = torsoX + side * 12 * s;
+      const shoulderX = torsoX + side * 16 * s;
       const shoulderY = torsoY - 10 * s;
 
       let elbowX: number, elbowY: number, handX: number, handY: number;
 
       if (isRight && act === 'attack') {
-        // Overhead arc: frame 0 = sword up behind head, frame 3 = sword forward-down
-        const swing = swordSwing * Math.PI * 0.75; // 0 -> ~135 deg arc
-        const armLen1 = 10 * s;
-        const armLen2 = 8 * s;
-        const baseAngle = -Math.PI * 0.6 + swing; // starts pointing up-back
+        const swing = swordSwing * Math.PI * 0.75;
+        const armLen1 = 12 * s;
+        const armLen2 = 10 * s;
+        const baseAngle = -Math.PI * 0.6 + swing;
         elbowX = shoulderX + Math.cos(baseAngle) * armLen1;
         elbowY = shoulderY + Math.sin(baseAngle) * armLen1;
         const foreAngle = baseAngle + Math.PI * 0.3;
         handX = elbowX + Math.cos(foreAngle) * armLen2;
         handY = elbowY + Math.sin(foreAngle) * armLen2;
       } else if (!isRight && (act === 'hurt' || act === 'cast')) {
-        // Shield raised defensively
-        const raiseAmt = shieldRaise * 8 * s;
-        elbowX = shoulderX - 5 * s;
-        elbowY = shoulderY + 5 * s - raiseAmt;
+        const raiseAmt = shieldRaise * 10 * s;
+        elbowX = shoulderX - 6 * s;
+        elbowY = shoulderY + 6 * s - raiseAmt;
         handX = elbowX + 2 * s;
-        handY = elbowY + 5 * s - raiseAmt * 0.5;
+        handY = elbowY + 6 * s - raiseAmt * 0.5;
       } else {
-        elbowX = shoulderX + side * 3 * s + Math.sin(armPhase) * 2 * s;
-        elbowY = shoulderY + 9 * s;
-        handX = elbowX + side * 2 * s + Math.sin(armPhase) * 1.5 * s;
-        handY = elbowY + 8 * s + Math.sin(armPhase) * 2 * s;
+        elbowX = shoulderX + side * 4 * s + Math.sin(armPhase) * 2.5 * s;
+        elbowY = shoulderY + 10 * s;
+        handX = elbowX + side * 3 * s + Math.sin(armPhase) * 2 * s;
+        handY = elbowY + 10 * s + Math.sin(armPhase) * 2.5 * s;
       }
 
-      // Upper arm plate
+      // Upper arm plate — thicker
       utils.drawLimb(ctx, [
         { x: shoulderX, y: shoulderY },
         { x: elbowX, y: elbowY },
         { x: handX, y: handY },
-      ], 5 * s, ARMOR_BASE);
-      // Elbow chain gap
+      ], 7 * s, ARMOR_BASE);
+      // Elbow joint
       ctx.fillStyle = utils.rgb(ARMOR_DARK, 0.6);
-      utils.fillCircle(ctx, elbowX, elbowY, 3 * s);
+      utils.fillCircle(ctx, elbowX, elbowY, 4 * s);
 
-      // Gauntlet
-      utils.drawMetalSurface(ctx, handX - 3 * s, handY - 3 * s, 6 * s, 6 * s, ARMOR_LIGHT);
+      // Gauntlet — bigger
+      utils.drawMetalSurface(ctx, handX - 4 * s, handY - 4 * s, 8 * s, 8 * s, ARMOR_LIGHT);
 
       // ── Kite Shield (left arm) ─────────────────────────────────────────
       if (!isRight) {
