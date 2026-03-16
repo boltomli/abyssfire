@@ -247,10 +247,12 @@ export class UIScene extends Phaser.Scene {
   private updateLogDisplay(): void {
     const colors: Record<string, string> = { system: '#c0934a', combat: '#c0392b', loot: '#27ae60', info: '#2e86c1' };
     for (let i = 0; i < LOG_MAX_LINES; i++) {
+      const txt = this.logTexts[i];
+      if (!txt || !txt.active) continue;
       if (i < this.logMessages.length) {
-        this.logTexts[i].setText(this.logMessages[i].text).setColor(colors[this.logMessages[i].type] ?? '#aaa');
+        txt.setText(this.logMessages[i].text).setColor(colors[this.logMessages[i].type] ?? '#aaa');
       } else {
-        this.logTexts[i].setText('');
+        txt.setText('');
       }
     }
   }
