@@ -18,6 +18,9 @@ import { SaveSystem } from '../systems/SaveSystem';
 import { SkillEffectSystem } from '../systems/SkillEffectSystem';
 import { MobileControlsSystem, isMobileDevice } from '../systems/MobileControlsSystem';
 import { LightingSystem } from '../systems/LightingSystem';
+import { VFXManager } from '../systems/VFXManager';
+import { WeatherSystem } from '../systems/WeatherSystem';
+import { TrailRenderer } from '../systems/TrailRenderer';
 import { applyColorGrading } from '../graphics/ColorGradePipeline';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
 import { AllClasses } from '../data/classes/index';
@@ -65,7 +68,11 @@ export class ZoneScene extends Phaser.Scene {
   private mobileControls: MobileControlsSystem | null = null;
   private lighting!: LightingSystem;
   private lights_playerLight: import('../systems/LightingSystem').LightSource | null = null;
+  private vfx!: VFXManager;
+  private weather!: WeatherSystem;
+  private trails!: TrailRenderer;
   private inCombat = false;
+  private isTransitioning = false;
   private combatDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
@@ -167,6 +174,16 @@ export class ZoneScene extends Phaser.Scene {
     this.lighting.setZone(this.currentMapId);
     this.registerLightSources();
 
+    // VFX Manager — camera effects, FX pipeline, combat juice
+    this.vfx = new VFXManager(this);
+
+    // Weather system — per-zone weather + environmental ambience
+    this.weather = new WeatherSystem(this);
+    this.weather.setZone(this.currentMapId);
+
+    // Trail renderer — weapon trails, ground scorch marks
+    this.trails = new TrailRenderer(this);
+
     // Post-processing: camera vignette (WebGL only)
     if (this.renderer.type === Phaser.WEBGL) {
       this.cameras.main.postFX.addVignette(0.5, 0.5, 0.92, 0.22);
@@ -174,6 +191,9 @@ export class ZoneScene extends Phaser.Scene {
 
     // Ambient dust particles
     this.createAmbientDust();
+
+    // Fade in from black on zone entry
+    this.cameras.main.fadeIn(400);
 
     // Color grading shader (WebGL only, no-op on Canvas)
     applyColorGrading(this);
@@ -270,9 +290,12 @@ export class ZoneScene extends Phaser.Scene {
     }
     EventBus.removeAllListeners(GameEvents.PLAYER_DIED);
     EventBus.on(GameEvents.PLAYER_DIED, () => {
+      // VFXManager handles the fade-to-red via its own listener
       this.time.delayedCall(2000, () => {
         const camp = this.campPositions[0];
         this.player.respawnAtCamp(camp.col, camp.row);
+        // Fade back in after respawn
+        this.cameras.main.fadeIn(500);
       });
     });
 
@@ -363,6 +386,9 @@ export class ZoneScene extends Phaser.Scene {
       this.updateNPCQuestMarkers();
     }
 
+    // Update trail renderer (fade per frame)
+    if (this.trails) this.trails.update();
+
     // Update lighting — player light follows player, then render
     if (this.lighting) {
       const playerLight = this.lights_playerLight;
@@ -430,6 +456,11 @@ export class ZoneScene extends Phaser.Scene {
               if (this.textures.exists('exit_portal')) {
                 const portal = this.add.image(pos.x, pos.y - 8, 'exit_portal').setScale(1 / TEXTURE_SCALE);
                 portal.setDepth(pos.y + 2);
+                // Apply glow + bloom to exit portals
+                if (this.vfx) {
+                  this.vfx.applyGlow(portal, 0x4488ff, 8, 0.1);
+                  this.vfx.applyBloom(portal, 0.8);
+                }
               }
             }
           }
@@ -843,6 +874,14 @@ export class ZoneScene extends Phaser.Scene {
         t.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
         this.showDamageText(t.sprite.x, t.sprite.y, result.damage, result.isCrit);
         if (!t.isAlive()) this.onMonsterKilled(t);
+        // Bloom impact on AoE skill hit
+        if (this.vfx && skill.damageType !== 'physical') {
+          const impactColor = skillId.includes('fire') || skillId === 'meteor' ? 0xff6600
+            : skillId.includes('ice') || skillId === 'blizzard' ? 0x4488ff
+            : skillId.includes('lightning') || skillId === 'chain_lightning' ? 0x5dade2
+            : 0xf39c12;
+          this.vfx.skillImpactBloom(t.sprite.x, t.sprite.y - 16, impactColor);
+        }
       }
       if (skillId === 'chain_lightning') {
         this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
@@ -859,6 +898,17 @@ export class ZoneScene extends Phaser.Scene {
       if (!target.isAlive()) this.onMonsterKilled(target);
       this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
         target.sprite.x, target.sprite.y);
+      // Bloom + ground scorch on skill hit
+      if (this.vfx) {
+        const impactColor = skill.damageType !== 'physical' ? 0xff6600 : 0xf1c40f;
+        this.vfx.skillImpactBloom(target.sprite.x, target.sprite.y - 16, impactColor);
+      }
+      if (this.trails && (skill.damageType !== 'physical' || skill.damageMultiplier > 1.5)) {
+        const scorchType = skillId.includes('fire') || skillId === 'meteor' ? 'fire'
+          : skillId.includes('ice') || skillId === 'blizzard' ? 'ice'
+          : 'lightning';
+        this.trails.stampGround(target.sprite.x, target.sprite.y, scorchType);
+      }
     }
   }
 
@@ -881,6 +931,10 @@ export class ZoneScene extends Phaser.Scene {
           this.player.playHurt(monster.sprite.x, monster.sprite.y);
           this.showDamageText(this.player.sprite.x, this.player.sprite.y, finalDmg, result.isCrit, false, true);
           this.skillEffects.playMonsterAttack(this.player.sprite.x, this.player.sprite.y);
+          EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+            targetId: 'player', damage: finalDmg, isDodged: false,
+            isCrit: result.isCrit, isPlayerTarget: true,
+          });
           if (this.player.hp <= 0) { this.player.die(); break; }
         }
       }
@@ -900,6 +954,18 @@ export class ZoneScene extends Phaser.Scene {
         target.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
         this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
         this.skillEffects.playAttack(this.player.sprite.x, this.player.sprite.y, target.sprite.x, target.sprite.y, true);
+        // VFX for player attacks — crit flash
+        if (result.isCrit || result.damage > 0) {
+          EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+            targetId: target.id, damage: result.damage, isDodged: false,
+            isCrit: result.isCrit, isPlayerTarget: false,
+          });
+        }
+        // Weapon slash trail on basic attack
+        if (this.trails) {
+          const angle = Math.atan2(target.sprite.y - this.player.sprite.y, target.sprite.x - this.player.sprite.x);
+          this.trails.stampSlash(target.sprite.x, target.sprite.y - 16, angle, 0xffffcc);
+        }
         if (!target.isAlive()) { this.onMonsterKilled(target); this.player.attackTarget = null; }
       }
     }
@@ -1104,6 +1170,14 @@ export class ZoneScene extends Phaser.Scene {
       container.sendToBack(glow);
     }
 
+    // Apply FX glow based on quality
+    if (this.vfx && item.quality !== 'normal') {
+      this.vfx.applyLootGlow(container, item.quality);
+    }
+
+    // Emit for VFXManager camera effects (legendary/set flash)
+    EventBus.emit(GameEvents.ITEM_DROPPED, { item });
+
     this.tweens.add({
       targets: container,
       y: container.y - 5,
@@ -1211,26 +1285,38 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private changeZone(targetMap: string, targetCol: number, targetRow: number): void {
+    if (this.isTransitioning) return;
+    this.isTransitioning = true;
     this.fogData[this.currentMapId] = this.fogOfWar.getExploredData();
     this.autoSave();
-    this.scene.restart({
-      classId: this.player.classData.id,
-      mapId: targetMap,
-      playerStats: {
-        level: this.player.level,
-        exp: this.player.exp,
-        gold: this.player.gold,
-        hp: this.player.hp,
-        mana: this.player.mana,
-        stats: { ...this.player.stats },
-        freeStatPoints: this.player.freeStatPoints,
-        freeSkillPoints: this.player.freeSkillPoints,
-        skillLevels: Object.fromEntries(this.player.skillLevels),
-        buffs: [...this.player.buffs],
-        autoCombat: this.player.autoCombat,
-        autoLootMode: this.player.autoLootMode,
-      },
-    });
+
+    const doRestart = () => {
+      this.scene.restart({
+        classId: this.player.classData.id,
+        mapId: targetMap,
+        playerStats: {
+          level: this.player.level,
+          exp: this.player.exp,
+          gold: this.player.gold,
+          hp: this.player.hp,
+          mana: this.player.mana,
+          stats: { ...this.player.stats },
+          freeStatPoints: this.player.freeStatPoints,
+          freeSkillPoints: this.player.freeSkillPoints,
+          skillLevels: Object.fromEntries(this.player.skillLevels),
+          buffs: [...this.player.buffs],
+          autoCombat: this.player.autoCombat,
+          autoLootMode: this.player.autoLootMode,
+        },
+      });
+    };
+
+    // Smooth fade-out transition
+    if (this.vfx) {
+      this.vfx.zoneTransition(doRestart);
+    } else {
+      doRestart();
+    }
   }
 
   private checkExitProximity(): void {
@@ -1475,7 +1561,6 @@ export class ZoneScene extends Phaser.Scene {
     const t = this.add.text(x + randomInt(-12, 12), y - 30, text, {
       fontSize: size, color, fontFamily: '"Cinzel", serif', fontStyle: isCrit ? 'bold' : 'normal', stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2000);
-    EventBus.emit(GameEvents.COMBAT_DAMAGE, { isCrit, isDodged, isPlayer });
     this.tweens.add({ targets: t, y: t.y - 50, alpha: 0, duration: 1200, ease: 'Power2', onComplete: () => t.destroy() });
   }
 
@@ -1486,5 +1571,8 @@ export class ZoneScene extends Phaser.Scene {
     this.campDecorSprites.clear();
     for (const emitter of this.campParticles.values()) emitter.destroy();
     this.campParticles.clear();
+    if (this.vfx) this.vfx.destroy();
+    if (this.weather) this.weather.destroy();
+    if (this.trails) this.trails.destroy();
   }
 }
