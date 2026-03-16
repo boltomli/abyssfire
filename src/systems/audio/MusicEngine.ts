@@ -62,6 +62,16 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
     padWaveform: 'sawtooth',
     mood: 'dark',
   },
+  menu: {
+    id: 'menu',
+    baseKey: 65.41,       // C2 — deep fundamental
+    scale: [65.41, 77.78, 87.31, 98.00, 116.54],  // C minor pentatonic
+    tempo: 40,
+    padWaveform: 'sawtooth',
+    mood: 'dark',
+    padFilterCutoff: 200,
+    padLFORate: 0.03,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -357,7 +367,7 @@ export class MusicEngine {
     // Lowpass filter.
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    const baseCutoff = padCutoff(theme.mood);
+    const baseCutoff = theme.padFilterCutoff ?? padCutoff(theme.mood);
     filter.frequency.setValueAtTime(baseCutoff, ctx.currentTime);
     filter.Q.value = 0.8;
 
@@ -365,7 +375,7 @@ export class MusicEngine {
     const lfo = ctx.createOscillator();
     const lfoGain = ctx.createGain();
     lfo.type = 'sine';
-    lfo.frequency.value = padLfoRate(theme.mood);
+    lfo.frequency.value = theme.padLFORate ?? padLfoRate(theme.mood);
     lfoGain.gain.value = baseCutoff * 0.3; // modulation depth ±30 % of cutoff
     lfo.connect(lfoGain);
     lfoGain.connect(filter.frequency);
@@ -431,8 +441,9 @@ export class MusicEngine {
       if (capturedSet !== this.activeSet) return;
       if (capturedSet.timeouts.length === 0 && capturedSet.nodes.length === 0) return;
 
-      const intervalMin = state === 'combat' ? 0.5 : 2.0;
-      const intervalMax = state === 'combat' ? 2.0 : 8.0;
+      const isMenu = theme.id === 'menu';
+      const intervalMin = state === 'combat' ? 0.5 : isMenu ? 6.0 : 2.0;
+      const intervalMax = state === 'combat' ? 2.0 : isMenu ? 15.0 : 8.0;
       const intervalMs = rand(intervalMin, intervalMax) * 1000;
 
       const id = window.setTimeout(() => {
@@ -460,10 +471,11 @@ export class MusicEngine {
     state: 'explore' | 'combat',
   ): void {
     const t = ctx.currentTime;
-    const freq = pick(theme.scale);
+    const isMenu = theme.id === 'menu';
+    const freq = isMenu ? pick(theme.scale) * 4 : pick(theme.scale); // two octaves up for menu
     const waveform: OscillatorType = Math.random() < 0.5 ? 'sine' : 'triangle';
-    const duration = rand(0.3, 1.5);
-    const peakGain = state === 'combat' ? rand(0.06, 0.12) : rand(0.04, 0.08);
+    const duration = isMenu ? rand(2.0, 5.0) : rand(0.3, 1.5);
+    const peakGain = state === 'combat' ? rand(0.06, 0.12) : isMenu ? rand(0.02, 0.04) : rand(0.04, 0.08);
 
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
@@ -471,10 +483,10 @@ export class MusicEngine {
     osc.frequency.setValueAtTime(freq, t);
 
     // ADSR envelope.
-    const attack = 0.02;
+    const attack = isMenu ? 0.3 : 0.02;
     const decay = duration * 0.2;
     const sustain = 0.5;
-    const release = duration * 0.4;
+    const release = isMenu ? duration * 0.6 : duration * 0.4;
     const sustainLevel = Math.max(sustain * peakGain, 0.001);
 
     gainNode.gain.setValueAtTime(0, t);
@@ -597,10 +609,12 @@ export class MusicEngine {
   ): void {
     const capturedSet = set;
 
+    const isMenu = theme.id === 'menu';
+
     const scheduleNext = (): void => {
       if (capturedSet !== this.activeSet) return;
 
-      const intervalMs = rand(4, 12) * 1000;
+      const intervalMs = rand(isMenu ? 15 : 4, isMenu ? 30 : 12) * 1000;
 
       const id = window.setTimeout(() => {
         const idx = capturedSet.timeouts.indexOf(id);
@@ -622,18 +636,19 @@ export class MusicEngine {
       if (capturedSet !== this.activeSet) return;
       this._playChime(ctx, capturedSet, theme);
       scheduleNext();
-    }, rand(2, 5) * 1000);
+    }, rand(isMenu ? 5 : 2, isMenu ? 10 : 5) * 1000);
 
     capturedSet.timeouts.push(initialId);
   }
 
   private _playChime(ctx: AudioContext, set: LayerSet, theme: ZoneTheme): void {
     const t = ctx.currentTime;
+    const isMenu = theme.id === 'menu';
     // Use top end of scale for ethereal feel.
     const topScale = theme.scale.slice(Math.max(0, theme.scale.length - 3));
     const freq = pick(topScale) * 2; // one octave up for chime brightness
-    const duration = rand(0.6, 1.2);
-    const peakGain = rand(0.02, 0.03);
+    const duration = isMenu ? rand(1.5, 3.0) : rand(0.6, 1.2);
+    const peakGain = isMenu ? rand(0.008, 0.015) : rand(0.02, 0.03);
 
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();

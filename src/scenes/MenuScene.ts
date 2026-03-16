@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE } from '../config';
 import { SaveSystem } from '../systems/SaveSystem';
 import { AllClasses } from '../data/classes/index';
+import { EventBus, GameEvents } from '../utils/EventBus';
+import { audioManager } from '../systems/audio/AudioManager';
 import type { SaveData } from '../data/types';
 
 export class MenuScene extends Phaser.Scene {
@@ -15,24 +17,166 @@ export class MenuScene extends Phaser.Scene {
   create(): void {
     const cx = GAME_WIDTH / 2;
 
-    // Dark gradient background
-    const bgGrad = this.add.graphics();
-    bgGrad.fillGradientStyle(0x0a0a1a, 0x0a0a1a, 0x1a1020, 0x1a1020, 1);
-    bgGrad.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    this.buildBackground(cx);
+    this.buildTitle(cx);
+    this.startBGM();
+    this.checkForSaves();
+  }
 
-    // Ambient particle effect
-    for (let i = 0; i < 30; i++) {
-      const px = Math.random() * GAME_WIDTH;
-      const py = Math.random() * GAME_HEIGHT;
-      const p = this.add.circle(px, py, 1 + Math.random() * 1.5, 0xc0934a, 0.1 + Math.random() * 0.2);
-      this.tweens.add({
-        targets: p, y: py - 40 - Math.random() * 60, alpha: 0, duration: 3000 + Math.random() * 4000,
-        repeat: -1, yoyo: false, delay: Math.random() * 3000,
-        onRepeat: () => { p.setPosition(Math.random() * GAME_WIDTH, GAME_HEIGHT + 10); p.setAlpha(0.1 + Math.random() * 0.2); },
-      });
+  // ---------------------------------------------------------------------------
+  // Background layers
+  // ---------------------------------------------------------------------------
+
+  private buildBackground(cx: number): void {
+    // Layer 1 — Void gradient
+    const bgGrad = this.add.graphics();
+    bgGrad.fillGradientStyle(0x050508, 0x050508, 0x1a0808, 0x1a0808, 1);
+    bgGrad.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    bgGrad.setDepth(0);
+
+    // Layer 2 — Fire glow (pulsing radial ellipse at bottom-center)
+    this.buildFireGlow(cx);
+
+    // Layer 3 — Ember particles
+    const bottomRect = new Phaser.Geom.Rectangle(0, GAME_HEIGHT - 20, GAME_WIDTH, 20);
+    const bottomZone = new Phaser.GameObjects.Particles.Zones.RandomZone(
+      bottomRect as unknown as Phaser.Types.GameObjects.Particles.RandomZoneSource,
+    );
+    const embers = this.add.particles(0, 0, 'particle_flame', {
+      emitZone: bottomZone,
+      speed: { min: 15, max: 45 },
+      angle: { min: 260, max: 280 },
+      scale: { start: 0.4, end: 0.05 },
+      alpha: { start: 0.7, end: 0 },
+      lifespan: { min: 3000, max: 6000 },
+      frequency: 100,
+      tint: [0xff4400, 0xff6600, 0xff8800, 0xffaa00],
+      blendMode: Phaser.BlendModes.ADD,
+      gravityY: -10,
+    });
+    embers.setDepth(2);
+
+    // Layer 4 — Spark particles
+    const sparks = this.add.particles(0, 0, 'particle_spark', {
+      emitZone: bottomZone,
+      speed: { min: 30, max: 70 },
+      angle: { min: 255, max: 285 },
+      scale: { start: 0.3, end: 0 },
+      alpha: { start: 0.9, end: 0 },
+      lifespan: { min: 1500, max: 3500 },
+      frequency: 300,
+      tint: [0xffcc44, 0xffffaa],
+      blendMode: Phaser.BlendModes.ADD,
+    });
+    sparks.setDepth(3);
+
+    // Layer 5 — Smoke haze
+    this.buildSmokeHaze();
+
+    // Layer 6 — Title fire glow
+    this.buildTitleGlow(cx);
+  }
+
+  private buildFireGlow(cx: number): void {
+    const glowKey = 'menu_fire_glow';
+    if (!this.textures.exists(glowKey)) {
+      const canvas = this.textures.createCanvas(glowKey, 512, 512)!;
+      const ctx2d = canvas.getContext();
+      const gradient = ctx2d.createRadialGradient(256, 256, 0, 256, 256, 256);
+      gradient.addColorStop(0, 'rgba(255, 100, 20, 0.6)');
+      gradient.addColorStop(0.4, 'rgba(200, 50, 0, 0.3)');
+      gradient.addColorStop(0.7, 'rgba(120, 20, 0, 0.1)');
+      gradient.addColorStop(1, 'rgba(60, 10, 0, 0)');
+      ctx2d.fillStyle = gradient;
+      ctx2d.fillRect(0, 0, 512, 512);
+      canvas.refresh();
     }
 
-    // Decorative line
+    const glow = this.add.image(cx, GAME_HEIGHT + 40, glowKey);
+    glow.setDisplaySize(GAME_WIDTH * 1.2, 500);
+    glow.setBlendMode(Phaser.BlendModes.ADD);
+    glow.setAlpha(0.2);
+    glow.setDepth(1);
+
+    this.tweens.add({
+      targets: glow,
+      alpha: { from: 0.15, to: 0.30 },
+      duration: 8000,
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+      repeat: -1,
+    });
+    this.tweens.add({
+      targets: glow,
+      scaleX: { from: glow.scaleX * 0.95, to: glow.scaleX * 1.05 },
+      scaleY: { from: glow.scaleY * 0.95, to: glow.scaleY * 1.05 },
+      duration: 10000,
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  private buildSmokeHaze(): void {
+    const smokeCount = 5;
+    for (let i = 0; i < smokeCount; i++) {
+      const radius = 200 + Math.random() * 100;
+      const startX = Math.random() * GAME_WIDTH;
+      const startY = GAME_HEIGHT * 0.3 + Math.random() * GAME_HEIGHT * 0.4;
+      const alpha = 0.03 + Math.random() * 0.03;
+
+      const smoke = this.add.circle(startX, startY, radius, 0x222222, alpha);
+      smoke.setDepth(4);
+
+      const driftDuration = 20000 + Math.random() * 10000;
+      const direction = Math.random() < 0.5 ? 1 : -1;
+      this.tweens.add({
+        targets: smoke,
+        x: startX + direction * (GAME_WIDTH * 0.4),
+        duration: driftDuration,
+        ease: 'Linear',
+        yoyo: true,
+        repeat: -1,
+      });
+    }
+  }
+
+  private buildTitleGlow(cx: number): void {
+    const titleGlowKey = 'menu_title_glow';
+    if (!this.textures.exists(titleGlowKey)) {
+      const canvas = this.textures.createCanvas(titleGlowKey, 256, 256)!;
+      const ctx2d = canvas.getContext();
+      const gradient = ctx2d.createRadialGradient(128, 128, 0, 128, 128, 128);
+      gradient.addColorStop(0, 'rgba(255, 160, 40, 0.4)');
+      gradient.addColorStop(0.5, 'rgba(200, 100, 20, 0.15)');
+      gradient.addColorStop(1, 'rgba(100, 50, 0, 0)');
+      ctx2d.fillStyle = gradient;
+      ctx2d.fillRect(0, 0, 256, 256);
+      canvas.refresh();
+    }
+
+    const titleGlow = this.add.image(cx, 150, titleGlowKey);
+    titleGlow.setDisplaySize(400, 200);
+    titleGlow.setBlendMode(Phaser.BlendModes.ADD);
+    titleGlow.setAlpha(0.1);
+    titleGlow.setDepth(5);
+
+    this.tweens.add({
+      targets: titleGlow,
+      alpha: { from: 0.08, to: 0.15 },
+      duration: 8000,
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Title & decorative elements
+  // ---------------------------------------------------------------------------
+
+  private buildTitle(cx: number): void {
+    // Decorative line above title
     const lineY = 80;
     const lineGfx = this.add.graphics();
     lineGfx.lineStyle(1, 0xc0934a, 0.3);
@@ -43,6 +187,7 @@ export class MenuScene extends Phaser.Scene {
     lineGfx.fillStyle(0xc0934a, 0.5);
     lineGfx.fillCircle(cx - 200, lineY, 2);
     lineGfx.fillCircle(cx + 200, lineY, 2);
+    lineGfx.setDepth(10);
 
     // Title
     this.add.text(cx, 130, 'ABYSSFIRE', {
@@ -52,7 +197,7 @@ export class MenuScene extends Phaser.Scene {
       fontStyle: 'bold',
       stroke: '#3a2a10',
       strokeThickness: 4,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(10);
 
     this.add.text(cx, 188, '渊   火', {
       fontSize: '26px',
@@ -61,7 +206,7 @@ export class MenuScene extends Phaser.Scene {
       fontStyle: 'bold',
       stroke: '#2a1a08',
       strokeThickness: 3,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(10);
 
     // Decorative line below title
     const lineGfx2 = this.add.graphics();
@@ -70,16 +215,44 @@ export class MenuScene extends Phaser.Scene {
     lineGfx2.moveTo(cx - 160, 215);
     lineGfx2.lineTo(cx + 160, 215);
     lineGfx2.strokePath();
+    lineGfx2.setDepth(10);
 
     // Version
     this.add.text(cx, GAME_HEIGHT - 20, 'v0.6.0 - HD', {
       fontSize: '11px',
       color: '#333340',
       fontFamily: '"Cinzel", serif',
-    }).setOrigin(0.5);
-
-    this.checkForSaves();
+    }).setOrigin(0.5).setDepth(10);
   }
+
+  // ---------------------------------------------------------------------------
+  // BGM
+  // ---------------------------------------------------------------------------
+
+  private startBGM(): void {
+    // Try starting immediately — works if AudioContext already exists (e.g. returning from game)
+    EventBus.emit(GameEvents.ZONE_ENTERED, { mapId: 'menu' });
+
+    // DOM-level handler ensures ctx.resume() runs inside a real user gesture call stack.
+    // Phaser's input system defers callbacks to the game loop, which browsers don't
+    // consider a user gesture — so AudioContext.resume() gets silently rejected.
+    const resumeAudio = () => {
+      audioManager.ensureContext();
+      document.removeEventListener('pointerdown', resumeAudio);
+      document.removeEventListener('keydown', resumeAudio);
+    };
+    document.addEventListener('pointerdown', resumeAudio);
+    document.addEventListener('keydown', resumeAudio);
+
+    this.events.once('shutdown', () => {
+      document.removeEventListener('pointerdown', resumeAudio);
+      document.removeEventListener('keydown', resumeAudio);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Menu logic
+  // ---------------------------------------------------------------------------
 
   private async checkForSaves(): Promise<void> {
     const saveSystem = new SaveSystem();
@@ -89,7 +262,7 @@ export class MenuScene extends Phaser.Scene {
 
   private showMainMenu(save: SaveData | null): void {
     if (this.menuContainer) { this.menuContainer.destroy(); }
-    this.menuContainer = this.add.container(0, 0);
+    this.menuContainer = this.add.container(0, 0).setDepth(10);
 
     const cx = GAME_WIDTH / 2;
     let y = save ? 300 : 340;
@@ -133,7 +306,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private showClassSelection(): void {
-    this.classContainer = this.add.container(0, 0);
+    this.classContainer = this.add.container(0, 0).setDepth(10);
     const cx = GAME_WIDTH / 2;
 
     this.classContainer.add(this.add.text(cx, 260, '选 择 职 业', {

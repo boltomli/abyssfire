@@ -14,6 +14,8 @@ export interface ZoneTheme {
   tempo: number;          // BPM for rhythm
   padWaveform: OscillatorType;
   mood: 'pastoral' | 'mysterious' | 'epic' | 'exotic' | 'dark';
+  padFilterCutoff?: number;   // override default padCutoff for mood
+  padLFORate?: number;        // override default padLfoRate for mood
 }
 
 export interface AudioSettings {

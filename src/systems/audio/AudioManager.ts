@@ -60,6 +60,11 @@ export class AudioManager {
   // Public API
   // ---------------------------------------------------------------------------
 
+  /** Resume AudioContext — call on user gesture to unblock browser autoplay policy. */
+  ensureContext(): void {
+    this.getCtx();
+  }
+
   /** Play a sound effect through the sfxGain node (no-op if muted). */
   playSFX(type: SFXType): void {
     if (this.settings.sfxMuted) return;
