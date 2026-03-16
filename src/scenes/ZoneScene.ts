@@ -17,7 +17,6 @@ import { AchievementSystem } from '../systems/AchievementSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import { SkillEffectSystem } from '../systems/SkillEffectSystem';
 import { MobileControlsSystem, isMobileDevice } from '../systems/MobileControlsSystem';
-import { audioSystem } from '../systems/AudioSystem';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
 import { AllClasses } from '../data/classes/index';
 import { AllMaps } from '../data/maps/index';
@@ -63,6 +62,8 @@ export class ZoneScene extends Phaser.Scene {
   private lastTileUpdate = 0;
   private _pendingSaveData: SaveData | null = null;
   private mobileControls: MobileControlsSystem | null = null;
+  private inCombat = false;
+  private combatDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super({ key: 'ZoneScene' });
@@ -178,6 +179,7 @@ export class ZoneScene extends Phaser.Scene {
         H: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.H),
         C: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
         J: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J),
+        O: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.O),
         ESC: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
       };
     }
@@ -307,6 +309,7 @@ export class ZoneScene extends Phaser.Scene {
     }
 
     this.handleCombat(time);
+    this.updateCombatState();
     if (this.mobileControls) this.mobileControls.update(time, delta);
 
     if (this.player.autoCombat) this.handleAutoCombat(time);
@@ -657,6 +660,9 @@ export class ZoneScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.wasd.J)) {
       EventBus.emit(GameEvents.UI_TOGGLE_PANEL, { panel: 'quest' });
     }
+    if (Phaser.Input.Keyboard.JustDown(this.wasd.O)) {
+      EventBus.emit(GameEvents.UI_TOGGLE_PANEL, { panel: 'audio' });
+    }
     if (Phaser.Input.Keyboard.JustDown(this.wasd.ESC)) {
       this.returnToMenu();
     }
@@ -697,7 +703,7 @@ export class ZoneScene extends Phaser.Scene {
       }
     }
     const level = this.player.getSkillLevel(skillId);
-    audioSystem.playSFX('skill');
+
 
     if (skill.buff) {
       this.player.buffs.push({ stat: skill.buff.stat, value: skill.buff.value + level * 0.02, duration: skill.buff.duration, startTime: time });
@@ -799,6 +805,25 @@ export class ZoneScene extends Phaser.Scene {
       if (this.player.isSkillReady(skillId, time) && this.player.mana >= skill.manaCost) {
         this.tryUseSkill(skillId, time);
         break;
+      }
+    }
+  }
+
+  private updateCombatState(): void {
+    const fighting = this.monsters.some(m => m.isAlive() && m.state === 'attack')
+      || (this.player.attackTarget != null && this.monsters.some(m => m.id === this.player.attackTarget && m.isAlive()));
+
+    if (fighting && !this.inCombat) {
+      this.inCombat = true;
+      if (this.combatDebounceTimer) { clearTimeout(this.combatDebounceTimer); this.combatDebounceTimer = null; }
+      EventBus.emit(GameEvents.COMBAT_STATE_CHANGED, { inCombat: true });
+    } else if (!fighting && this.inCombat) {
+      if (!this.combatDebounceTimer) {
+        this.combatDebounceTimer = setTimeout(() => {
+          this.inCombat = false;
+          this.combatDebounceTimer = null;
+          EventBus.emit(GameEvents.COMBAT_STATE_CHANGED, { inCombat: false });
+        }, 1500);
       }
     }
   }

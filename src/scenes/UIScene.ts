@@ -4,7 +4,7 @@ import { EventBus, GameEvents } from '../utils/EventBus';
 import { getItemBase } from '../data/items/bases';
 import { AllMaps, MapOrder } from '../data/maps/index';
 import { NPCDefinitions } from '../data/npcs';
-import { audioSystem } from '../systems/AudioSystem';
+import { audioManager } from '../systems/audio/AudioManager';
 import type { Player } from '../entities/Player';
 import type { ZoneScene } from './ZoneScene';
 import type { ItemInstance, WeaponBase, ArmorBase } from '../data/types';
@@ -51,6 +51,7 @@ export class UIScene extends Phaser.Scene {
   private autoLootText!: Phaser.GameObjects.Text;
   private autoLootMode: 'off' | 'all' | 'magic' | 'rare' = 'off';
   private contextPopup: Phaser.GameObjects.Container | null = null;
+  private audioPanel: Phaser.GameObjects.Container | null = null;
 
   constructor() {
     super({ key: 'UIScene' });
@@ -236,6 +237,7 @@ export class UIScene extends Phaser.Scene {
       if (data.panel === 'character') this.toggleCharacter();
       if (data.panel === 'homestead') this.toggleHomestead();
       if (data.panel === 'quest') this.toggleQuestLog();
+      if (data.panel === 'audio') this.toggleAudioSettings();
     });
     EventBus.on('ui:refresh', (data: { player: Player; zone: ZoneScene }) => {
       this.player = data.player;
@@ -261,7 +263,7 @@ export class UIScene extends Phaser.Scene {
   private toggleInventory(): void {
     if (this.inventoryPanel) { this.inventoryPanel.destroy(); this.inventoryPanel = null; this.hideItemTooltip(); this.hideContextPopup(); return; }
     this.closeAllPanels();
-    audioSystem.playSFX('click');
+    audioManager.playSFX('click');
     const pw = 520, ph = 500, px = (GAME_WIDTH - pw) / 2, py = 10;
     const inv = this.zone.inventorySystem.inventory;
     const itemsPerPage = 50;
@@ -404,7 +406,7 @@ export class UIScene extends Phaser.Scene {
   // --- Shop Panel (Diablo-style split) ---
   private openShop(data: { npcId: string; shopItems: string[]; type: string }): void {
     this.closeAllPanels();
-    audioSystem.playSFX('click');
+    audioManager.playSFX('click');
     this.shopInventoryPage = 0;
 
     // Backdrop for outside-click dismiss
@@ -462,7 +464,7 @@ export class UIScene extends Phaser.Scene {
         buyBtn.on('pointerdown', () => {
           if (this.player.gold >= buyPrice) {
             this.player.gold -= buyPrice;
-            audioSystem.playSFX('buy');
+            audioManager.playSFX('click');
             const item = this.zone.lootSystem.createItem(itemId, this.player.level, 'normal');
             if (item) { item.identified = true; this.zone.inventorySystem.addItem(item); }
             this.shopPanel?.destroy(); this.shopPanel = null;
@@ -520,7 +522,7 @@ export class UIScene extends Phaser.Scene {
         } else {
           const gold = this.zone.inventorySystem.sellItem(item.uid);
           this.player.gold += gold;
-          audioSystem.playSFX('buy');
+          audioManager.playSFX('click');
           this.shopPanel?.destroy(); this.shopPanel = null;
           if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
           this.openShop(data);
@@ -583,7 +585,7 @@ export class UIScene extends Phaser.Scene {
     yesBtn.on('pointerdown', () => {
       const gold = this.zone.inventorySystem.sellItem(item.uid);
       this.player.gold += gold;
-      audioSystem.playSFX('buy');
+      audioManager.playSFX('click');
       this.hideContextPopup();
       this.shopPanel?.destroy(); this.shopPanel = null;
       if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
@@ -936,7 +938,7 @@ export class UIScene extends Phaser.Scene {
   private openDialogue(data: { npcName: string; dialogue: string; actions: { label: string; callback: () => void }[] }): void {
     this.closeDialogue();
     this.closeAllPanels();
-    audioSystem.playSFX('click');
+    audioManager.playSFX('click');
 
     // Full-screen transparent backdrop to catch outside clicks
     this.dialogueBackdrop = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.3)
@@ -1385,6 +1387,82 @@ export class UIScene extends Phaser.Scene {
     if (this.inventoryPanel) { this.inventoryPanel.destroy(); this.inventoryPanel = null; this.toggleInventory(); }
   }
 
+  // --- Audio Settings Panel ---
+  private toggleAudioSettings(): void {
+    if (this.audioPanel) { this.audioPanel.destroy(); this.audioPanel = null; return; }
+    this.closeAllPanels();
+    const pw = 280, ph = 180, px = (GAME_WIDTH - pw) / 2, py = (GAME_HEIGHT - ph) / 2;
+    this.audioPanel = this.add.container(px, py).setDepth(4000);
+    this.audioPanel.add(this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(2, 0xc0934a));
+    this.audioPanel.add(this.add.text(pw / 2, 12, '音频设置', {
+      fontSize: '14px', color: '#c0934a', fontFamily: '"Cinzel", "Noto Sans SC", serif', fontStyle: 'bold',
+    }).setOrigin(0.5, 0));
+
+    const settings = audioManager.getSettings();
+    const sliderW = 160, sliderH = 8, sliderX = 90, labelX = 14;
+
+    // BGM volume
+    const bgmY = 46;
+    this.audioPanel.add(this.add.text(labelX, bgmY, '背景音乐', { fontSize: '11px', color: '#e0d8cc', fontFamily: '"Noto Sans SC", sans-serif' }));
+    const bgmTrack = this.add.rectangle(sliderX, bgmY + 4, sliderW, sliderH, 0x333344).setOrigin(0, 0.5);
+    const bgmFill = this.add.rectangle(sliderX, bgmY + 4, sliderW * settings.bgmVolume, sliderH, 0xc0934a).setOrigin(0, 0.5);
+    const bgmHandle = this.add.rectangle(sliderX + sliderW * settings.bgmVolume, bgmY + 4, 12, 16, 0xe0d8cc).setInteractive({ draggable: true, useHandCursor: true });
+    this.audioPanel.add([bgmTrack, bgmFill, bgmHandle]);
+    bgmHandle.on('drag', (_p: Phaser.Input.Pointer, dragX: number) => {
+      const localX = Math.max(0, Math.min(dragX - px - sliderX, sliderW));
+      const v = localX / sliderW;
+      bgmHandle.x = sliderX + localX;
+      bgmFill.width = localX;
+      audioManager.setMusicVolume(v);
+    });
+
+    // BGM mute
+    const bgmMuteBtn = this.add.text(sliderX + sliderW + 10, bgmY, settings.bgmMuted ? '静音' : '播放', {
+      fontSize: '10px', color: settings.bgmMuted ? '#c0392b' : '#27ae60', fontFamily: '"Noto Sans SC", sans-serif',
+    }).setInteractive({ useHandCursor: true });
+    bgmMuteBtn.on('pointerdown', () => {
+      audioManager.toggleMusicMute();
+      const s = audioManager.getSettings();
+      bgmMuteBtn.setText(s.bgmMuted ? '静音' : '播放').setColor(s.bgmMuted ? '#c0392b' : '#27ae60');
+    });
+    this.audioPanel.add(bgmMuteBtn);
+
+    // SFX volume
+    const sfxY = 86;
+    this.audioPanel.add(this.add.text(labelX, sfxY, '音效', { fontSize: '11px', color: '#e0d8cc', fontFamily: '"Noto Sans SC", sans-serif' }));
+    const sfxTrack = this.add.rectangle(sliderX, sfxY + 4, sliderW, sliderH, 0x333344).setOrigin(0, 0.5);
+    const sfxFill = this.add.rectangle(sliderX, sfxY + 4, sliderW * settings.sfxVolume, sliderH, 0xc0934a).setOrigin(0, 0.5);
+    const sfxHandle = this.add.rectangle(sliderX + sliderW * settings.sfxVolume, sfxY + 4, 12, 16, 0xe0d8cc).setInteractive({ draggable: true, useHandCursor: true });
+    this.audioPanel.add([sfxTrack, sfxFill, sfxHandle]);
+    sfxHandle.on('drag', (_p: Phaser.Input.Pointer, dragX: number) => {
+      const localX = Math.max(0, Math.min(dragX - px - sliderX, sliderW));
+      const v = localX / sliderW;
+      sfxHandle.x = sliderX + localX;
+      sfxFill.width = localX;
+      audioManager.setSFXVolume(v);
+    });
+
+    // SFX mute
+    const sfxMuteBtn = this.add.text(sliderX + sliderW + 10, sfxY, settings.sfxMuted ? '静音' : '播放', {
+      fontSize: '10px', color: settings.sfxMuted ? '#c0392b' : '#27ae60', fontFamily: '"Noto Sans SC", sans-serif',
+    }).setInteractive({ useHandCursor: true });
+    sfxMuteBtn.on('pointerdown', () => {
+      audioManager.toggleSFXMute();
+      const s = audioManager.getSettings();
+      sfxMuteBtn.setText(s.sfxMuted ? '静音' : '播放').setColor(s.sfxMuted ? '#c0392b' : '#27ae60');
+    });
+    this.audioPanel.add(sfxMuteBtn);
+
+    // Close button
+    const closeBtn = this.add.text(pw - 12, 8, 'X', {
+      fontSize: '12px', color: '#888', fontFamily: '"Noto Sans SC", sans-serif',
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerdown', () => {
+      if (this.audioPanel) { this.audioPanel.destroy(); this.audioPanel = null; }
+    });
+    this.audioPanel.add(closeBtn);
+  }
+
   private closeAllPanels(): void {
     if (this.inventoryPanel) { this.inventoryPanel.destroy(); this.inventoryPanel = null; }
     if (this.shopPanel) { this.shopPanel.destroy(); this.shopPanel = null; }
@@ -1393,6 +1471,7 @@ export class UIScene extends Phaser.Scene {
     if (this.charPanel) { this.charPanel.destroy(); this.charPanel = null; }
     if (this.homesteadPanel) { this.homesteadPanel.destroy(); this.homesteadPanel = null; }
     if (this.questLogPanel) { this.questLogPanel.destroy(); this.questLogPanel = null; }
+    if (this.audioPanel) { this.audioPanel.destroy(); this.audioPanel = null; }
     this.hideItemTooltip();
     this.hideContextPopup();
     this.closeDialogue();

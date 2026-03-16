@@ -212,7 +212,7 @@ export class Player {
     if (!skill) return;
     this.skillCooldowns.set(id, now + skill.cooldown);
     this.mana = Math.max(0, this.mana - skill.manaCost);
-    EventBus.emit(GameEvents.SKILL_USED, { skillId: id });
+    EventBus.emit(GameEvents.SKILL_USED, { skillId: id, damageType: skill.damageType });
     EventBus.emit(GameEvents.PLAYER_MANA_CHANGED, { mana: this.mana, maxMana: this.maxMana });
   }
 

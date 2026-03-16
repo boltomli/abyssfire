@@ -176,8 +176,8 @@ export class AudioManager {
     });
 
     // --- Loot ---
-    EventBus.on(GameEvents.ITEM_PICKED, (payload: { quality?: string }) => {
-      switch (payload?.quality) {
+    EventBus.on(GameEvents.ITEM_PICKED, (payload: { item?: { quality?: string } }) => {
+      switch (payload?.item?.quality) {
         case 'magic':
           this.playSFX('loot_magic');
           break;
@@ -195,23 +195,19 @@ export class AudioManager {
     });
 
     // --- Skills ---
-    EventBus.on(GameEvents.SKILL_USED, (payload: { element?: string }) => {
-      switch (payload?.element) {
+    EventBus.on(GameEvents.SKILL_USED, (payload: { damageType?: string }) => {
+      switch (payload?.damageType) {
         case 'fire':
           this.playSFX('skill_fire');
           break;
         case 'ice':
-        case 'cold':
           this.playSFX('skill_ice');
           break;
         case 'lightning':
           this.playSFX('skill_lightning');
           break;
-        case 'heal':
-        case 'holy':
-          this.playSFX('skill_heal');
-          break;
-        case 'buff':
+        case 'arcane':
+        case 'poison':
           this.playSFX('skill_buff');
           break;
         default:
@@ -228,9 +224,7 @@ export class AudioManager {
       this.musicEngine.setZone(ctx, this.musicGain, payload.mapId);
     });
 
-    // Wire combat state changes. The event constant will be added to GameEvents
-    // later; registering now is safe — EventBus.on silently queues the listener.
-    EventBus.on('combat:state_changed', (payload: { inCombat?: boolean }) => {
+    EventBus.on(GameEvents.COMBAT_STATE_CHANGED, (payload: { inCombat?: boolean }) => {
       const ctx = this.getCtx();
       if (!this.musicGain) return;
       if (payload?.inCombat) {

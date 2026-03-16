@@ -4,7 +4,7 @@ import { BootScene } from './scenes/BootScene';
 import { MenuScene } from './scenes/MenuScene';
 import { ZoneScene } from './scenes/ZoneScene';
 import { UIScene } from './scenes/UIScene';
-import './systems/AudioSystem';
+import './systems/audio/AudioManager';
 
 const config: Phaser.Types.Core.GameConfig = {
   ...gameConfig,

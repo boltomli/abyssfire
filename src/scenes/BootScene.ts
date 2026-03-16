@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
 import { SkillEffectSystem } from '../systems/SkillEffectSystem';
+import { audioManager } from '../systems/audio/AudioManager';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -57,6 +58,25 @@ export class BootScene extends Phaser.Scene {
 
     this.load.image('loot_bag', 'assets/sprites/effects/loot_bag.png');
     this.load.image('exit_portal', 'assets/sprites/effects/exit_portal.png');
+
+    // ── Audio assets (optional overrides) ─────────────────────
+    const zones = ['emerald_plains', 'twilight_forest', 'anvil_mountains', 'scorching_desert', 'abyss_rift'];
+    const musicStates = ['explore', 'combat', 'victory'];
+    for (const z of zones) {
+      for (const s of musicStates) {
+        this.load.audio(`bgm_${z}_${s}`, `assets/audio/bgm/${z}_${s}.mp3`);
+      }
+    }
+    const sfxTypes = [
+      'hit', 'hit_heavy', 'crit', 'miss', 'block', 'player_hurt', 'monster_death', 'player_death',
+      'skill_melee', 'skill_fire', 'skill_ice', 'skill_lightning', 'skill_heal', 'skill_buff',
+      'loot_common', 'loot_magic', 'loot_rare', 'loot_legendary', 'equip', 'potion',
+      'click', 'panel_open', 'panel_close', 'error',
+      'zone_transition', 'quest_complete', 'levelup', 'npc_interact',
+    ];
+    for (const t of sfxTypes) {
+      this.load.audio(`sfx_${t}`, `assets/audio/sfx/${t}.mp3`);
+    }
   }
 
   create(): void {
@@ -66,6 +86,23 @@ export class BootScene extends Phaser.Scene {
 
     // Skill effect particle textures
     SkillEffectSystem.generateTextures(this);
+
+    // Pass any successfully loaded audio files to the AudioLoader for Web Audio decoding.
+    // Phaser's cache stores decoded HTML audio objects; we grab the raw data for Web Audio.
+    // Files that failed to load (via loaderror) won't be in the cache — AudioLoader returns null.
+    const loader = audioManager.getLoader();
+    const audioKeys = this.cache.audio.getKeys();
+    if (audioKeys.length > 0) {
+      const ctx = new AudioContext();
+      for (const key of audioKeys) {
+        const audioData = this.cache.audio.get(key);
+        if (audioData && audioData instanceof ArrayBuffer) {
+          loader.decodeAudio(ctx, key, audioData).catch(() => {
+            console.debug(`[BootScene] Failed to decode audio: ${key}`);
+          });
+        }
+      }
+    }
 
     this.scene.start('MenuScene');
   }

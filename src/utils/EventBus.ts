@@ -34,4 +34,5 @@ export const GameEvents = {
   LOAD_GAME: 'load:game',
   UI_SKILL_CLICK: 'ui:skill_click',
   UI_TOGGLE_PANEL: 'ui:toggle_panel',
+  COMBAT_STATE_CHANGED: 'combat:state_changed',
 } as const;
