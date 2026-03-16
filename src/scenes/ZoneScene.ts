@@ -54,7 +54,6 @@ export class ZoneScene extends Phaser.Scene {
   private campPositions: { col: number; row: number }[] = [];
   private lootDrops: { sprite: Phaser.GameObjects.Container; item: ItemInstance; col: number; row: number }[] = [];
   private difficulty: 'normal' | 'nightmare' | 'hell' = 'normal';
-  private autoLootMode: 'off' | 'all' | 'magic' | 'rare' = 'off';
   private lastAutoLootCheck = 0;
   private totalKills = 0;
   private exploredZones: Set<string> = new Set();
@@ -121,6 +120,7 @@ export class ZoneScene extends Phaser.Scene {
       this.player.skillLevels = new Map(Array.isArray(zsl) ? zsl : Object.entries(zsl));
       this.player.buffs = s.buffs;
       this.player.autoCombat = s.autoCombat;
+      if (s.autoLootMode) this.player.autoLootMode = s.autoLootMode;
     }
     this.player.recalcDerived();
 
@@ -184,6 +184,18 @@ export class ZoneScene extends Phaser.Scene {
       };
     }
 
+    if (import.meta.env.DEV) {
+      const exportKey = this.input.keyboard!.addKey(
+        Phaser.Input.Keyboard.KeyCodes.E
+      );
+      exportKey.on('down', async (event: KeyboardEvent) => {
+        if (event.ctrlKey && event.shiftKey) {
+          const { TextureExporter } = await import('../graphics/TextureExporter');
+          new TextureExporter(this).exportAll();
+        }
+      });
+    }
+
     // Mobile controls
     if (isMobileDevice()) {
       this.mobileControls = new MobileControlsSystem(this, this.player);
@@ -236,9 +248,6 @@ export class ZoneScene extends Phaser.Scene {
     } else {
       EventBus.emit('ui:refresh', { player: this.player, zone: this });
     }
-    // Sync UI settings after UIScene is active
-    EventBus.emit(GameEvents.AUTOLOOT_CHANGED, { mode: this.autoLootMode });
-
     EventBus.removeAllListeners(GameEvents.PLAYER_DIED);
     EventBus.on(GameEvents.PLAYER_DIED, () => {
       this.time.delayedCall(2000, () => {
@@ -250,11 +259,6 @@ export class ZoneScene extends Phaser.Scene {
     EventBus.removeAllListeners(GameEvents.UI_SKILL_CLICK);
     EventBus.on(GameEvents.UI_SKILL_CLICK, (data: { index: number; skillId: string }) => {
       this.tryUseSkill(data.skillId, this.time.now);
-    });
-
-    EventBus.removeAllListeners(GameEvents.AUTOLOOT_CHANGED);
-    EventBus.on(GameEvents.AUTOLOOT_CHANGED, (data: { mode: 'off' | 'all' | 'magic' | 'rare' }) => {
-      this.autoLootMode = data.mode;
     });
 
     this.exploredZones.add(this.currentMapId);
@@ -315,7 +319,7 @@ export class ZoneScene extends Phaser.Scene {
     if (this.player.autoCombat) this.handleAutoCombat(time);
 
     // Auto-loot
-    if (this.autoLootMode !== 'off' && time - this.lastAutoLootCheck > 300) {
+    if (this.player.autoLootMode !== 'off' && time - this.lastAutoLootCheck > 300) {
       this.lastAutoLootCheck = time;
       this.handleAutoLoot();
     }
@@ -830,7 +834,7 @@ export class ZoneScene extends Phaser.Scene {
 
   private handleAutoLoot(): void {
     const qualityRank: Record<string, number> = { normal: 0, magic: 1, rare: 2, legendary: 3, set: 3 };
-    const minRank = this.autoLootMode === 'all' ? 0 : this.autoLootMode === 'magic' ? 1 : 2;
+    const minRank = this.player.autoLootMode === 'all' ? 0 : this.player.autoLootMode === 'magic' ? 1 : 2;
     for (let i = this.lootDrops.length - 1; i >= 0; i--) {
       const loot = this.lootDrops[i];
       const rank = qualityRank[loot.item.quality] ?? 0;
@@ -1105,6 +1109,7 @@ export class ZoneScene extends Phaser.Scene {
         skillLevels: Object.fromEntries(this.player.skillLevels),
         buffs: [...this.player.buffs],
         autoCombat: this.player.autoCombat,
+        autoLootMode: this.player.autoLootMode,
       },
     });
   }
@@ -1123,6 +1128,7 @@ export class ZoneScene extends Phaser.Scene {
     await this.autoSave();
     this.scene.stop('UIScene');
     this.scene.start('MenuScene');
+    this.scene.stop();
   }
 
   private async autoSave(): Promise<void> {
@@ -1150,7 +1156,7 @@ export class ZoneScene extends Phaser.Scene {
           activePet: this.homesteadSystem.activePet ?? undefined,
         },
         achievements: this.achievementSystem.getUnlockedData(),
-        settings: { autoCombat: this.player.autoCombat, musicVolume: 0.5, sfxVolume: 0.7, autoLootMode: this.autoLootMode },
+        settings: { autoCombat: this.player.autoCombat, musicVolume: 0.5, sfxVolume: 0.7, autoLootMode: this.player.autoLootMode },
         difficulty: this.difficulty,
         completedDifficulties: [],
       });
@@ -1201,7 +1207,7 @@ export class ZoneScene extends Phaser.Scene {
 
     // 7. Settings
     this.player.autoCombat = save.settings?.autoCombat ?? false;
-    this.autoLootMode = save.settings?.autoLootMode ?? 'off';
+    this.player.autoLootMode = save.settings?.autoLootMode ?? 'off';
     this.difficulty = save.difficulty ?? 'normal';
   }
 
