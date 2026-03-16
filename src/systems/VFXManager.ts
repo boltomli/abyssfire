@@ -238,93 +238,61 @@ export class VFXManager {
     });
   }
 
-  // ── Particle Burst Effects (pooled emitters) ─────────────
+  // ── Particle Burst Effects (tween-based, reliable) ───────
 
-  private hitSparkEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
-  private goldBurstEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
-  private healEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
-  private levelUpEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
-
-  private ensureEmitters(): void {
-    if (this.hitSparkEmitter) return;
-
-    // Hit spark emitter — white/yellow explode burst on player crit
-    this.hitSparkEmitter = this.scene.add.particles(0, 0, 'particle_spark', {
-      speed: { min: 40, max: 100 },
-      angle: { min: 0, max: 360 },
-      scale: { start: 0.8, end: 0.1 },
-      alpha: { start: 0.9, end: 0 },
-      lifespan: { min: 200, max: 400 },
-      tint: [0xffffff, 0xffffaa, 0xffd700],
-      blendMode: Phaser.BlendModes.ADD,
-      emitting: false,
-    });
-    this.hitSparkEmitter.setDepth(1501);
-
-    // Gold burst emitter — gold coins on pickup
-    this.goldBurstEmitter = this.scene.add.particles(0, 0, 'particle_circle', {
-      speed: { min: 30, max: 80 },
-      angle: { min: 220, max: 320 },
-      scale: { start: 0.6, end: 0.1 },
-      alpha: { start: 0.9, end: 0 },
-      lifespan: { min: 300, max: 600 },
-      gravityY: 100,
-      tint: [0xffd700, 0xffaa00, 0xffcc33],
-      blendMode: Phaser.BlendModes.ADD,
-      emitting: false,
-    });
-    this.goldBurstEmitter.setDepth(1501);
-
-    // Heal convergence emitter — green particles
-    this.healEmitter = this.scene.add.particles(0, 0, 'particle_circle', {
-      speed: { min: 20, max: 60 },
-      angle: { min: 220, max: 320 },
-      scale: { start: 0.5, end: 0.2 },
-      alpha: { start: 0.8, end: 0 },
-      lifespan: { min: 400, max: 800 },
-      tint: [0x2ecc71, 0x27ae60, 0x66ff66],
-      blendMode: Phaser.BlendModes.ADD,
-      emitting: false,
-    });
-    this.healEmitter.setDepth(1501);
-
-    // Level-up celebration emitter — multi-colored star burst
-    this.levelUpEmitter = this.scene.add.particles(0, 0, 'particle_star', {
-      speed: { min: 60, max: 150 },
-      angle: { min: 0, max: 360 },
-      scale: { start: 0.8, end: 0 },
-      alpha: { start: 1, end: 0 },
-      lifespan: { min: 500, max: 1000 },
-      gravityY: 50,
-      tint: [0xffd700, 0xff8800, 0xffcc33, 0xffffff],
-      blendMode: Phaser.BlendModes.ADD,
-      emitting: false,
-    });
-    this.levelUpEmitter.setDepth(1501);
+  /** Burst particles outward from a point using tweened sprites */
+  private burstParticles(
+    x: number, y: number, count: number,
+    texture: string, tints: number[],
+    opts: { speedMin?: number; speedMax?: number; scaleStart?: number; duration?: number; gravityY?: number; blend?: number } = {},
+  ): void {
+    const { speedMin = 40, speedMax = 100, scaleStart = 0.8, duration = 400, gravityY = 0, blend = Phaser.BlendModes.ADD } = opts;
+    for (let i = 0; i < count; i++) {
+      const tint = tints[Math.floor(Math.random() * tints.length)];
+      const p = this.scene.add.image(x, y, texture)
+        .setDepth(1501).setTint(tint).setScale(scaleStart).setAlpha(0.9)
+        .setBlendMode(blend);
+      const angle = Math.random() * Math.PI * 2;
+      const speed = speedMin + Math.random() * (speedMax - speedMin);
+      const endX = x + Math.cos(angle) * speed;
+      const endY = y + Math.sin(angle) * speed + gravityY * (duration / 1000);
+      this.scene.tweens.add({
+        targets: p,
+        x: endX, y: endY,
+        alpha: 0, scale: 0.05,
+        duration: duration * (0.7 + Math.random() * 0.6),
+        ease: 'Power2',
+        onComplete: () => p.destroy(),
+      });
+    }
   }
 
-  /** Explode hit sparks at a world position */
+  /** Hit sparks at a world position (player crit) */
   hitSparks(x: number, y: number, count: number = 8): void {
-    this.ensureEmitters();
-    this.hitSparkEmitter!.explode(count, x, y);
+    this.burstParticles(x, y, count, 'particle_spark',
+      [0xffffff, 0xffffaa, 0xffd700],
+      { speedMin: 15, speedMax: 40, duration: 300 });
   }
 
-  /** Explode gold particles at a world position (loot/gold pickup) */
+  /** Gold particles (loot/gold pickup, monster kill) */
   goldBurst(x: number, y: number, count: number = 6): void {
-    this.ensureEmitters();
-    this.goldBurstEmitter!.explode(count, x, y);
+    this.burstParticles(x, y, count, 'particle_circle',
+      [0xffd700, 0xffaa00, 0xffcc33],
+      { speedMin: 15, speedMax: 35, duration: 500, gravityY: 80 });
   }
 
-  /** Explode heal particles at a world position */
+  /** Heal particles at a world position */
   healBurst(x: number, y: number, count: number = 8): void {
-    this.ensureEmitters();
-    this.healEmitter!.explode(count, x, y);
+    this.burstParticles(x, y, count, 'particle_circle',
+      [0x2ecc71, 0x27ae60, 0x66ff66],
+      { speedMin: 10, speedMax: 30, duration: 600 });
   }
 
-  /** Explode level-up celebration particles */
+  /** Level-up celebration particles */
   levelUpBurst(x: number, y: number): void {
-    this.ensureEmitters();
-    this.levelUpEmitter!.explode(20, x, y);
+    this.burstParticles(x, y, 20, 'particle_star',
+      [0xffd700, 0xff8800, 0xffcc33, 0xffffff],
+      { speedMin: 30, speedMax: 70, scaleStart: 0.8, duration: 800, gravityY: 40 });
   }
 
   // ── Cleanup ─────────────────────────────────────────────
@@ -334,9 +302,5 @@ export class VFXManager {
     EventBus.off(GameEvents.PLAYER_LEVEL_UP);
     EventBus.off(GameEvents.PLAYER_DIED);
     EventBus.off(GameEvents.ITEM_DROPPED);
-    this.hitSparkEmitter?.destroy();
-    this.goldBurstEmitter?.destroy();
-    this.healEmitter?.destroy();
-    this.levelUpEmitter?.destroy();
   }
 }
