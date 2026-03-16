@@ -175,86 +175,148 @@ export class SFXEngine {
 
   /** Metallic slash — sawtooth sweep 200→80 Hz + highpass noise burst. 0.15 s */
   private sfxHit(ctx: AudioContext, destination: AudioNode, t: number): void {
-    const dur = 0.15;
+    const dur = 0.2;
 
-    // Sawtooth sweep
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(200, t);
-    osc.frequency.exponentialRampToValueAtTime(80, t + dur);
-    this.createADSR(ctx, gain.gain, 0.003, 0.04, 0.2, 0.08, 0.3, t);
-    osc.connect(gain);
-    gain.connect(destination);
-    osc.start(t);
-    osc.stop(t + dur);
+    // Layer 1: metallic slash — sawtooth through bandpass for body
+    const osc1 = ctx.createOscillator();
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 1200; bp.Q.value = 2;
+    const g1 = ctx.createGain();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(250, t);
+    osc1.frequency.exponentialRampToValueAtTime(80, t + dur);
+    this.createADSR(ctx, g1.gain, 0.002, 0.04, 0.15, 0.12, 0.25, t);
+    osc1.connect(bp); bp.connect(g1); g1.connect(destination);
+    osc1.start(t); osc1.stop(t + dur);
 
-    // Highpass noise
-    this.createNoiseBurst(ctx, destination, dur, 2000, 'highpass', t, 0.2);
+    // Layer 2: sub-bass thump for weight
+    const sub = ctx.createOscillator();
+    const gSub = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(100, t);
+    sub.frequency.exponentialRampToValueAtTime(40, t + 0.08);
+    this.createADSR(ctx, gSub.gain, 0.001, 0.03, 0.1, 0.06, 0.2, t);
+    sub.connect(gSub); gSub.connect(destination);
+    sub.start(t); sub.stop(t + 0.1);
+
+    // Layer 3: metallic ring overtone
+    const ring = ctx.createOscillator();
+    const gRing = ctx.createGain();
+    const ringFilter = ctx.createBiquadFilter();
+    ringFilter.type = 'bandpass'; ringFilter.frequency.value = 3500; ringFilter.Q.value = 8;
+    ring.type = 'square';
+    ring.frequency.setValueAtTime(2200, t);
+    ring.frequency.exponentialRampToValueAtTime(1800, t + dur);
+    this.createADSR(ctx, gRing.gain, 0.001, 0.02, 0.08, 0.15, 0.06, t);
+    ring.connect(ringFilter); ringFilter.connect(gRing); gRing.connect(destination);
+    ring.start(t); ring.stop(t + dur);
+
+    // Layer 4: impact noise
+    this.createNoiseBurst(ctx, destination, 0.08, 2500, 'highpass', t, 0.2);
   }
 
   /** Deeper metallic slash — sawtooth 150→50 Hz + square 100→40 Hz + noise. 0.25 s */
   private sfxHitHeavy(ctx: AudioContext, destination: AudioNode, t: number): void {
-    const dur = 0.25;
+    const dur = 0.35;
 
-    // Primary sawtooth
+    // Layer 1: deep sawtooth body through lowpass
     const osc1 = ctx.createOscillator();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(600, t); lp.frequency.exponentialRampToValueAtTime(200, t + dur); lp.Q.value = 3;
     const g1 = ctx.createGain();
     osc1.type = 'sawtooth';
     osc1.frequency.setValueAtTime(150, t);
-    osc1.frequency.exponentialRampToValueAtTime(50, t + dur);
-    this.createADSR(ctx, g1.gain, 0.003, 0.06, 0.2, 0.15, 0.28, t);
-    osc1.connect(g1);
-    g1.connect(destination);
-    osc1.start(t);
-    osc1.stop(t + dur);
+    osc1.frequency.exponentialRampToValueAtTime(40, t + dur);
+    this.createADSR(ctx, g1.gain, 0.002, 0.06, 0.25, 0.2, 0.3, t);
+    osc1.connect(lp); lp.connect(g1); g1.connect(destination);
+    osc1.start(t); osc1.stop(t + dur);
 
-    // Square harmonic
+    // Layer 2: distorted square mid-range
     const osc2 = ctx.createOscillator();
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(256);
+    for (let i = 0; i < 256; i++) { const x = (i / 128) - 1; curve[i] = Math.tanh(x * 3); }
+    shaper.curve = curve;
     const g2 = ctx.createGain();
     osc2.type = 'square';
-    osc2.frequency.setValueAtTime(100, t);
-    osc2.frequency.exponentialRampToValueAtTime(40, t + dur);
-    this.createADSR(ctx, g2.gain, 0.003, 0.08, 0.15, 0.15, 0.15, t);
-    osc2.connect(g2);
-    g2.connect(destination);
-    osc2.start(t);
-    osc2.stop(t + dur);
+    osc2.frequency.setValueAtTime(120, t);
+    osc2.frequency.exponentialRampToValueAtTime(35, t + dur);
+    this.createADSR(ctx, g2.gain, 0.002, 0.08, 0.2, 0.2, 0.12, t);
+    osc2.connect(shaper); shaper.connect(g2); g2.connect(destination);
+    osc2.start(t); osc2.stop(t + dur);
 
-    // Lowpass noise
-    this.createNoiseBurst(ctx, destination, dur, 800, 'lowpass', t, 0.2);
+    // Layer 3: sub-bass sine punch
+    const sub = ctx.createOscillator();
+    const gSub = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(80, t);
+    sub.frequency.exponentialRampToValueAtTime(25, t + 0.12);
+    this.createADSR(ctx, gSub.gain, 0.001, 0.04, 0.1, 0.08, 0.25, t);
+    sub.connect(gSub); gSub.connect(destination);
+    sub.start(t); sub.stop(t + 0.15);
+
+    // Layer 4: crunchy noise impact
+    this.createNoiseBurst(ctx, destination, 0.1, 800, 'lowpass', t, 0.25);
+    this.createNoiseBurst(ctx, destination, 0.06, 3000, 'highpass', t, 0.12);
   }
 
   /** Sharp high impact — square 600→100 Hz + sawtooth 900→200 Hz + noise. 0.25 s */
   private sfxCrit(ctx: AudioContext, destination: AudioNode, t: number): void {
-    const dur = 0.25;
+    const dur = 0.35;
 
-    // Square attack
+    // Layer 1: aggressive square attack through distortion
     const osc1 = ctx.createOscillator();
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(256);
+    for (let i = 0; i < 256; i++) { const x = (i / 128) - 1; curve[i] = Math.tanh(x * 4); }
+    shaper.curve = curve;
+    const bp1 = ctx.createBiquadFilter();
+    bp1.type = 'bandpass'; bp1.frequency.value = 1800; bp1.Q.value = 1.5;
     const g1 = ctx.createGain();
     osc1.type = 'square';
-    osc1.frequency.setValueAtTime(600, t);
-    osc1.frequency.exponentialRampToValueAtTime(100, t + dur);
-    this.createADSR(ctx, g1.gain, 0.002, 0.05, 0.15, 0.15, 0.3, t);
-    osc1.connect(g1);
-    g1.connect(destination);
-    osc1.start(t);
-    osc1.stop(t + dur);
+    osc1.frequency.setValueAtTime(700, t);
+    osc1.frequency.exponentialRampToValueAtTime(100, t + 0.15);
+    this.createADSR(ctx, g1.gain, 0.001, 0.04, 0.15, 0.2, 0.3, t);
+    osc1.connect(shaper); shaper.connect(bp1); bp1.connect(g1); g1.connect(destination);
+    osc1.start(t); osc1.stop(t + dur);
 
-    // Sawtooth harmonic
+    // Layer 2: bright sawtooth harmonic screech
     const osc2 = ctx.createOscillator();
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 800;
     const g2 = ctx.createGain();
     osc2.type = 'sawtooth';
-    osc2.frequency.setValueAtTime(900, t);
-    osc2.frequency.exponentialRampToValueAtTime(200, t + dur);
-    this.createADSR(ctx, g2.gain, 0.002, 0.04, 0.1, 0.18, 0.2, t);
-    osc2.connect(g2);
-    g2.connect(destination);
-    osc2.start(t);
-    osc2.stop(t + dur);
+    osc2.frequency.setValueAtTime(1100, t);
+    osc2.frequency.exponentialRampToValueAtTime(250, t + 0.12);
+    this.createADSR(ctx, g2.gain, 0.001, 0.03, 0.1, 0.15, 0.18, t);
+    osc2.connect(hp); hp.connect(g2); g2.connect(destination);
+    osc2.start(t); osc2.stop(t + 0.2);
 
-    // Highpass noise burst
-    this.createNoiseBurst(ctx, destination, dur, 3000, 'highpass', t, 0.25);
+    // Layer 3: sub-bass impact
+    const sub = ctx.createOscillator();
+    const gSub = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(120, t);
+    sub.frequency.exponentialRampToValueAtTime(30, t + 0.1);
+    this.createADSR(ctx, gSub.gain, 0.001, 0.03, 0.08, 0.07, 0.25, t);
+    sub.connect(gSub); gSub.connect(destination);
+    sub.start(t); sub.stop(t + 0.12);
+
+    // Layer 4: metallic ring resonance
+    const ring = ctx.createOscillator();
+    const gRing = ctx.createGain();
+    const ringBp = ctx.createBiquadFilter();
+    ringBp.type = 'bandpass'; ringBp.frequency.value = 4000; ringBp.Q.value = 12;
+    ring.type = 'square';
+    ring.frequency.setValueAtTime(3200, t);
+    ring.frequency.exponentialRampToValueAtTime(2400, t + dur);
+    this.createADSR(ctx, gRing.gain, 0.001, 0.02, 0.06, 0.25, 0.04, t);
+    ring.connect(ringBp); ringBp.connect(gRing); gRing.connect(destination);
+    ring.start(t); ring.stop(t + dur);
+
+    // Layer 5: sharp noise crack + tail
+    this.createNoiseBurst(ctx, destination, 0.06, 4000, 'highpass', t, 0.3);
+    this.createNoiseBurst(ctx, destination, 0.15, 1500, 'bandpass', t + 0.05, 0.08);
   }
 
   /** Whoosh — sine 400→150 Hz gentle sweep. Quiet. 0.2 s */
@@ -274,37 +336,68 @@ export class SFXEngine {
 
   /** Hard clang — square 300 Hz short burst + highpass noise. 0.15 s */
   private sfxBlock(ctx: AudioContext, destination: AudioNode, t: number): void {
-    const dur = 0.15;
+    const dur = 0.2;
 
+    // Layer 1: metallic clang with resonant bandpass
     const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 2000; bp.Q.value = 8;
+    const g = ctx.createGain();
     osc.type = 'square';
-    osc.frequency.setValueAtTime(300, t);
-    this.createADSR(ctx, gain.gain, 0.002, 0.03, 0.1, 0.1, 0.3, t);
-    osc.connect(gain);
-    gain.connect(destination);
-    osc.start(t);
-    osc.stop(t + dur);
+    osc.frequency.setValueAtTime(350, t);
+    osc.frequency.exponentialRampToValueAtTime(250, t + dur);
+    this.createADSR(ctx, g.gain, 0.001, 0.03, 0.12, 0.12, 0.25, t);
+    osc.connect(bp); bp.connect(g); g.connect(destination);
+    osc.start(t); osc.stop(t + dur);
 
-    this.createNoiseBurst(ctx, destination, dur, 4000, 'highpass', t, 0.22);
+    // Layer 2: shield ring — high resonant tone
+    const ring = ctx.createOscillator();
+    const gRing = ctx.createGain();
+    const ringBp = ctx.createBiquadFilter();
+    ringBp.type = 'bandpass'; ringBp.frequency.value = 3500; ringBp.Q.value = 12;
+    ring.type = 'triangle';
+    ring.frequency.setValueAtTime(3200, t);
+    ring.frequency.exponentialRampToValueAtTime(2800, t + dur);
+    this.createADSR(ctx, gRing.gain, 0.001, 0.02, 0.08, 0.15, 0.06, t);
+    ring.connect(ringBp); ringBp.connect(gRing); gRing.connect(destination);
+    ring.start(t); ring.stop(t + dur);
+
+    // Layer 3: sharp impact noise
+    this.createNoiseBurst(ctx, destination, 0.04, 4000, 'highpass', t, 0.25);
   }
 
   /** Dull thud — sine 150→60 Hz + lowpass noise burst. 0.2 s */
   private sfxPlayerHurt(ctx: AudioContext, destination: AudioNode, t: number): void {
-    const dur = 0.2;
+    const dur = 0.25;
 
+    // Layer 1: body impact — sine thump with lowpass filter
     const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 300; lp.Q.value = 3;
+    const g = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(150, t);
-    osc.frequency.exponentialRampToValueAtTime(60, t + dur);
-    this.createADSR(ctx, gain.gain, 0.003, 0.05, 0.2, 0.12, 0.3, t);
-    osc.connect(gain);
-    gain.connect(destination);
-    osc.start(t);
-    osc.stop(t + dur);
+    osc.frequency.setValueAtTime(180, t);
+    osc.frequency.exponentialRampToValueAtTime(50, t + dur);
+    this.createADSR(ctx, g.gain, 0.002, 0.05, 0.2, 0.15, 0.3, t);
+    osc.connect(lp); lp.connect(g); g.connect(destination);
+    osc.start(t); osc.stop(t + dur);
 
-    this.createNoiseBurst(ctx, destination, dur, 400, 'lowpass', t, 0.2);
+    // Layer 2: pain — distorted mid tone
+    const osc2 = ctx.createOscillator();
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(256);
+    for (let i = 0; i < 256; i++) { const x = (i / 128) - 1; curve[i] = Math.tanh(x * 2); }
+    shaper.curve = curve;
+    const g2 = ctx.createGain();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(250, t);
+    osc2.frequency.exponentialRampToValueAtTime(100, t + dur);
+    this.createADSR(ctx, g2.gain, 0.002, 0.04, 0.15, 0.15, 0.1, t);
+    osc2.connect(shaper); shaper.connect(g2); g2.connect(destination);
+    osc2.start(t); osc2.stop(t + dur);
+
+    // Layer 3: dull impact noise
+    this.createNoiseBurst(ctx, destination, 0.08, 400, 'lowpass', t, 0.22);
   }
 
   /** Descending groan — sawtooth 200→40 Hz slow sweep + noise fade. 0.6 s */
@@ -360,111 +453,221 @@ export class SFXEngine {
 
   /** Sword swing — triangle 300→600→200 Hz sweep + noise. 0.3 s */
   private sfxSkillMelee(ctx: AudioContext, destination: AudioNode, t: number): void {
-    const dur = 0.3;
+    const dur = 0.35;
 
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(300, t);
-    osc.frequency.linearRampToValueAtTime(600, t + 0.08);
-    osc.frequency.exponentialRampToValueAtTime(200, t + dur);
-    this.createADSR(ctx, gain.gain, 0.005, 0.06, 0.25, 0.18, 0.28, t);
-    osc.connect(gain);
-    gain.connect(destination);
-    osc.start(t);
-    osc.stop(t + dur);
+    // Layer 1: whoosh sweep — triangle through bandpass
+    const osc1 = ctx.createOscillator();
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.setValueAtTime(800, t); bp.frequency.exponentialRampToValueAtTime(400, t + dur); bp.Q.value = 2;
+    const g1 = ctx.createGain();
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(250, t);
+    osc1.frequency.linearRampToValueAtTime(700, t + 0.06);
+    osc1.frequency.exponentialRampToValueAtTime(150, t + dur);
+    this.createADSR(ctx, g1.gain, 0.003, 0.05, 0.2, 0.2, 0.28, t);
+    osc1.connect(bp); bp.connect(g1); g1.connect(destination);
+    osc1.start(t); osc1.stop(t + dur);
 
-    this.createNoiseBurst(ctx, destination, dur, 1500, 'bandpass', t, 0.18);
+    // Layer 2: metallic impact at peak of swing
+    const impact = ctx.createOscillator();
+    const gImp = ctx.createGain();
+    const impBp = ctx.createBiquadFilter();
+    impBp.type = 'bandpass'; impBp.frequency.value = 2500; impBp.Q.value = 5;
+    impact.type = 'sawtooth';
+    impact.frequency.setValueAtTime(1500, t + 0.05);
+    impact.frequency.exponentialRampToValueAtTime(400, t + 0.15);
+    this.createADSR(ctx, gImp.gain, 0.001, 0.03, 0.1, 0.12, 0.12, t + 0.05);
+    impact.connect(impBp); impBp.connect(gImp); gImp.connect(destination);
+    impact.start(t + 0.05); impact.stop(t + 0.2);
+
+    // Layer 3: wind noise whoosh
+    this.createNoiseBurst(ctx, destination, 0.15, 1200, 'bandpass', t, 0.2);
+    // Layer 4: sharp impact noise
+    this.createNoiseBurst(ctx, destination, 0.04, 3000, 'highpass', t + 0.05, 0.15);
   }
 
   /** Crackling fire — sawtooth 200→400 Hz + bandpass noise at 1000 Hz. 0.4 s */
   private sfxSkillFire(ctx: AudioContext, destination: AudioNode, t: number): void {
-    const dur = 0.4;
+    const dur = 0.5;
 
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(200, t);
-    osc.frequency.exponentialRampToValueAtTime(400, t + dur);
-    this.createADSR(ctx, gain.gain, 0.01, 0.08, 0.35, 0.22, 0.25, t);
-    osc.connect(gain);
-    gain.connect(destination);
-    osc.start(t);
-    osc.stop(t + dur);
+    // Layer 1: roaring low flame — sawtooth through lowpass with rising cutoff
+    const osc1 = ctx.createOscillator();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(300, t); lp.frequency.linearRampToValueAtTime(1200, t + 0.15); lp.frequency.exponentialRampToValueAtTime(400, t + dur); lp.Q.value = 4;
+    const g1 = ctx.createGain();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(120, t);
+    osc1.frequency.linearRampToValueAtTime(300, t + 0.1);
+    osc1.frequency.exponentialRampToValueAtTime(80, t + dur);
+    this.createADSR(ctx, g1.gain, 0.005, 0.08, 0.3, 0.3, 0.22, t);
+    osc1.connect(lp); lp.connect(g1); g1.connect(destination);
+    osc1.start(t); osc1.stop(t + dur);
 
-    this.createNoiseBurst(ctx, destination, dur, 1000, 'bandpass', t, 0.3);
+    // Layer 2: crackle — high sawtooth with fast LFO modulation
+    const osc2 = ctx.createOscillator();
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+    lfo.type = 'square'; lfo.frequency.value = 30;
+    lfoGain.gain.value = 200;
+    lfo.connect(lfoGain); lfoGain.connect(osc2.frequency);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 2000; bp.Q.value = 3;
+    const g2 = ctx.createGain();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(400, t);
+    this.createADSR(ctx, g2.gain, 0.01, 0.1, 0.2, 0.3, 0.1, t);
+    osc2.connect(bp); bp.connect(g2); g2.connect(destination);
+    osc2.start(t); osc2.stop(t + dur);
+    lfo.start(t); lfo.stop(t + dur);
+
+    // Layer 3: fire whoosh noise
+    this.createNoiseBurst(ctx, destination, dur * 0.8, 800, 'bandpass', t, 0.25);
+    // Layer 4: bright crackle noise
+    this.createNoiseBurst(ctx, destination, 0.15, 4000, 'highpass', t + 0.05, 0.1);
   }
 
   /** Crystal shimmer — sine 800→1200→600 Hz + highpass noise at 3000 Hz. 0.35 s */
   private sfxSkillIce(ctx: AudioContext, destination: AudioNode, t: number): void {
-    const dur = 0.35;
+    const dur = 0.45;
 
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(800, t);
-    osc.frequency.linearRampToValueAtTime(1200, t + 0.1);
-    osc.frequency.exponentialRampToValueAtTime(600, t + dur);
-    this.createADSR(ctx, gain.gain, 0.008, 0.07, 0.3, 0.2, 0.25, t);
-    osc.connect(gain);
-    gain.connect(destination);
-    osc.start(t);
-    osc.stop(t + dur);
+    // Layer 1: crystalline shimmer — detuned sine pair through highpass
+    const freqs = [900, 907]; // slight detune for shimmer
+    for (const freq of freqs) {
+      const osc = ctx.createOscillator();
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = 600;
+      const g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      osc.frequency.linearRampToValueAtTime(freq * 1.4, t + 0.12);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.7, t + dur);
+      this.createADSR(ctx, g.gain, 0.005, 0.06, 0.3, 0.25, 0.15, t);
+      osc.connect(hp); hp.connect(g); g.connect(destination);
+      osc.start(t); osc.stop(t + dur);
+    }
 
-    this.createNoiseBurst(ctx, destination, dur, 3000, 'highpass', t, 0.15);
+    // Layer 2: glass resonance — triangle at high frequency with narrow bandpass
+    const glass = ctx.createOscillator();
+    const glassBp = ctx.createBiquadFilter();
+    glassBp.type = 'bandpass'; glassBp.frequency.value = 5000; glassBp.Q.value = 15;
+    const gGlass = ctx.createGain();
+    glass.type = 'triangle';
+    glass.frequency.setValueAtTime(4500, t);
+    glass.frequency.exponentialRampToValueAtTime(3000, t + dur);
+    this.createADSR(ctx, gGlass.gain, 0.002, 0.04, 0.15, 0.3, 0.04, t);
+    glass.connect(glassBp); glassBp.connect(gGlass); gGlass.connect(destination);
+    glass.start(t); glass.stop(t + dur);
+
+    // Layer 3: ice crack noise
+    this.createNoiseBurst(ctx, destination, 0.08, 5000, 'highpass', t + 0.02, 0.18);
+    // Layer 4: sustained frost hiss
+    this.createNoiseBurst(ctx, destination, dur * 0.6, 3000, 'highpass', t + 0.05, 0.08);
   }
 
   /** Electric zap — square 1000→200 Hz fast + white noise burst. 0.3 s */
   private sfxSkillLightning(ctx: AudioContext, destination: AudioNode, t: number): void {
-    const dur = 0.3;
+    const dur = 0.4;
 
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(1000, t);
-    osc.frequency.exponentialRampToValueAtTime(200, t + dur);
-    this.createADSR(ctx, gain.gain, 0.002, 0.03, 0.2, 0.25, 0.28, t);
-    osc.connect(gain);
-    gain.connect(destination);
-    osc.start(t);
-    osc.stop(t + dur);
+    // Layer 1: electric buzz — square with rapid frequency jitter via LFO
+    const osc1 = ctx.createOscillator();
+    const lfo = ctx.createOscillator();
+    const lfoG = ctx.createGain();
+    lfo.type = 'sawtooth'; lfo.frequency.value = 60;
+    lfoG.gain.value = 500;
+    lfo.connect(lfoG); lfoG.connect(osc1.frequency);
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(256);
+    for (let i = 0; i < 256; i++) { const x = (i / 128) - 1; curve[i] = Math.sign(x) * Math.pow(Math.abs(x), 0.5); }
+    shaper.curve = curve;
+    const g1 = ctx.createGain();
+    osc1.type = 'square';
+    osc1.frequency.setValueAtTime(1200, t);
+    osc1.frequency.exponentialRampToValueAtTime(150, t + dur);
+    this.createADSR(ctx, g1.gain, 0.001, 0.03, 0.2, 0.3, 0.2, t);
+    osc1.connect(shaper); shaper.connect(g1); g1.connect(destination);
+    osc1.start(t); osc1.stop(t + dur);
+    lfo.start(t); lfo.stop(t + dur);
 
-    // Broad white noise burst (use lowpass at very high freq = essentially flat)
-    this.createNoiseBurst(ctx, destination, dur * 0.5, 8000, 'lowpass', t, 0.3);
+    // Layer 2: bright zap — high frequency descending
+    const osc2 = ctx.createOscillator();
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 2000;
+    const g2 = ctx.createGain();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(3000, t);
+    osc2.frequency.exponentialRampToValueAtTime(500, t + 0.1);
+    this.createADSR(ctx, g2.gain, 0.001, 0.02, 0.05, 0.08, 0.12, t);
+    osc2.connect(hp); hp.connect(g2); g2.connect(destination);
+    osc2.start(t); osc2.stop(t + 0.15);
+
+    // Layer 3: thunder sub
+    const sub = ctx.createOscillator();
+    const gSub = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(80, t + 0.02);
+    sub.frequency.exponentialRampToValueAtTime(30, t + 0.15);
+    this.createADSR(ctx, gSub.gain, 0.002, 0.04, 0.1, 0.1, 0.2, t + 0.02);
+    sub.connect(gSub); gSub.connect(destination);
+    sub.start(t + 0.02); sub.stop(t + 0.18);
+
+    // Layer 4: crackling noise
+    this.createNoiseBurst(ctx, destination, 0.08, 6000, 'highpass', t, 0.3);
+    this.createNoiseBurst(ctx, destination, 0.15, 2000, 'bandpass', t + 0.05, 0.12);
   }
 
   /** Warm ascending — sine arpeggio [400, 500, 600, 800] with overlap. 0.5 s */
   private sfxSkillHeal(ctx: AudioContext, destination: AudioNode, t: number): void {
     const freqs = [400, 500, 600, 800];
-    const stepDur = 0.15;
+    // Warm ascending with detuned pairs and filtered harmonics
     freqs.forEach((freq, i) => {
       const noteStart = t + i * 0.1;
+      const noteDur = 0.25;
+      // Main tone
       const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = freq * 3; lp.Q.value = 2;
+      const g = ctx.createGain();
       osc.type = 'sine';
       osc.frequency.setValueAtTime(freq, noteStart);
-      this.createADSR(ctx, gain.gain, 0.01, 0.03, 0.5, 0.1, 0.2, noteStart);
-      osc.connect(gain);
-      gain.connect(destination);
-      osc.start(noteStart);
-      osc.stop(noteStart + stepDur);
+      this.createADSR(ctx, g.gain, 0.01, 0.04, 0.5, 0.15, 0.15, noteStart);
+      osc.connect(lp); lp.connect(g); g.connect(destination);
+      osc.start(noteStart); osc.stop(noteStart + noteDur);
+      // Detuned shimmer
+      const osc2 = ctx.createOscillator();
+      const g2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(freq * 1.005, noteStart);
+      this.createADSR(ctx, g2.gain, 0.015, 0.04, 0.4, 0.15, 0.1, noteStart);
+      osc2.connect(g2); g2.connect(destination);
+      osc2.start(noteStart); osc2.stop(noteStart + noteDur);
     });
+    // Soft sparkle noise
+    this.createNoiseBurst(ctx, destination, 0.3, 4000, 'highpass', t + 0.15, 0.04);
   }
 
   /** Chime — triangle [523, 659, 784] chord with gentle ADSR. 0.4 s */
   private sfxSkillBuff(ctx: AudioContext, destination: AudioNode, t: number): void {
     const freqs = [523, 659, 784];
-    const dur = 0.4;
-    freqs.forEach(freq => {
+    const dur = 0.5;
+    // Rich chord with filtered triangle + sine harmonics
+    freqs.forEach((freq, i) => {
       const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 3000; lp.Q.value = 1;
+      const g = ctx.createGain();
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(freq, t);
-      this.createADSR(ctx, gain.gain, 0.01, 0.06, 0.4, 0.28, 0.12, t);
-      osc.connect(gain);
-      gain.connect(destination);
-      osc.start(t);
-      osc.stop(t + dur);
+      this.createADSR(ctx, g.gain, 0.01 + i * 0.01, 0.06, 0.4, 0.3, 0.12, t);
+      osc.connect(lp); lp.connect(g); g.connect(destination);
+      osc.start(t); osc.stop(t + dur);
+      // Octave harmonic
+      const oct = ctx.createOscillator();
+      const gOct = ctx.createGain();
+      oct.type = 'sine';
+      oct.frequency.setValueAtTime(freq * 2, t);
+      this.createADSR(ctx, gOct.gain, 0.02, 0.05, 0.3, 0.3, 0.04, t);
+      oct.connect(gOct); gOct.connect(destination);
+      oct.start(t); oct.stop(t + dur);
     });
   }
 
