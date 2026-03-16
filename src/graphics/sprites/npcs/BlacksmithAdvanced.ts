@@ -150,8 +150,8 @@ export const BlacksmithAdvancedDrawer: EntityDrawer = {
     // ── Ornate hammer (drawn so handle extends AWAY from body) ──
     ctx.save();
     ctx.translate(armEndX, armEndY);
-    ctx.rotate(hammerRot - 0.3);
-    // Handle — extends only upward from hand, not through body
+    ctx.rotate(hammerRot + 0.8);
+    // Handle — extends upward-right from hand, away from body
     ctx.fillStyle = utils.rgb(WOOD_HANDLE);
     ctx.fillRect(-1.5 * s, -22 * s, 3 * s, 22 * s);
     // Ornate metal head
