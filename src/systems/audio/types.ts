@@ -16,6 +16,35 @@ export interface ZoneTheme {
   mood: 'pastoral' | 'mysterious' | 'epic' | 'exotic' | 'dark';
   padFilterCutoff?: number;   // override default padCutoff for mood
   padLFORate?: number;        // override default padLfoRate for mood
+  // Effects chain parameters
+  reverbMix?: number;         // wet level 0-1, default 0.25
+  reverbDecay?: number;       // decay time in seconds, default 1.5
+  reverbPreDelay?: number;    // pre-delay in seconds, default 0.01
+  compressorThreshold?: number; // in dB, default -18
+  compressorKnee?: number;    // in dB, default 6
+  compressorRatio?: number;   // ratio, default 4
+  compressorAttack?: number;  // in seconds, default 0.003
+  compressorRelease?: number; // in seconds, default 0.25
+}
+
+/** Configuration for the effects chain applied to BGM output. */
+export interface EffectsChainConfig {
+  reverb: {
+    mix: number;          // wet level 0-1
+    decay: number;        // decay time in seconds
+    preDelay: number;     // pre-delay in seconds
+  };
+  compressor: {
+    threshold: number;    // in dB
+    knee: number;         // in dB
+    ratio: number;        // ratio
+    attack: number;       // in seconds
+    release: number;      // in seconds
+  };
+  limiter: {
+    threshold: number;    // in dB, typically -1 to 0
+    release: number;      // in seconds
+  };
 }
 
 export interface AudioSettings {

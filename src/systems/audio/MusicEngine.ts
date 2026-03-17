@@ -15,7 +15,7 @@
  */
 
 import { AudioLoader } from './AudioLoader';
-import type { MusicState, ZoneTheme } from './types';
+import type { EffectsChainConfig, MusicState, ZoneTheme } from './types';
 
 // ---------------------------------------------------------------------------
 // Zone theme definitions
@@ -29,6 +29,9 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
     tempo: 72,
     padWaveform: 'sine',
     mood: 'pastoral',
+    // Warm, natural reverb for pastoral feel
+    reverbMix: 0.22,
+    reverbDecay: 1.2,
   },
   twilight_forest: {
     id: 'twilight_forest',
@@ -37,6 +40,10 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
     tempo: 60,
     padWaveform: 'triangle',
     mood: 'mysterious',
+    // Longer, ethereal reverb for mystery
+    reverbMix: 0.35,
+    reverbDecay: 2.0,
+    reverbPreDelay: 0.025,
   },
   anvil_mountains: {
     id: 'anvil_mountains',
@@ -45,6 +52,9 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
     tempo: 80,
     padWaveform: 'sawtooth',
     mood: 'epic',
+    // Large hall reverb for epic scale
+    reverbMix: 0.30,
+    reverbDecay: 1.8,
   },
   scorching_desert: {
     id: 'scorching_desert',
@@ -53,6 +63,9 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
     tempo: 68,
     padWaveform: 'triangle',
     mood: 'exotic',
+    // Medium reverb with character
+    reverbMix: 0.25,
+    reverbDecay: 1.4,
   },
   abyss_rift: {
     id: 'abyss_rift',
@@ -61,6 +74,10 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
     tempo: 90,
     padWaveform: 'sawtooth',
     mood: 'dark',
+    // Deep, dark reverb for atmosphere
+    reverbMix: 0.38,
+    reverbDecay: 2.5,
+    reverbPreDelay: 0.030,
   },
   menu: {
     id: 'menu',
@@ -71,6 +88,10 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
     mood: 'dark',
     padFilterCutoff: 200,
     padLFORate: 0.03,
+    // Subtle, dark reverb for menu
+    reverbMix: 0.28,
+    reverbDecay: 2.0,
+    reverbPreDelay: 0.020,
   },
 };
 
@@ -134,6 +155,140 @@ function padLfoRate(mood: ZoneTheme['mood']): number {
 }
 
 // ---------------------------------------------------------------------------
+// Effects chain helpers
+// ---------------------------------------------------------------------------
+
+/** Default reverb parameters based on mood. */
+function reverbParams(mood: ZoneTheme['mood']): { mix: number; decay: number; preDelay: number } {
+  switch (mood) {
+    case 'pastoral':   return { mix: 0.22, decay: 1.2, preDelay: 0.015 };
+    case 'mysterious': return { mix: 0.35, decay: 2.0, preDelay: 0.025 };
+    case 'epic':       return { mix: 0.30, decay: 1.8, preDelay: 0.020 };
+    case 'exotic':     return { mix: 0.25, decay: 1.4, preDelay: 0.018 };
+    case 'dark':       return { mix: 0.38, decay: 2.5, preDelay: 0.030 };
+  }
+}
+
+/** Generate a procedural impulse response for reverb. */
+function generateReverbIR(
+  ctx: AudioContext,
+  duration: number,
+  decay: number,
+): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const length = Math.ceil(sampleRate * duration);
+  const buffer = ctx.createBuffer(2, length, sampleRate);
+
+  for (let channel = 0; channel < 2; channel++) {
+    const data = buffer.getChannelData(channel);
+    for (let i = 0; i < length; i++) {
+      // Exponential decay envelope with some randomness
+      const t = i / sampleRate;
+      const envelope = Math.exp(-t * (3.0 / decay));
+      // Add filtered noise for smoother reverb tail
+      const noise = (Math.random() * 2 - 1) * envelope;
+      data[i] = noise * (1 - (i / length) * 0.3);
+    }
+  }
+
+  return buffer;
+}
+
+/** Build the effects chain: Reverb → Compressor → Limiter. */
+function buildEffectsChain(
+  ctx: AudioContext,
+  destination: AudioNode,
+  config: EffectsChainConfig,
+): { input: GainNode; nodes: AudioNode[] } | null {
+  try {
+    const nodes: AudioNode[] = [];
+
+    // Input gain node for dry signal
+    const inputGain = ctx.createGain();
+    inputGain.gain.value = 1;
+    nodes.push(inputGain);
+
+    // Create reverb (convolver with generated IR)
+    const reverbIR = generateReverbIR(ctx, config.reverb.decay + 0.2, config.reverb.decay);
+    const convolver = ctx.createConvolver();
+    convolver.buffer = reverbIR;
+    nodes.push(convolver);
+
+    // Wet/dry mix using a parallel path
+    const dryGain = ctx.createGain();
+    dryGain.gain.value = 1 - config.reverb.mix;
+    nodes.push(dryGain);
+
+    const wetGain = ctx.createGain();
+    wetGain.gain.value = config.reverb.mix;
+    nodes.push(wetGain);
+
+    // Pre-delay for reverb
+    const preDelayNode = ctx.createDelay(config.reverb.preDelay + 0.1);
+    preDelayNode.delayTime.value = config.reverb.preDelay;
+    nodes.push(preDelayNode);
+
+    // Compressor for loudness stabilization
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = config.compressor.threshold;
+    compressor.knee.value = config.compressor.knee;
+    compressor.ratio.value = config.compressor.ratio;
+    compressor.attack.value = config.compressor.attack;
+    compressor.release.value = config.compressor.release;
+    nodes.push(compressor);
+
+    // Limiter (high-ratio compressor) to prevent clipping
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = config.limiter.threshold;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;  // High ratio for limiting
+    limiter.attack.value = 0.001;
+    limiter.release.value = config.limiter.release;
+    nodes.push(limiter);
+
+    // Connect the chain:
+    // inputGain → dryGain ──────────────────┐
+    //           → preDelay → convolver → wetGain → compressor → limiter → destination
+    inputGain.connect(dryGain);
+    inputGain.connect(preDelayNode);
+    preDelayNode.connect(convolver);
+    convolver.connect(wetGain);
+    wetGain.connect(compressor);
+    dryGain.connect(compressor);
+    compressor.connect(limiter);
+    limiter.connect(destination);
+
+    return { input: inputGain, nodes };
+  } catch {
+    // Effects creation failed - return null for fallback
+    return null;
+  }
+}
+
+/** Build effects config from ZoneTheme with defaults. */
+function buildEffectsConfig(theme: ZoneTheme): EffectsChainConfig {
+  const baseReverb = reverbParams(theme.mood);
+  return {
+    reverb: {
+      mix: theme.reverbMix ?? baseReverb.mix,
+      decay: theme.reverbDecay ?? baseReverb.decay,
+      preDelay: theme.reverbPreDelay ?? baseReverb.preDelay,
+    },
+    compressor: {
+      threshold: theme.compressorThreshold ?? -18,
+      knee: theme.compressorKnee ?? 6,
+      ratio: theme.compressorRatio ?? 4,
+      attack: theme.compressorAttack ?? 0.003,
+      release: theme.compressorRelease ?? 0.25,
+    },
+    limiter: {
+      threshold: -1,
+      release: 0.1,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // MusicEngine
 // ---------------------------------------------------------------------------
 
@@ -149,6 +304,10 @@ export class MusicEngine {
   private transitionTimeouts: number[] = [];
   /** Victory auto-return timer. */
   private victoryTimer: number | null = null;
+  /** Effects chain nodes for cleanup. */
+  private effectsNodes: AudioNode[] = [];
+  /** Effects chain input gain. */
+  private effectsInput: GainNode | null = null;
 
   constructor(loader: AudioLoader) {
     this.loader = loader;
@@ -210,6 +369,9 @@ export class MusicEngine {
     if (this.masterGain) {
       this.masterGain.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
     }
+
+    // Clean up effects chain
+    this._cleanupEffectsChain();
   }
 
   /** Adjust master volume (0–1). */
@@ -222,13 +384,6 @@ export class MusicEngine {
   // ---------------------------------------------------------------------------
 
   private _transition(ctx: AudioContext, destination: AudioNode, duration: number): void {
-    // Ensure master gain exists.
-    if (!this.masterGain) {
-      this.masterGain = ctx.createGain();
-      this.masterGain.gain.value = 1;
-      this.masterGain.connect(destination);
-    }
-
     // Cancel any in-progress transition fade-out timers (they reference an old set).
     this._cancelTransitionTimers();
 
@@ -248,6 +403,28 @@ export class MusicEngine {
       return;
     }
 
+    // Build effects chain for this zone (with fallback)
+    const config = buildEffectsConfig(theme);
+    let finalDestination: AudioNode = destination;
+
+    // Clean up old effects chain
+    this._cleanupEffectsChain();
+
+    // Build new effects chain
+    const effects = buildEffectsChain(ctx, destination, config);
+    if (effects) {
+      this.effectsInput = effects.input;
+      this.effectsNodes = effects.nodes;
+      finalDestination = effects.input;
+    }
+
+    // Ensure master gain exists and connect to effects chain or destination.
+    if (!this.masterGain) {
+      this.masterGain = ctx.createGain();
+      this.masterGain.gain.value = 1;
+    }
+    this.masterGain.connect(finalDestination);
+
     // Build new layer set.
     const newSet = this._buildLayerSet(ctx, this.masterGain, theme, this.currentState);
     this.activeSet = newSet;
@@ -260,6 +437,15 @@ export class MusicEngine {
     if (oldSet) {
       this._fadeOutAndDestroy(ctx, oldSet, duration);
     }
+  }
+
+  /** Clean up effects chain nodes. */
+  private _cleanupEffectsChain(): void {
+    for (const node of this.effectsNodes) {
+      try { node.disconnect(); } catch { /* already disconnected */ }
+    }
+    this.effectsNodes = [];
+    this.effectsInput = null;
   }
 
   private _cancelTransitionTimers(): void {
