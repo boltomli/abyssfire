@@ -86,12 +86,20 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
     tempo: 40,
     padWaveform: 'sawtooth',
     mood: 'dark',
-    padFilterCutoff: 200,
+    // Higher cutoff for clearer, more audible sound (was 200)
+    padFilterCutoff: 550,
     padLFORate: 0.03,
-    // Subtle, dark reverb for menu
-    reverbMix: 0.28,
-    reverbDecay: 2.0,
-    reverbPreDelay: 0.020,
+    // Higher pad gain for menu presence
+    padGain: 0.28,
+    // Higher melody/chime gain for clarity
+    melodyPeakGainMin: 0.12,
+    melodyPeakGainMax: 0.18,
+    chimePeakGainMin: 0.05,
+    chimePeakGainMax: 0.08,
+    // Balanced reverb for menu - clearer but still atmospheric
+    reverbMix: 0.22,
+    reverbDecay: 1.8,
+    reverbPreDelay: 0.015,
   },
 };
 
@@ -548,7 +556,7 @@ export class MusicEngine {
   private _buildPadLayer(ctx: AudioContext, set: LayerSet, theme: ZoneTheme): void {
     const root = theme.baseKey;
     const padGain = ctx.createGain();
-    padGain.gain.value = 0.15;
+    padGain.gain.value = theme.padGain ?? 0.15;
 
     // Lowpass filter.
     const filter = ctx.createBiquadFilter();
@@ -661,7 +669,10 @@ export class MusicEngine {
     const freq = isMenu ? pick(theme.scale) * 4 : pick(theme.scale); // two octaves up for menu
     const waveform: OscillatorType = Math.random() < 0.5 ? 'sine' : 'triangle';
     const duration = isMenu ? rand(2.0, 5.0) : rand(0.3, 1.5);
-    const peakGain = state === 'combat' ? rand(0.06, 0.12) : isMenu ? rand(0.06, 0.10) : rand(0.04, 0.08);
+    // Use theme-specific gain range if defined, otherwise use defaults
+    const melodyMin = theme.melodyPeakGainMin ?? (isMenu ? 0.06 : 0.04);
+    const melodyMax = theme.melodyPeakGainMax ?? (isMenu ? 0.10 : 0.08);
+    const peakGain = state === 'combat' ? rand(0.06, 0.12) : rand(melodyMin, melodyMax);
 
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
@@ -834,7 +845,10 @@ export class MusicEngine {
     const topScale = theme.scale.slice(Math.max(0, theme.scale.length - 3));
     const freq = pick(topScale) * 2; // one octave up for chime brightness
     const duration = isMenu ? rand(1.5, 3.0) : rand(0.6, 1.2);
-    const peakGain = isMenu ? rand(0.025, 0.045) : rand(0.02, 0.03);
+    // Use theme-specific gain range if defined, otherwise use defaults
+    const chimeMin = theme.chimePeakGainMin ?? (isMenu ? 0.025 : 0.02);
+    const chimeMax = theme.chimePeakGainMax ?? (isMenu ? 0.045 : 0.03);
+    const peakGain = rand(chimeMin, chimeMax);
 
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();

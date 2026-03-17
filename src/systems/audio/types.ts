@@ -16,6 +16,12 @@ export interface ZoneTheme {
   mood: 'pastoral' | 'mysterious' | 'epic' | 'exotic' | 'dark';
   padFilterCutoff?: number;   // override default padCutoff for mood
   padLFORate?: number;        // override default padLfoRate for mood
+  // Layer gain overrides for zone-specific volume control
+  padGain?: number;           // pad layer master gain, default 0.15
+  melodyPeakGainMin?: number; // min peak gain for melody notes
+  melodyPeakGainMax?: number; // max peak gain for melody notes
+  chimePeakGainMin?: number;  // min peak gain for chime notes
+  chimePeakGainMax?: number;  // max peak gain for chime notes
   // Effects chain parameters
   reverbMix?: number;         // wet level 0-1, default 0.25
   reverbDecay?: number;       // decay time in seconds, default 1.5
