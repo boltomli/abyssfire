@@ -74,6 +74,8 @@ export class ZoneScene extends Phaser.Scene {
   private inCombat = false;
   private isTransitioning = false;
   private combatDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private targetIndicator: Phaser.GameObjects.Ellipse | null = null;
+  private currentTargetId: string | null = null;
 
   constructor() {
     super({ key: 'ZoneScene' });
@@ -313,6 +315,7 @@ export class ZoneScene extends Phaser.Scene {
       type: 'system',
     });
 
+    this.showZoneBanner();
     this.autoSave();
   }
 
@@ -357,6 +360,7 @@ export class ZoneScene extends Phaser.Scene {
 
     this.handleCombat(time);
     this.updateCombatState();
+    this.updateTargetIndicator();
     if (this.mobileControls) this.mobileControls.update(time, delta);
 
     if (this.player.autoCombat) this.handleAutoCombat(time);
@@ -1001,6 +1005,28 @@ export class ZoneScene extends Phaser.Scene {
     }
   }
 
+  private updateTargetIndicator(): void {
+    // Find the active attack target
+    const targetId = this.player.attackTarget;
+    const target = targetId
+      ? this.monsters.find(m => m.id === targetId && m.isAlive())
+      : this.findNearestAggroMonster();
+
+    if (target && target.isAlive()) {
+      if (!this.targetIndicator) {
+        this.targetIndicator = this.add.ellipse(0, 0, 36, 12, 0xff4444, 0)
+          .setStrokeStyle(1.5, 0xff4444, 0.6);
+      }
+      this.targetIndicator.setPosition(target.sprite.x, target.sprite.y + 4);
+      this.targetIndicator.setDepth(target.sprite.depth - 1);
+      this.targetIndicator.setVisible(true);
+      this.currentTargetId = target.id;
+    } else if (this.targetIndicator) {
+      this.targetIndicator.setVisible(false);
+      this.currentTargetId = null;
+    }
+  }
+
   private updateCombatState(): void {
     const fighting = this.monsters.some(m => m.isAlive() && m.state === 'attack')
       || (this.player.attackTarget != null && this.monsters.some(m => m.id === this.player.attackTarget && m.isAlive()));
@@ -1032,7 +1058,14 @@ export class ZoneScene extends Phaser.Scene {
       if (this.inventorySystem.addItem(loot.item)) {
         EventBus.emit(GameEvents.ITEM_PICKED, { item: loot.item });
         if (loot.item.quality === 'legendary') this.achievementSystem.update('collect');
-        loot.sprite.destroy();
+        // Fly-to-player animation
+        this.tweens.killTweensOf(loot.sprite);
+        this.tweens.add({
+          targets: loot.sprite,
+          x: this.player.sprite.x, y: this.player.sprite.y - 20,
+          scale: 0.3, alpha: 0, duration: 250, ease: 'Power2',
+          onComplete: () => loot.sprite.destroy(),
+        });
         this.lootDrops.splice(i, 1);
       } else {
         break; // inventory full
@@ -1113,10 +1146,24 @@ export class ZoneScene extends Phaser.Scene {
     this.player.addExp(exp);
     this.player.gold += gold;
 
-    // Gold/exp pickup particle burst at monster death location
+    // Death particles + gold burst at monster death location
     if (this.vfx) {
+      this.vfx.deathBurst(monster.sprite.x, monster.sprite.y - 16);
       this.vfx.goldBurst(monster.sprite.x, monster.sprite.y - 10, 6);
     }
+
+    // Floating EXP/Gold text
+    const expText = this.add.text(monster.sprite.x, monster.sprite.y - 40, `+${exp} EXP`, {
+      fontSize: '11px', color: '#b39ddb', fontFamily: '"Cinzel", serif',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(2000);
+    this.tweens.add({ targets: expText, y: expText.y - 35, alpha: 0, duration: 1500, ease: 'Power2', onComplete: () => expText.destroy() });
+
+    const goldText = this.add.text(monster.sprite.x + 15, monster.sprite.y - 28, `+${gold}G`, {
+      fontSize: '11px', color: '#ffd700', fontFamily: '"Cinzel", serif',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(2000);
+    this.tweens.add({ targets: goldText, y: goldText.y - 30, alpha: 0, duration: 1200, ease: 'Power2', onComplete: () => goldText.destroy() });
 
     this.totalKills++;
     this.achievementSystem.update('kill', undefined, 1);
@@ -1183,6 +1230,19 @@ export class ZoneScene extends Phaser.Scene {
       this.vfx.applyLootGlow(container, item.quality);
     }
 
+    // Floating item name label (D2-style)
+    const qualityColors: Record<string, string> = {
+      normal: '#cccccc', magic: '#6888ff', rare: '#f1c40f',
+      legendary: '#ff8800', set: '#2ecc71',
+    };
+    const label = this.add.text(0, -18, item.name, {
+      fontSize: item.quality === 'legendary' || item.quality === 'set' ? '11px' : '10px',
+      color: qualityColors[item.quality] || '#cccccc',
+      fontFamily: '"Cinzel", serif',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5);
+    container.add(label);
+
     // Emit for VFXManager camera effects (legendary/set flash)
     EventBus.emit(GameEvents.ITEM_DROPPED, { item });
 
@@ -1226,9 +1286,20 @@ export class ZoneScene extends Phaser.Scene {
       if (this.vfx) {
         this.vfx.goldBurst(lootDrop.sprite.x, lootDrop.sprite.y, 8);
       }
-      lootDrop.sprite.destroy();
+      // Fly-to-player pickup animation
       const idx = this.lootDrops.indexOf(lootDrop);
       if (idx !== -1) this.lootDrops.splice(idx, 1);
+      this.tweens.killTweensOf(lootDrop.sprite);
+      this.tweens.add({
+        targets: lootDrop.sprite,
+        x: this.player.sprite.x,
+        y: this.player.sprite.y - 20,
+        scale: 0.3,
+        alpha: 0,
+        duration: 300,
+        ease: 'Power2',
+        onComplete: () => lootDrop.sprite.destroy(),
+      });
     }
   }
 
@@ -1567,13 +1638,59 @@ export class ZoneScene extends Phaser.Scene {
 
   private showDamageText(x: number, y: number, damage: number, isCrit: boolean, isDodged = false, isPlayer = false): void {
     let text: string, color: string, size = '16px';
-    if (isDodged) { text = 'MISS'; color = '#7f8c8d'; size = '14px'; }
-    else if (isPlayer) { text = `-${damage}`; color = isCrit ? '#ff6b6b' : '#e74c3c'; if (isCrit) size = '22px'; }
-    else { text = `${damage}`; color = isCrit ? '#ffd700' : '#ffffff'; if (isCrit) size = '22px'; }
-    const t = this.add.text(x + randomInt(-12, 12), y - 30, text, {
-      fontSize: size, color, fontFamily: '"Cinzel", serif', fontStyle: isCrit ? 'bold' : 'normal', stroke: '#000000', strokeThickness: 3,
+    if (isDodged) { text = 'MISS'; color = '#7f8c8d'; size = '13px'; }
+    else if (isPlayer) { text = `-${damage}`; color = isCrit ? '#ff4444' : '#e74c3c'; if (isCrit) size = '24px'; }
+    else { text = `${damage}`; color = isCrit ? '#ffd700' : '#ffffff'; if (isCrit) size = '26px'; }
+    const t = this.add.text(x + randomInt(-15, 15), y - 30, text, {
+      fontSize: size, color, fontFamily: '"Cinzel", serif', fontStyle: isCrit ? 'bold' : 'normal',
+      stroke: '#000000', strokeThickness: isCrit ? 4 : 3,
     }).setOrigin(0.5).setDepth(2000);
-    this.tweens.add({ targets: t, y: t.y - 50, alpha: 0, duration: 1200, ease: 'Power2', onComplete: () => t.destroy() });
+    if (isCrit) {
+      t.setScale(1.5);
+      this.tweens.add({ targets: t, scale: 1, duration: 200, ease: 'Back.easeOut' });
+      this.tweens.add({ targets: t, y: t.y - 70, alpha: 0, duration: 1500, ease: 'Power2', onComplete: () => t.destroy() });
+    } else {
+      this.tweens.add({ targets: t, y: t.y - 50, alpha: 0, duration: 1200, ease: 'Power2', onComplete: () => t.destroy() });
+    }
+  }
+
+  private showZoneBanner(): void {
+    const banner = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.32, this.mapData.name, {
+      fontSize: '28px', color: '#c0934a', fontFamily: '"Cinzel", serif',
+      fontStyle: 'bold', stroke: '#000000', strokeThickness: 5,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
+
+    const subtitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.32 + 36,
+      `Lv.${this.mapData.levelRange[0]}-${this.mapData.levelRange[1]}`, {
+      fontSize: '14px', color: '#8a7a5a', fontFamily: '"Cinzel", serif',
+      stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
+
+    // Decorative lines
+    const lineW = 120;
+    const lineY = GAME_HEIGHT * 0.32 + 18;
+    const lineL = this.add.rectangle(GAME_WIDTH / 2 - 80, lineY, lineW, 1, 0xc0934a, 0).setScrollFactor(0).setDepth(2500);
+    const lineR = this.add.rectangle(GAME_WIDTH / 2 + 80, lineY, lineW, 1, 0xc0934a, 0).setScrollFactor(0).setDepth(2500);
+
+    this.tweens.add({
+      targets: [banner, subtitle, lineL, lineR],
+      alpha: { from: 0, to: 1 },
+      duration: 800,
+      ease: 'Power2',
+    });
+
+    this.time.delayedCall(3000, () => {
+      this.tweens.add({
+        targets: [banner, subtitle, lineL, lineR],
+        alpha: 0,
+        duration: 800,
+        ease: 'Power2',
+        onComplete: () => {
+          banner.destroy(); subtitle.destroy();
+          lineL.destroy(); lineR.destroy();
+        },
+      });
+    });
   }
 
   shutdown(): void {
@@ -1583,6 +1700,7 @@ export class ZoneScene extends Phaser.Scene {
     this.campDecorSprites.clear();
     for (const emitter of this.campParticles.values()) emitter.destroy();
     this.campParticles.clear();
+    if (this.targetIndicator) { this.targetIndicator.destroy(); this.targetIndicator = null; }
     if (this.vfx) this.vfx.destroy();
     if (this.weather) this.weather.destroy();
     if (this.trails) this.trails.destroy();

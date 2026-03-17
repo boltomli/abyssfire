@@ -15,6 +15,7 @@ export class Monster {
   body: Phaser.GameObjects.Rectangle;
   hpBar: Phaser.GameObjects.Rectangle;
   hpBarBg: Phaser.GameObjects.Rectangle;
+  nameLabel: Phaser.GameObjects.Text;
 
   id: string;
   definition: MonsterDefinition;
@@ -84,13 +85,21 @@ export class Monster {
       this.sprite.sendToBack(shadow);
     }
 
-    // HP bar background
-    this.hpBarBg = scene.add.rectangle(0, -size - 10, 40, 4, 0x333333);
+    // HP bar background (hidden until damaged)
+    this.hpBarBg = scene.add.rectangle(0, -size - 10, 40, 4, 0x333333).setAlpha(0);
     this.sprite.add(this.hpBarBg);
 
-    // HP bar
-    this.hpBar = scene.add.rectangle(0, -size - 10, 40, 4, 0x2ecc71);
+    // HP bar (hidden until damaged)
+    this.hpBar = scene.add.rectangle(0, -size - 10, 40, 4, 0x2ecc71).setAlpha(0);
     this.sprite.add(this.hpBar);
+
+    // Monster name label (visible on aggro/damage)
+    const nameLabel = scene.add.text(0, -size - 18, definition.name, {
+      fontSize: '9px', color: definition.elite ? '#e74c3c' : '#cccccc',
+      fontFamily: '"Cinzel", serif', stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5).setAlpha(0);
+    this.sprite.add(nameLabel);
+    this.nameLabel = nameLabel;
 
     // Elite crown indicator
     if (definition.elite) {
@@ -227,10 +236,18 @@ export class Monster {
     this.hpBar.scaleX = ratio;
     const color = ratio > 0.5 ? 0x2ecc71 : ratio > 0.25 ? 0xf39c12 : 0xe74c3c;
     this.hpBar.setFillStyle(color);
+    // Show HP bar + name only when damaged
+    const show = ratio < 1;
+    this.hpBarBg.setAlpha(show ? 0.8 : 0);
+    this.hpBar.setAlpha(show ? 1 : 0);
+    this.nameLabel.setAlpha(show ? 1 : 0);
   }
 
   die(): void {
     this.state = 'dead';
+    this.hpBar.setAlpha(0);
+    this.hpBarBg.setAlpha(0);
+    this.nameLabel.setAlpha(0);
     this.animator.playDeath(() => {
       this.sprite.destroy();
     });

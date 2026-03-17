@@ -288,6 +288,13 @@ export class VFXManager {
       { speedMin: 10, speedMax: 30, duration: 600 });
   }
 
+  /** Death particles at monster kill location */
+  deathBurst(x: number, y: number, color: number = 0xff4444): void {
+    this.burstParticles(x, y, 10, 'particle_circle',
+      [color, 0x888888, 0x444444],
+      { speedMin: 20, speedMax: 50, scaleStart: 0.6, duration: 500, gravityY: 60 });
+  }
+
   /** Level-up celebration particles */
   levelUpBurst(x: number, y: number): void {
     this.burstParticles(x, y, 20, 'particle_star',

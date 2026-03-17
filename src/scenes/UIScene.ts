@@ -906,6 +906,18 @@ export class UIScene extends Phaser.Scene {
         }
       }
 
+      // Monster dots on minimap (red = aggro, orange = nearby)
+      const monsters = (this.zone as any).monsters as { tileCol: number; tileRow: number; isAlive: () => boolean; isAggro: () => boolean }[];
+      if (monsters) {
+        for (const m of monsters) {
+          if (!m.isAlive()) continue;
+          const color = m.isAggro() ? 0xff4444 : 0xcc6644;
+          const alpha = m.isAggro() ? 0.9 : 0.5;
+          this.minimap.fillStyle(color, alpha);
+          this.minimap.fillCircle(m.tileCol * sx, m.tileRow * sy, m.isAggro() ? 2 : 1.5);
+        }
+      }
+
       // Active quest target area markers
       const activeQuests = this.zone.questSystem.getActiveQuests();
       for (const { quest, progress } of activeQuests) {
