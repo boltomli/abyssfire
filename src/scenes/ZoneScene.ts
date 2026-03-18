@@ -1057,6 +1057,8 @@ export class ZoneScene extends Phaser.Scene {
   private handleAutoCombat(time: number): void {
     if (this.player.hp <= 0) return;
     if (!this.player.attackTarget) {
+      // Don't override user's click-to-move path
+      if (this.player.isMoving) return;
       const nearest = this.findNearestAliveMonster();
       if (nearest) {
         const dist = euclideanDistance(this.player.tileCol, this.player.tileRow, nearest.tileCol, nearest.tileRow);
