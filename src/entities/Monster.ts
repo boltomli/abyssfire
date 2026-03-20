@@ -42,6 +42,9 @@ export class Monster {
   animator: CharacterAnimator;
   leashRange: number = 8;
 
+  private currentMoveSpeed = 0;
+  private readonly moveAccel = 6;
+
   private static idCounter = 0;
 
   constructor(scene: Phaser.Scene, definition: MonsterDefinition, col: number, row: number) {
@@ -130,6 +133,7 @@ export class Monster {
     // Leash: return to spawn if too far
     if (distToSpawn > this.leashRange && this.state !== 'idle') {
       this.state = 'idle';
+      this.currentMoveSpeed = 0;
       this.moveToward(this.spawnCol, this.spawnRow, delta, collisions);
       this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.01);
       this.updateHpBar();
@@ -160,16 +164,19 @@ export class Monster {
           const arrived = this.moveToward(this.patrolTarget.col, this.patrolTarget.row, delta, collisions);
           if (arrived) {
             this.state = 'idle';
+            this.currentMoveSpeed = 0;
             this.patrolTarget = null;
           }
         } else {
           this.state = 'idle';
+          this.currentMoveSpeed = 0;
         }
         break;
 
       case 'chase':
         if (distToPlayer > this.definition.aggroRange * 1.5) {
           this.state = 'idle';
+          this.currentMoveSpeed = 0;
         } else if (distToPlayer <= this.definition.attackRange) {
           this.state = 'attack';
         } else {
@@ -201,11 +208,12 @@ export class Monster {
 
     if (dist < 0.1) return true;
 
-    const speed = this.definition.speed * (delta / 1000) * 0.03;
+    const targetSpeed = this.definition.speed * (delta / 1000) * 0.03;
+    this.currentMoveSpeed += (targetSpeed - this.currentMoveSpeed) * this.moveAccel * (delta / 1000);
     const nx = dx / dist;
     const ny = dy / dist;
-    const newCol = this.tileCol + nx * speed;
-    const newRow = this.tileRow + ny * speed;
+    const newCol = this.tileCol + nx * this.currentMoveSpeed;
+    const newRow = this.tileRow + ny * this.currentMoveSpeed;
 
     // Simple collision check
     const checkCol = Math.round(newCol);
@@ -236,14 +244,14 @@ export class Monster {
     const dx = this.sprite.x - sx;
     const dy = this.sprite.y - sy;
     const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    const knockDist = 3;
+    const knockDist = 10;
     this.scene.tweens.add({
       targets: this.sprite,
       x: this.sprite.x + (dx / dist) * knockDist,
       y: this.sprite.y + (dy / dist) * knockDist,
-      duration: 60,
+      duration: 200,
       yoyo: true,
-      ease: 'Power2',
+      ease: 'Back.easeOut',
     });
 
     if (this.hp <= 0) {
