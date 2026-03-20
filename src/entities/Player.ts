@@ -32,6 +32,9 @@ export class Player {
   path: { col: number; row: number }[] = [];
   isMoving: boolean = false;
   moveSpeed: number = 120;
+  private currentSpeed = 0;
+  private readonly acceleration = 8;
+  private readonly deceleration = 12;
 
   attackTarget: string | null = null;
   lastAttackTime: number = 0;
@@ -163,12 +166,22 @@ export class Player {
   }
 
   private updateMovement(delta: number): void {
+    const dt = delta / 1000;
+
     if (this.path.length === 0) {
-      this.isMoving = false;
-      this.animator.setIdle();
+      // Decelerate to stop
+      this.currentSpeed = this.currentSpeed * (1 - this.deceleration * dt);
+      if (this.currentSpeed < 0.5) {
+        this.currentSpeed = 0;
+        this.isMoving = false;
+        this.animator.setIdle();
+      }
       return;
     }
     this.animator.setWalk();
+
+    // Accelerate toward target speed
+    this.currentSpeed += (this.moveSpeed - this.currentSpeed) * this.acceleration * dt;
 
     const target = this.path[0];
     const targetWorld = cartToIso(target.col, target.row);
@@ -176,14 +189,13 @@ export class Player {
     const dy = targetWorld.y - this.sprite.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    const step = this.moveSpeed * (delta / 1000);
+    const step = this.currentSpeed * dt;
 
     if (dist <= step) {
       this.tileCol = target.col;
       this.tileRow = target.row;
       this.sprite.setPosition(targetWorld.x, targetWorld.y);
       this.sprite.setDepth(targetWorld.y + 100);
-      // Footstep dust puff on tile arrival
       this.spawnFootDust(targetWorld.x, targetWorld.y);
       this.path.shift();
       if (this.path.length === 0) {
@@ -196,29 +208,25 @@ export class Player {
       this.sprite.y += ny * step;
       this.sprite.setDepth(this.sprite.y + 100);
 
-      // Approximate tile position
       this.tileCol += (target.col - this.tileCol) * (step / dist);
       this.tileRow += (target.row - this.tileRow) * (step / dist);
     }
   }
 
-  private footDustCount = 0;
   private spawnFootDust(x: number, y: number): void {
-    // Only every other step to avoid spam
-    if (++this.footDustCount % 2 !== 0) return;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const p = this.scene.add.circle(
-        x + (Math.random() - 0.5) * 10,
-        y + 2 + Math.random() * 4,
-        1 + Math.random() * 1.5,
+        x + (Math.random() - 0.5) * 16,
+        y + 2 + Math.random() * 5,
+        1.5 + Math.random() * 2,
         0x888877, 0.3,
       ).setDepth(this.sprite.depth - 1);
       this.scene.tweens.add({
         targets: p,
-        alpha: 0, y: p.y - 6 - Math.random() * 4,
-        x: p.x + (Math.random() - 0.5) * 8,
-        scale: 0.3,
-        duration: 300 + Math.random() * 200,
+        alpha: 0, y: p.y - 8 - Math.random() * 6,
+        x: p.x + (Math.random() - 0.5) * 12,
+        scale: 0.2,
+        duration: 350 + Math.random() * 250,
         ease: 'Power2',
         onComplete: () => p.destroy(),
       });
