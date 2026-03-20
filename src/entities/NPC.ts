@@ -1,8 +1,12 @@
 import Phaser from 'phaser';
-import { TEXTURE_SCALE } from '../config';
+import { TEXTURE_SCALE, DPR } from '../config';
 import { cartToIso } from '../utils/IsometricUtils';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import type { NPCDefinition } from '../data/types';
+
+function fs(basePx: number): string {
+  return `${Math.round(basePx * DPR)}px`;
+}
 
 type NPCState = 'working' | 'alert' | 'idle' | 'talking';
 
@@ -55,12 +59,12 @@ export class NPC {
     // Quest marker (created for quest NPCs, updated dynamically)
     if (definition.type === 'quest') {
       this.questMarker = scene.add.text(0, -80, '!', {
-        fontSize: '18px',
+        fontSize: fs(20),
         color: '#f1c40f',
         fontFamily: '"Cinzel", serif',
         fontStyle: 'bold',
         stroke: '#000000',
-        strokeThickness: 3,
+        strokeThickness: Math.round(3 * DPR),
       }).setOrigin(0.5);
       this.sprite.add(this.questMarker);
       this.questMarkerTween = scene.tweens.add({
@@ -71,11 +75,11 @@ export class NPC {
 
     // Name label
     this.nameLabel = scene.add.text(0, 16, definition.name, {
-      fontSize: '11px',
+      fontSize: fs(13),
       color: '#ffffff',
       fontFamily: '"Noto Sans SC", sans-serif',
       stroke: '#000000',
-      strokeThickness: 3,
+      strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5);
     this.sprite.add(this.nameLabel);
 

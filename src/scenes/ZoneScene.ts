@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TILE_WIDTH, TILE_HEIGHT, GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE } from '../config';
+import { TILE_WIDTH, TILE_HEIGHT, GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE, DPR } from '../config';
 import { cartToIso, worldToTile, euclideanDistance } from '../utils/IsometricUtils';
 import { randomInt } from '../utils/MathUtils';
 import { EventBus, GameEvents } from '../utils/EventBus';
@@ -31,6 +31,13 @@ import { AllQuests } from '../data/quests/all_quests';
 import type { MapData, ClassDefinition, ItemInstance, SaveData } from '../data/types';
 
 const TILE_KEYS = ['tile_grass', 'tile_dirt', 'tile_stone', 'tile_water', 'tile_wall', 'tile_camp', 'tile_camp_wall'];
+
+function fs(basePx: number): string {
+  return `${Math.round(basePx * DPR)}px`;
+}
+
+const W = GAME_WIDTH * DPR;
+const H = GAME_HEIGHT * DPR;
 
 export class ZoneScene extends Phaser.Scene {
   player!: Player;
@@ -304,9 +311,9 @@ export class ZoneScene extends Phaser.Scene {
         this.vfx.deathBurst(this.player.sprite.x, this.player.sprite.y - 16, 0xcc2222);
       }
       // "YOU DIED" text overlay
-      const deathText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.4, '你已死亡', {
-        fontSize: '36px', color: '#cc2222', fontFamily: '"Cinzel", serif',
-        fontStyle: 'bold', stroke: '#000000', strokeThickness: 6,
+      const deathText = this.add.text(W / 2, H * 0.4, '你已死亡', {
+        fontSize: fs(36), color: '#cc2222', fontFamily: '"Cinzel", serif',
+        fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(6 * DPR),
       }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
       this.tweens.add({
         targets: deathText, alpha: 1, duration: 600, ease: 'Power2',
@@ -1233,14 +1240,14 @@ export class ZoneScene extends Phaser.Scene {
 
     // Floating EXP/Gold text
     const expText = this.add.text(monster.sprite.x, monster.sprite.y - 40, `+${exp} EXP`, {
-      fontSize: '11px', color: '#b39ddb', fontFamily: '"Cinzel", serif',
-      stroke: '#000000', strokeThickness: 2,
+      fontSize: fs(13), color: '#b39ddb', fontFamily: '"Cinzel", serif',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0.5).setDepth(2000);
     this.tweens.add({ targets: expText, y: expText.y - 35, alpha: 0, duration: 1500, ease: 'Power2', onComplete: () => expText.destroy() });
 
     const goldText = this.add.text(monster.sprite.x + 15, monster.sprite.y - 28, `+${gold}G`, {
-      fontSize: '11px', color: '#ffd700', fontFamily: '"Cinzel", serif',
-      stroke: '#000000', strokeThickness: 2,
+      fontSize: fs(13), color: '#ffd700', fontFamily: '"Cinzel", serif',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0.5).setDepth(2000);
     this.tweens.add({ targets: goldText, y: goldText.y - 30, alpha: 0, duration: 1200, ease: 'Power2', onComplete: () => goldText.destroy() });
 
@@ -1327,10 +1334,10 @@ export class ZoneScene extends Phaser.Scene {
       legendary: '#ff8800', set: '#2ecc71',
     };
     const label = this.add.text(0, -18, item.name, {
-      fontSize: item.quality === 'legendary' || item.quality === 'set' ? '11px' : '10px',
+      fontSize: item.quality === 'legendary' || item.quality === 'set' ? fs(13) : fs(12),
       color: qualityColors[item.quality] || '#cccccc',
       fontFamily: '"Cinzel", serif',
-      stroke: '#000000', strokeThickness: 2,
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0.5);
     container.add(label);
 
@@ -1770,21 +1777,21 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private showDamageText(x: number, y: number, damage: number, isCrit: boolean, isDodged = false, isPlayer = false, damageType?: string): void {
-    let text: string, color: string, size = '16px';
+    let text: string, color: string, size = fs(20);
     const elementColors: Record<string, string> = {
       fire: '#ff6600', ice: '#66ccff', lightning: '#a8e6ff',
       poison: '#66ff66', arcane: '#cc66ff',
     };
-    if (isDodged) { text = 'MISS'; color = '#7f8c8d'; size = '13px'; }
-    else if (isPlayer) { text = `-${damage}`; color = isCrit ? '#ff4444' : '#e74c3c'; if (isCrit) size = '24px'; }
+    if (isDodged) { text = 'MISS'; color = '#7f8c8d'; size = fs(14); }
+    else if (isPlayer) { text = `-${damage}`; color = isCrit ? '#ff4444' : '#e74c3c'; if (isCrit) size = fs(28); }
     else {
       text = `${damage}`;
       color = isCrit ? '#ffd700' : (damageType && elementColors[damageType]) || '#ffffff';
-      if (isCrit) size = '26px';
+      if (isCrit) size = fs(32);
     }
     const t = this.add.text(x + randomInt(-15, 15), y - 30, text, {
       fontSize: size, color, fontFamily: '"Cinzel", serif', fontStyle: isCrit ? 'bold' : 'normal',
-      stroke: '#000000', strokeThickness: isCrit ? 4 : 3,
+      stroke: '#000000', strokeThickness: Math.round((isCrit ? 4 : 3) * DPR),
     }).setOrigin(0.5).setDepth(2000);
     if (isCrit) {
       t.setScale(1.5);
@@ -1796,14 +1803,14 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private showLevelUpBanner(level: number): void {
-    const text = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.28, '升级!', {
-      fontSize: '32px', color: '#ffd700', fontFamily: '"Cinzel", serif',
-      fontStyle: 'bold', stroke: '#000000', strokeThickness: 5,
+    const text = this.add.text(W / 2, H * 0.28, '升级!', {
+      fontSize: fs(32), color: '#ffd700', fontFamily: '"Cinzel", serif',
+      fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(5 * DPR),
     }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0).setScale(0.5);
 
-    const lvlText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.28 + 38, `等级 ${level}`, {
-      fontSize: '18px', color: '#ffcc00', fontFamily: '"Cinzel", serif',
-      stroke: '#000000', strokeThickness: 3,
+    const lvlText = this.add.text(W / 2, H * 0.28 + 38, `等级 ${level}`, {
+      fontSize: fs(20), color: '#ffcc00', fontFamily: '"Cinzel", serif',
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
 
     this.tweens.add({
@@ -1821,14 +1828,14 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private showQuestCompleteBanner(questName: string): void {
-    const label = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.22, '任务完成!', {
-      fontSize: '20px', color: '#f1c40f', fontFamily: '"Cinzel", serif',
-      fontStyle: 'bold', stroke: '#000000', strokeThickness: 4,
+    const label = this.add.text(W / 2, H * 0.22, '任务完成!', {
+      fontSize: fs(20), color: '#f1c40f', fontFamily: '"Cinzel", serif',
+      fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(4 * DPR),
     }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
 
-    const name = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.22 + 28, questName, {
-      fontSize: '14px', color: '#e0d8cc', fontFamily: '"Cinzel", serif',
-      stroke: '#000000', strokeThickness: 3,
+    const name = this.add.text(W / 2, H * 0.22 + 28, questName, {
+      fontSize: fs(16), color: '#e0d8cc', fontFamily: '"Cinzel", serif',
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
 
     this.tweens.add({ targets: [label, name], alpha: 1, duration: 500, ease: 'Power2' });
@@ -1841,22 +1848,22 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private showZoneBanner(): void {
-    const banner = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.32, this.mapData.name, {
-      fontSize: '28px', color: '#c0934a', fontFamily: '"Cinzel", serif',
-      fontStyle: 'bold', stroke: '#000000', strokeThickness: 5,
+    const banner = this.add.text(W / 2, H * 0.32, this.mapData.name, {
+      fontSize: fs(28), color: '#c0934a', fontFamily: '"Cinzel", serif',
+      fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(5 * DPR),
     }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
 
-    const subtitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT * 0.32 + 36,
+    const subtitle = this.add.text(W / 2, H * 0.32 + 36,
       `Lv.${this.mapData.levelRange[0]}-${this.mapData.levelRange[1]}`, {
-      fontSize: '14px', color: '#8a7a5a', fontFamily: '"Cinzel", serif',
-      stroke: '#000000', strokeThickness: 3,
+      fontSize: fs(16), color: '#8a7a5a', fontFamily: '"Cinzel", serif',
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
 
     // Decorative lines
     const lineW = 120;
-    const lineY = GAME_HEIGHT * 0.32 + 18;
-    const lineL = this.add.rectangle(GAME_WIDTH / 2 - 80, lineY, lineW, 1, 0xc0934a, 0).setScrollFactor(0).setDepth(2500);
-    const lineR = this.add.rectangle(GAME_WIDTH / 2 + 80, lineY, lineW, 1, 0xc0934a, 0).setScrollFactor(0).setDepth(2500);
+    const lineY = H * 0.32 + 18;
+    const lineL = this.add.rectangle(W / 2 - 80, lineY, lineW, 1, 0xc0934a, 0).setScrollFactor(0).setDepth(2500);
+    const lineR = this.add.rectangle(W / 2 + 80, lineY, lineW, 1, 0xc0934a, 0).setScrollFactor(0).setDepth(2500);
 
     this.tweens.add({
       targets: [banner, subtitle, lineL, lineR],

@@ -1,9 +1,14 @@
 import Phaser from 'phaser';
+import { DPR } from '../config';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
 import { SkillEffectSystem } from '../systems/SkillEffectSystem';
 import { audioManager } from '../systems/audio/AudioManager';
 // import { buildFrameSizeRegistry } from '../graphics/sprites/types';
 // import { TEXTURE_SCALE } from '../config';
+
+function fs(basePx: number): string {
+  return `${Math.round(basePx * DPR)}px`;
+}
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -20,11 +25,11 @@ export class BootScene extends Phaser.Scene {
 
     // Game title with glow
     const titleText = this.add.text(width / 2, height / 2 - 70, '渊  火', {
-      fontSize: '36px', color: '#c0934a', fontFamily: '"Cinzel", serif', fontStyle: 'bold',
-      stroke: '#000000', strokeThickness: 4,
+      fontSize: fs(36), color: '#c0934a', fontFamily: '"Cinzel", serif', fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(4 * DPR),
     }).setOrigin(0.5).setAlpha(0);
     const subtitleText = this.add.text(width / 2, height / 2 - 36, 'A B Y S S F I R E', {
-      fontSize: '12px', color: '#8a7060', fontFamily: '"Cinzel", serif',
+      fontSize: fs(14), color: '#8a7060', fontFamily: '"Cinzel", serif',
     }).setOrigin(0.5).setAlpha(0);
 
     // Fade in title
@@ -58,7 +63,7 @@ export class BootScene extends Phaser.Scene {
     this.add.rectangle(width / 2, barY, barW, barH, 0x1a1a2e).setStrokeStyle(1, 0x333344);
     const fill = this.add.rectangle((width - barW) / 2 + 2, barY, 0, barH - 2, 0xc0934a).setOrigin(0, 0.5);
     const loadingText = this.add.text(width / 2, barY + 18, '锻造渊火...', {
-      fontSize: '11px', color: '#8a7060', fontFamily: '"Cinzel", serif',
+      fontSize: fs(13), color: '#8a7060', fontFamily: '"Cinzel", serif',
     }).setOrigin(0.5);
     this.load.on('progress', (v: number) => { fill.width = (barW - 4) * v; });
     this.load.on('complete', () => { loadingText.setText('准备就绪!'); });

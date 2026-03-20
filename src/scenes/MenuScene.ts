@@ -1,10 +1,18 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE } from '../config';
+import { GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE, DPR } from '../config';
 import { SaveSystem } from '../systems/SaveSystem';
 import { AllClasses } from '../data/classes/index';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import { audioManager } from '../systems/audio/AudioManager';
 import type { SaveData } from '../data/types';
+
+function fs(basePx: number): string {
+  return `${Math.round(basePx * DPR)}px`;
+}
+const px = (n: number) => Math.round(n * DPR);
+
+const W = GAME_WIDTH * DPR;
+const H = GAME_HEIGHT * DPR;
 
 export class MenuScene extends Phaser.Scene {
   private menuContainer: Phaser.GameObjects.Container | null = null;
@@ -15,7 +23,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
-    const cx = GAME_WIDTH / 2;
+    const cx = W / 2;
 
     this.buildBackground(cx);
     this.buildTitle(cx);
@@ -31,14 +39,14 @@ export class MenuScene extends Phaser.Scene {
     // Layer 1 — Void gradient
     const bgGrad = this.add.graphics();
     bgGrad.fillGradientStyle(0x050508, 0x050508, 0x1a0808, 0x1a0808, 1);
-    bgGrad.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    bgGrad.fillRect(0, 0, W, H);
     bgGrad.setDepth(0);
 
     // Layer 2 — Fire glow (pulsing radial ellipse at bottom-center)
     this.buildFireGlow(cx);
 
     // Layer 3 — Ember particles
-    const bottomRect = new Phaser.Geom.Rectangle(0, GAME_HEIGHT - 20, GAME_WIDTH, 20);
+    const bottomRect = new Phaser.Geom.Rectangle(0, H - px(20), W, px(20));
     const bottomZone = new Phaser.GameObjects.Particles.Zones.RandomZone(
       bottomRect as unknown as Phaser.Types.GameObjects.Particles.RandomZoneSource,
     );
@@ -92,8 +100,8 @@ export class MenuScene extends Phaser.Scene {
       canvas.refresh();
     }
 
-    const glow = this.add.image(cx, GAME_HEIGHT + 40, glowKey);
-    glow.setDisplaySize(GAME_WIDTH * 1.2, 500);
+    const glow = this.add.image(cx, H + px(40), glowKey);
+    glow.setDisplaySize(W * 1.2, px(500));
     glow.setBlendMode(Phaser.BlendModes.ADD);
     glow.setAlpha(0.2);
     glow.setDepth(1);
@@ -121,8 +129,8 @@ export class MenuScene extends Phaser.Scene {
     const smokeCount = 5;
     for (let i = 0; i < smokeCount; i++) {
       const radius = 200 + Math.random() * 100;
-      const startX = Math.random() * GAME_WIDTH;
-      const startY = GAME_HEIGHT * 0.3 + Math.random() * GAME_HEIGHT * 0.4;
+      const startX = Math.random() * W;
+      const startY = H * 0.3 + Math.random() * H * 0.4;
       const alpha = 0.03 + Math.random() * 0.03;
 
       const smoke = this.add.circle(startX, startY, radius, 0x222222, alpha);
@@ -132,7 +140,7 @@ export class MenuScene extends Phaser.Scene {
       const direction = Math.random() < 0.5 ? 1 : -1;
       this.tweens.add({
         targets: smoke,
-        x: startX + direction * (GAME_WIDTH * 0.4),
+        x: startX + direction * (W * 0.4),
         duration: driftDuration,
         ease: 'Linear',
         yoyo: true,
@@ -155,8 +163,8 @@ export class MenuScene extends Phaser.Scene {
       canvas.refresh();
     }
 
-    const titleGlow = this.add.image(cx, 150, titleGlowKey);
-    titleGlow.setDisplaySize(400, 200);
+    const titleGlow = this.add.image(cx, px(150), titleGlowKey);
+    titleGlow.setDisplaySize(px(400), px(200));
     titleGlow.setBlendMode(Phaser.BlendModes.ADD);
     titleGlow.setAlpha(0.1);
     titleGlow.setDepth(5);
@@ -177,49 +185,49 @@ export class MenuScene extends Phaser.Scene {
 
   private buildTitle(cx: number): void {
     // Decorative line above title
-    const lineY = 80;
+    const lineY = px(80);
     const lineGfx = this.add.graphics();
     lineGfx.lineStyle(1, 0xc0934a, 0.3);
     lineGfx.beginPath();
-    lineGfx.moveTo(cx - 200, lineY);
-    lineGfx.lineTo(cx + 200, lineY);
+    lineGfx.moveTo(cx - px(200), lineY);
+    lineGfx.lineTo(cx + px(200), lineY);
     lineGfx.strokePath();
     lineGfx.fillStyle(0xc0934a, 0.5);
-    lineGfx.fillCircle(cx - 200, lineY, 2);
-    lineGfx.fillCircle(cx + 200, lineY, 2);
+    lineGfx.fillCircle(cx - px(200), lineY, px(2));
+    lineGfx.fillCircle(cx + px(200), lineY, px(2));
     lineGfx.setDepth(10);
 
     // Title
-    this.add.text(cx, 130, 'ABYSSFIRE', {
-      fontSize: '52px',
+    this.add.text(cx, px(130), 'ABYSSFIRE', {
+      fontSize: fs(52),
       color: '#c0934a',
       fontFamily: '"Cinzel", serif',
       fontStyle: 'bold',
       stroke: '#3a2a10',
-      strokeThickness: 4,
+      strokeThickness: Math.round(4 * DPR),
     }).setOrigin(0.5).setDepth(10);
 
-    this.add.text(cx, 188, '渊   火', {
-      fontSize: '26px',
+    this.add.text(cx, px(188), '渊   火', {
+      fontSize: fs(32),
       color: '#d4a84b',
       fontFamily: '"Noto Sans SC", sans-serif',
       fontStyle: 'bold',
       stroke: '#2a1a08',
-      strokeThickness: 3,
+      strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5).setDepth(10);
 
     // Decorative line below title
     const lineGfx2 = this.add.graphics();
     lineGfx2.lineStyle(1, 0xc0934a, 0.3);
     lineGfx2.beginPath();
-    lineGfx2.moveTo(cx - 160, 215);
-    lineGfx2.lineTo(cx + 160, 215);
+    lineGfx2.moveTo(cx - px(160), px(215));
+    lineGfx2.lineTo(cx + px(160), px(215));
     lineGfx2.strokePath();
     lineGfx2.setDepth(10);
 
     // Version
-    this.add.text(cx, GAME_HEIGHT - 20, 'v0.6.0 - HD', {
-      fontSize: '11px',
+    this.add.text(cx, H - px(20), 'v0.6.0 - HD', {
+      fontSize: fs(13),
       color: '#333340',
       fontFamily: '"Cinzel", serif',
     }).setOrigin(0.5).setDepth(10);
@@ -264,8 +272,8 @@ export class MenuScene extends Phaser.Scene {
     if (this.menuContainer) { this.menuContainer.destroy(); }
     this.menuContainer = this.add.container(0, 0).setDepth(10);
 
-    const cx = GAME_WIDTH / 2;
-    let y = save ? 300 : 340;
+    const cx = W / 2;
+    let y = save ? px(300) : px(340);
 
     if (save) {
       // "Continue" button — shows class name + level
@@ -273,25 +281,25 @@ export class MenuScene extends Phaser.Scene {
       const className = classData?.name ?? save.classId;
       const label = `继续游戏 - ${className} Lv.${save.player.level}`;
 
-      const bg = this.add.rectangle(cx, y, 320, 65, 0x12121e, 0.9)
+      const bg = this.add.rectangle(cx, y, px(320), px(65), 0x12121e, 0.9)
         .setStrokeStyle(1.5, 0xc0934a, 0.8).setInteractive({ useHandCursor: true });
       bg.on('pointerover', () => { bg.setStrokeStyle(2, 0xc0934a, 1); bg.setFillStyle(0x1a1a2e, 0.95); });
       bg.on('pointerout', () => { bg.setStrokeStyle(1.5, 0xc0934a, 0.8); bg.setFillStyle(0x12121e, 0.9); });
       bg.on('pointerdown', () => this.loadGame(save));
       this.menuContainer.add(bg);
 
-      this.menuContainer.add(this.add.text(cx, y - 6, label, {
-        fontSize: '16px', color: '#e8e0d4', fontFamily: '"Cinzel", "Noto Sans SC", serif',
+      this.menuContainer.add(this.add.text(cx, y - px(6), label, {
+        fontSize: fs(20), color: '#e8e0d4', fontFamily: '"Cinzel", "Noto Sans SC", serif',
       }).setOrigin(0.5));
-      this.menuContainer.add(this.add.text(cx, y + 16, '继续你的冒险', {
-        fontSize: '11px', color: '#c0934a', fontFamily: '"Noto Sans SC", sans-serif',
+      this.menuContainer.add(this.add.text(cx, y + px(16), '继续你的冒险', {
+        fontSize: fs(13), color: '#c0934a', fontFamily: '"Noto Sans SC", sans-serif',
       }).setOrigin(0.5));
 
-      y += 90;
+      y += px(90);
     }
 
     // "New Game" button
-    const newBg = this.add.rectangle(cx, y, 320, 55, 0x12121e, 0.9)
+    const newBg = this.add.rectangle(cx, y, px(320), px(55), 0x12121e, 0.9)
       .setStrokeStyle(1.5, 0x555566, 0.6).setInteractive({ useHandCursor: true });
     newBg.on('pointerover', () => { newBg.setStrokeStyle(2, 0x888899, 1); newBg.setFillStyle(0x1a1a2e, 0.95); });
     newBg.on('pointerout', () => { newBg.setStrokeStyle(1.5, 0x555566, 0.6); newBg.setFillStyle(0x12121e, 0.9); });
@@ -301,16 +309,16 @@ export class MenuScene extends Phaser.Scene {
     });
     this.menuContainer.add(newBg);
     this.menuContainer.add(this.add.text(cx, y, '新的旅程', {
-      fontSize: '16px', color: '#a0907a', fontFamily: '"Cinzel", "Noto Sans SC", serif',
+      fontSize: fs(20), color: '#a0907a', fontFamily: '"Cinzel", "Noto Sans SC", serif',
     }).setOrigin(0.5));
   }
 
   private showClassSelection(): void {
     this.classContainer = this.add.container(0, 0).setDepth(10);
-    const cx = GAME_WIDTH / 2;
+    const cx = W / 2;
 
-    this.classContainer.add(this.add.text(cx, 260, '选 择 职 业', {
-      fontSize: '18px',
+    this.classContainer.add(this.add.text(cx, px(260), '选 择 职 业', {
+      fontSize: fs(20),
       color: '#a0907a',
       fontFamily: '"Noto Sans SC", sans-serif',
     }).setOrigin(0.5));
@@ -322,15 +330,15 @@ export class MenuScene extends Phaser.Scene {
     ];
 
     classes.forEach((cls, i) => {
-      const y = 320 + i * 80;
-      const bg = this.add.rectangle(cx, y, 320, 65, 0x12121e, 0.9)
+      const y = px(320) + i * px(80);
+      const bg = this.add.rectangle(cx, y, px(320), px(65), 0x12121e, 0.9)
         .setStrokeStyle(1.5, cls.color, 0.6)
         .setInteractive({ useHandCursor: true });
 
       // Animated class icon preview
       const spriteKey = `player_${cls.id}`;
       if (this.textures.exists(spriteKey)) {
-        const preview = this.add.sprite(cx - 130, y, spriteKey, 0).setScale(0.7 / TEXTURE_SCALE);
+        const preview = this.add.sprite(cx - px(130), y, spriteKey, 0).setScale(0.7 / TEXTURE_SCALE);
         const idleKey = `${spriteKey}_idle`;
         if (this.anims.exists(idleKey)) preview.play(idleKey);
         this.classContainer!.add(preview);
@@ -342,14 +350,14 @@ export class MenuScene extends Phaser.Scene {
       }
 
       this.classContainer!.add(bg);
-      this.classContainer!.add(this.add.text(cx, y - 12, cls.name, {
-        fontSize: '18px',
+      this.classContainer!.add(this.add.text(cx, y - px(12), cls.name, {
+        fontSize: fs(20),
         color: '#e8e0d4',
         fontFamily: '"Cinzel", "Noto Sans SC", serif',
       }).setOrigin(0.5));
 
-      this.classContainer!.add(this.add.text(cx, y + 12, cls.desc, {
-        fontSize: '12px',
+      this.classContainer!.add(this.add.text(cx, y + px(12), cls.desc, {
+        fontSize: fs(14),
         color: cls.accent,
         fontFamily: '"Noto Sans SC", sans-serif',
       }).setOrigin(0.5));
@@ -378,8 +386,8 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Back button
-    const backBtn = this.add.text(cx, 570, '← 返回', {
-      fontSize: '12px', color: '#888', fontFamily: '"Noto Sans SC", sans-serif',
+    const backBtn = this.add.text(cx, px(570), '← 返回', {
+      fontSize: fs(14), color: '#888', fontFamily: '"Noto Sans SC", sans-serif',
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     backBtn.on('pointerdown', () => {
       this.classContainer?.destroy(); this.classContainer = null;

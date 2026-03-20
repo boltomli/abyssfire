@@ -1,11 +1,15 @@
 import Phaser from 'phaser';
-import { TEXTURE_SCALE } from '../config';
+import { TEXTURE_SCALE, DPR } from '../config';
 import { cartToIso } from '../utils/IsometricUtils';
 import { euclideanDistance } from '../utils/IsometricUtils';
 import { randomInt } from '../utils/MathUtils';
 import type { MonsterDefinition, Stats } from '../data/types';
 import type { CombatEntity, ActiveBuff } from '../systems/CombatSystem';
 import { CharacterAnimator, getAnimConfig } from '../systems/CharacterAnimator';
+
+function fs(basePx: number): string {
+  return `${Math.round(basePx * DPR)}px`;
+}
 
 type MonsterState = 'idle' | 'patrol' | 'chase' | 'attack' | 'dead';
 
@@ -95,8 +99,8 @@ export class Monster {
 
     // Monster name label (visible on aggro/damage)
     const nameLabel = scene.add.text(0, -size - 18, definition.name, {
-      fontSize: '9px', color: definition.elite ? '#e74c3c' : '#cccccc',
-      fontFamily: '"Cinzel", serif', stroke: '#000000', strokeThickness: 2,
+      fontSize: fs(12), color: definition.elite ? '#e74c3c' : '#cccccc',
+      fontFamily: '"Cinzel", serif', stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0.5).setAlpha(0);
     this.sprite.add(nameLabel);
     this.nameLabel = nameLabel;
