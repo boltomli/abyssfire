@@ -288,4 +288,81 @@ export class DrawUtils {
     const [r, g, b] = this.hexRgb(color);
     return (this.clamp(r - amount * 8) << 16) | (this.clamp(g + amount * 2) << 8) | this.clamp(b + amount * 15);
   }
+
+  // ── Painterly Effect Helpers ──
+
+  /**
+   * Enable soft (blurred) outline on subsequent draws.
+   * Call before drawing a shape fill for an outer glow effect.
+   */
+  softOutline(
+    ctx: CanvasRenderingContext2D,
+    color: string,
+    blur: number = 4,
+    offsetX: number = 0,
+    offsetY: number = 0,
+  ): void {
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = blur;
+    ctx.shadowOffsetX = offsetX;
+    ctx.shadowOffsetY = offsetY;
+  }
+
+  /** End soft outline — restore context state */
+  softOutlineEnd(ctx: CanvasRenderingContext2D): void {
+    ctx.restore();
+  }
+
+  /**
+   * Draw a rim light on the edge of a circular/elliptical shape.
+   * Creates a subtle bright edge highlight opposite to the light direction.
+   */
+  rimLight(
+    ctx: CanvasRenderingContext2D,
+    cx: number, cy: number,
+    rx: number, ry: number,
+    color: string = 'rgba(255,255,255,0.15)',
+    lightAngle: number = -0.7,
+  ): void {
+    const edgeX = cx + Math.cos(lightAngle + Math.PI) * rx * 0.8;
+    const edgeY = cy + Math.sin(lightAngle + Math.PI) * ry * 0.8;
+    const grad = ctx.createRadialGradient(edgeX, edgeY, 0, edgeX, edgeY, Math.max(rx, ry) * 0.6);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /**
+   * Fill a rectangle with a multi-layer gradient for volumetric depth.
+   * Applies base → shadow → highlight in 3 passes.
+   */
+  volumeGradient(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number,
+    baseColor: string,
+    shadowColor: string,
+    highlightColor: string,
+  ): void {
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(x, y, w, h);
+
+    const shadowGrad = ctx.createLinearGradient(x, y, x, y + h);
+    shadowGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    shadowGrad.addColorStop(1, shadowColor);
+    ctx.fillStyle = shadowGrad;
+    ctx.fillRect(x, y, w, h);
+
+    const hlGrad = ctx.createLinearGradient(x, y, x + w * 0.6, y + h * 0.6);
+    hlGrad.addColorStop(0, highlightColor);
+    hlGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hlGrad;
+    ctx.fillRect(x, y, w, h);
+  }
 }
