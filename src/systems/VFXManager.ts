@@ -293,7 +293,7 @@ export class VFXManager {
   hitSparks(x: number, y: number, count: number = 12): void {
     this.burstParticles(x, y, count, 'particle_spark',
       [0xffffff, 0xffffaa, 0xffd700],
-      { speedMin: 20, speedMax: 55, scaleStart: 1.0, duration: 400 });
+      { speedMin: 20, speedMax: 55, scaleStart: 0.6, duration: 400 });
   }
 
   /** Gold particles (loot/gold pickup, monster kill) */
@@ -314,14 +314,14 @@ export class VFXManager {
   deathBurst(x: number, y: number, color: number = 0xff4444): void {
     this.burstParticles(x, y, 10, 'particle_circle',
       [color, 0x888888, 0x444444],
-      { speedMin: 20, speedMax: 50, scaleStart: 0.6, duration: 500, gravityY: 60 });
+      { speedMin: 20, speedMax: 50, scaleStart: 0.4, duration: 500, gravityY: 60 });
   }
 
   /** Level-up celebration particles */
   levelUpBurst(x: number, y: number): void {
     this.burstParticles(x, y, 20, 'particle_star',
       [0xffd700, 0xff8800, 0xffcc33, 0xffffff],
-      { speedMin: 30, speedMax: 70, scaleStart: 0.8, duration: 800, gravityY: 40 });
+      { speedMin: 30, speedMax: 70, scaleStart: 0.5, duration: 800, gravityY: 40 });
   }
 
   // ── Low HP Danger Vignette ──────────────────────────────

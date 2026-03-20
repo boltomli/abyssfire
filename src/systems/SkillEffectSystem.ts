@@ -13,128 +13,128 @@ export class SkillEffectSystem {
   static generateTextures(scene: Phaser.Scene): void {
     const g = scene.add.graphics();
 
-    // particle_circle (8x8 soft circle)
+    // particle_circle (16x16 soft circle)
     g.clear();
     g.fillStyle(0xffffff, 0.3);
-    g.fillCircle(4, 4, 4);
+    g.fillCircle(8, 8, 8);
     g.fillStyle(0xffffff, 0.6);
-    g.fillCircle(4, 4, 3);
+    g.fillCircle(8, 8, 6);
     g.fillStyle(0xffffff, 1.0);
-    g.fillCircle(4, 4, 1.5);
-    g.generateTexture('particle_circle', 8, 8);
+    g.fillCircle(8, 8, 3);
+    g.generateTexture('particle_circle', 16, 16);
 
-    // particle_spark (6x6 diamond/star)
+    // particle_spark (12x12 diamond/star)
     g.clear();
     g.fillStyle(0xffffff, 0.9);
     g.fillPoints([
-      new Phaser.Geom.Point(3, 0),
-      new Phaser.Geom.Point(4.5, 3),
-      new Phaser.Geom.Point(6, 3),
+      new Phaser.Geom.Point(6, 0),
+      new Phaser.Geom.Point(9, 6),
+      new Phaser.Geom.Point(12, 6),
+      new Phaser.Geom.Point(6, 12),
+      new Phaser.Geom.Point(0, 6),
       new Phaser.Geom.Point(3, 6),
-      new Phaser.Geom.Point(0, 3),
-      new Phaser.Geom.Point(1.5, 3),
     ], true);
-    g.generateTexture('particle_spark', 6, 6);
+    g.generateTexture('particle_spark', 12, 12);
 
-    // particle_flame (8x12 tear/flame shape)
+    // particle_flame (16x24 tear/flame shape)
     g.clear();
     g.fillStyle(0xff6600, 0.8);
-    g.fillTriangle(4, 0, 0, 10, 8, 10);
+    g.fillTriangle(8, 0, 0, 20, 16, 20);
     g.fillStyle(0xffaa00, 0.6);
-    g.fillTriangle(4, 2, 1.5, 9, 6.5, 9);
+    g.fillTriangle(8, 4, 3, 18, 13, 18);
     g.fillStyle(0xffdd44, 0.5);
-    g.fillTriangle(4, 4, 2.5, 8, 5.5, 8);
-    g.fillCircle(4, 10, 3);
-    g.generateTexture('particle_flame', 8, 12);
+    g.fillTriangle(8, 8, 5, 16, 11, 16);
+    g.fillCircle(8, 20, 6);
+    g.generateTexture('particle_flame', 16, 24);
 
-    // particle_ice (8x8 crystal/diamond)
+    // particle_ice (16x16 crystal/diamond)
     g.clear();
     g.fillStyle(0x88ccff, 0.7);
     g.fillPoints([
-      new Phaser.Geom.Point(4, 0),
-      new Phaser.Geom.Point(8, 4),
-      new Phaser.Geom.Point(4, 8),
-      new Phaser.Geom.Point(0, 4),
+      new Phaser.Geom.Point(8, 0),
+      new Phaser.Geom.Point(16, 8),
+      new Phaser.Geom.Point(8, 16),
+      new Phaser.Geom.Point(0, 8),
     ], true);
     g.fillStyle(0xaaddff, 0.5);
     g.fillPoints([
-      new Phaser.Geom.Point(4, 1),
-      new Phaser.Geom.Point(6, 4),
-      new Phaser.Geom.Point(4, 6),
-      new Phaser.Geom.Point(2, 4),
+      new Phaser.Geom.Point(8, 2),
+      new Phaser.Geom.Point(12, 8),
+      new Phaser.Geom.Point(8, 12),
+      new Phaser.Geom.Point(4, 8),
     ], true);
     g.fillStyle(0xffffff, 0.3);
-    g.fillCircle(3, 3, 1);
-    g.generateTexture('particle_ice', 8, 8);
+    g.fillCircle(6, 6, 2);
+    g.generateTexture('particle_ice', 16, 16);
 
-    // particle_arrow (4x12 thin arrow)
+    // particle_arrow (8x24 thin arrow)
     g.clear();
     g.fillStyle(0xcccccc, 0.9);
-    g.fillRect(1, 3, 2, 9);
+    g.fillRect(2, 6, 4, 18);
     g.fillStyle(0xeeeeee, 0.9);
-    g.fillTriangle(2, 0, 0, 3, 4, 3);
+    g.fillTriangle(4, 0, 0, 6, 8, 6);
     g.fillStyle(0x886644, 0.7);
-    g.fillRect(0, 10, 4, 2);
-    g.generateTexture('particle_arrow', 4, 12);
+    g.fillRect(0, 20, 8, 4);
+    g.generateTexture('particle_arrow', 8, 24);
 
-    // particle_slash (16x4 thin arc/line)
+    // particle_slash (32x8 thin arc/line)
     g.clear();
     g.fillStyle(0xffffff, 0.9);
-    g.fillRoundedRect(0, 1, 16, 2, 1);
+    g.fillRoundedRect(0, 2, 32, 4, 2);
     g.fillStyle(0xffffff, 0.5);
-    g.fillRoundedRect(1, 0, 14, 4, 2);
-    g.generateTexture('particle_slash', 16, 4);
+    g.fillRoundedRect(2, 0, 28, 8, 4);
+    g.generateTexture('particle_slash', 32, 8);
 
-    // particle_lightning (2x16 jagged line)
+    // particle_lightning (4x32 jagged line)
     g.clear();
-    g.lineStyle(2, 0xaaddff, 0.9);
+    g.lineStyle(4, 0xaaddff, 0.9);
     g.beginPath();
-    g.moveTo(1, 0);
-    g.lineTo(0, 4);
-    g.lineTo(2, 6);
-    g.lineTo(0, 10);
-    g.lineTo(2, 12);
-    g.lineTo(1, 16);
+    g.moveTo(2, 0);
+    g.lineTo(0, 8);
+    g.lineTo(4, 12);
+    g.lineTo(0, 20);
+    g.lineTo(4, 24);
+    g.lineTo(2, 32);
     g.strokePath();
-    g.generateTexture('particle_lightning', 2, 16);
+    g.generateTexture('particle_lightning', 4, 32);
 
-    // particle_smoke (12x12 soft fuzzy circle)
+    // particle_smoke (24x24 soft fuzzy circle)
     g.clear();
     g.fillStyle(0x888888, 0.15);
-    g.fillCircle(6, 6, 6);
+    g.fillCircle(12, 12, 12);
     g.fillStyle(0x999999, 0.25);
-    g.fillCircle(6, 6, 4.5);
+    g.fillCircle(12, 12, 9);
     g.fillStyle(0xaaaaaa, 0.3);
-    g.fillCircle(6, 6, 3);
+    g.fillCircle(12, 12, 6);
     g.fillStyle(0xbbbbbb, 0.2);
-    g.fillCircle(5, 5, 2);
-    g.generateTexture('particle_smoke', 12, 12);
+    g.fillCircle(10, 10, 4);
+    g.generateTexture('particle_smoke', 24, 24);
 
-    // particle_poison (6x6 green droplet)
+    // particle_poison (12x12 green droplet)
     g.clear();
     g.fillStyle(0x33cc33, 0.8);
-    g.fillTriangle(3, 0, 0, 4, 6, 4);
-    g.fillCircle(3, 4, 2.5);
+    g.fillTriangle(6, 0, 0, 8, 12, 8);
+    g.fillCircle(6, 8, 5);
     g.fillStyle(0x66ff66, 0.4);
-    g.fillCircle(2.5, 3.5, 1);
-    g.generateTexture('particle_poison', 6, 6);
+    g.fillCircle(5, 7, 2);
+    g.generateTexture('particle_poison', 12, 12);
 
-    // particle_star (10x10 4-pointed star)
+    // particle_star (20x20 4-pointed star)
     g.clear();
     g.fillStyle(0xffffff, 0.9);
     g.fillPoints([
-      new Phaser.Geom.Point(5, 0),
-      new Phaser.Geom.Point(6.2, 3.8),
-      new Phaser.Geom.Point(10, 5),
-      new Phaser.Geom.Point(6.2, 6.2),
-      new Phaser.Geom.Point(5, 10),
-      new Phaser.Geom.Point(3.8, 6.2),
-      new Phaser.Geom.Point(0, 5),
-      new Phaser.Geom.Point(3.8, 3.8),
+      new Phaser.Geom.Point(10, 0),
+      new Phaser.Geom.Point(12.4, 7.6),
+      new Phaser.Geom.Point(20, 10),
+      new Phaser.Geom.Point(12.4, 12.4),
+      new Phaser.Geom.Point(10, 20),
+      new Phaser.Geom.Point(7.6, 12.4),
+      new Phaser.Geom.Point(0, 10),
+      new Phaser.Geom.Point(7.6, 7.6),
     ], true);
     g.fillStyle(0xffffff, 0.5);
-    g.fillCircle(5, 5, 2);
-    g.generateTexture('particle_star', 10, 10);
+    g.fillCircle(10, 10, 4);
+    g.generateTexture('particle_star', 20, 20);
 
     g.destroy();
   }
