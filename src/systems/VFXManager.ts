@@ -26,7 +26,7 @@ export class VFXManager {
   // ── Event-driven VFX ────────────────────────────────────
 
   private setupEventListeners(): void {
-    // Combat damage — camera shake + flash on crits
+    // Combat damage — camera shake + flash on crits, scaled by damage ratio
     EventBus.on(GameEvents.COMBAT_DAMAGE, (data: {
       targetId: string;
       damage: number;
@@ -34,18 +34,25 @@ export class VFXManager {
       isCrit: boolean;
       isPlayerTarget?: boolean;
       damageType?: string;
+      targetMaxHP?: number;
     }) => {
       if (data.isDodged) return;
+      const maxHP = data.targetMaxHP || 100;
+      const ratio = data.damage / maxHP;
 
       if (data.isPlayerTarget) {
-        // Player taking damage
         if (data.isCrit) {
           this.cameraShake(150, 0.008);
         } else if (data.damage > 0) {
-          this.cameraShake(80, 0.003);
+          const intensity = Math.max(0.002, Math.min(0.006, ratio * 0.01));
+          const duration = Math.max(50, Math.min(120, 50 + ratio * 100));
+          this.cameraShake(duration, intensity);
         }
       } else {
-        // Player dealing damage
+        // Player dealing damage — scale with damage dealt
+        const intensity = Math.max(0.001, Math.min(0.005, ratio * 0.008));
+        const duration = Math.max(40, Math.min(100, 40 + ratio * 80));
+        this.cameraShake(duration, intensity);
         if (data.isCrit) {
           this.cameraFlash(50, 0.3, 0xffffff);
         }
@@ -183,13 +190,24 @@ export class VFXManager {
 
   // ── Hit Flash (Color Matrix) ────────────────────────────
 
-  hitFlash(sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image): void {
+  /** Flash a game object white for one frame */
+  hitFlash(target: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image | Phaser.GameObjects.Container): void {
     if (!this.isWebGL) return;
-    const fx = (sprite as any).preFX?.addColorMatrix();
+    if (target instanceof Phaser.GameObjects.Container) {
+      // Flash all sprite/image children in the container
+      const children = target.list as Phaser.GameObjects.GameObject[];
+      for (const child of children) {
+        if (child instanceof Phaser.GameObjects.Sprite || child instanceof Phaser.GameObjects.Image) {
+          this.hitFlash(child);
+        }
+      }
+      return;
+    }
+    const fx = (target as any).preFX?.addColorMatrix();
     if (!fx) return;
     fx.brightness(1.8);
-    this.scene.time.delayedCall(80, () => {
-      (sprite as any).preFX?.remove(fx);
+    this.scene.time.delayedCall(50, () => {
+      (target as any).preFX?.remove(fx);
     });
   }
 
@@ -272,10 +290,10 @@ export class VFXManager {
   }
 
   /** Hit sparks at a world position (player crit) */
-  hitSparks(x: number, y: number, count: number = 8): void {
+  hitSparks(x: number, y: number, count: number = 12): void {
     this.burstParticles(x, y, count, 'particle_spark',
       [0xffffff, 0xffffaa, 0xffd700],
-      { speedMin: 15, speedMax: 40, duration: 300 });
+      { speedMin: 20, speedMax: 55, scaleStart: 1.0, duration: 400 });
   }
 
   /** Gold particles (loot/gold pickup, monster kill) */

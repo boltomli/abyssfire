@@ -1021,6 +1021,7 @@ export class ZoneScene extends Phaser.Scene {
           EventBus.emit(GameEvents.COMBAT_DAMAGE, {
             targetId: 'player', damage: finalDmg, isDodged: false,
             isCrit: result.isCrit, isPlayerTarget: true,
+            targetMaxHP: this.player.maxHp,
           });
           if (this.player.hp <= 0) { this.player.die(); break; }
         }
@@ -1046,7 +1047,12 @@ export class ZoneScene extends Phaser.Scene {
           EventBus.emit(GameEvents.COMBAT_DAMAGE, {
             targetId: target.id, damage: result.damage, isDodged: false,
             isCrit: result.isCrit, isPlayerTarget: false,
+            targetMaxHP: target.maxHp,
           });
+          // Hit-freeze and flash
+          target.animator.triggerHitFreeze(35);
+          this.player.animator.triggerHitFreeze(35);
+          if (this.vfx) this.vfx.hitFlash(target.sprite);
           if (result.isCrit && this.vfx) {
             this.vfx.hitSparks(target.sprite.x, target.sprite.y - 16, 12);
           }
