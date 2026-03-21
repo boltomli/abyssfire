@@ -56,6 +56,7 @@ export class ZoneScene extends Phaser.Scene {
   saveSystem!: SaveSystem;
   private tileSprites: (Phaser.GameObjects.Image | null)[][] = [];
   private decorSprites: Map<string, Phaser.GameObjects.Image> = new Map();
+  private exitSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private campDecorSprites: Map<string, Phaser.GameObjects.Image | Phaser.GameObjects.Container> = new Map();
   private campParticles: Map<string, Phaser.GameObjects.Particles.ParticleEmitter> = new Map();
   private campDecorPositions: { col: number; row: number; type: string }[] = [];
@@ -84,6 +85,10 @@ export class ZoneScene extends Phaser.Scene {
   private combatDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private targetIndicator: Phaser.GameObjects.Ellipse | null = null;
   private currentTargetId: string | null = null;
+  private ambientDustEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+  private readonly contextMenuHandler = (e: Event): void => {
+    e.preventDefault();
+  };
 
   constructor() {
     super({ key: 'ZoneScene' });
@@ -98,6 +103,7 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   create(data: { classId: string; mapId: string; saveData?: SaveData; playerStats?: any }): void {
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     this.monsters = [];
     this.npcs = [];
     this.lootDrops = [];
@@ -124,8 +130,10 @@ export class ZoneScene extends Phaser.Scene {
     }
     this.visibleTiles = new Set();
     this.decorSprites = new Map();
+    this.exitSprites = new Map();
     this.campDecorSprites = new Map();
     this.campParticles = new Map();
+    this.ambientDustEmitter = null;
 
     // Create player — restore stats from zone transition if available
     const classData = AllClasses[data.classId] || AllClasses['warrior'];
@@ -255,100 +263,18 @@ export class ZoneScene extends Phaser.Scene {
       this.mobileControls = new MobileControlsSystem(this, this.player);
     }
 
-    this.game.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.rightButtonDown()) {
-        this.useTownPortal();
-        return;
-      }
-      if (this.player.hp <= 0) return;
-      const tile = worldToTile(pointer.worldX, pointer.worldY);
-
-      const loot = this.findLootAt(tile.col, tile.row);
-      if (loot) { this.pickupLoot(loot); return; }
-
-      const npc = this.findNPCAt(tile.col, tile.row);
-      if (npc && npc.isNearPlayer(this.player.tileCol, this.player.tileRow, 3)) {
-        this.interactNPC(npc);
-        return;
-      }
-
-      const monster = this.findMonsterAt(tile.col, tile.row);
-      if (monster && monster.isAlive()) {
-        this.player.attackTarget = monster.id;
-        const path = this.pathfinding.findPath(
-          Math.round(this.player.tileCol), Math.round(this.player.tileRow),
-          Math.round(monster.tileCol), Math.round(monster.tileRow),
-        );
-        this.player.setPath(path);
-        return;
-      }
-
-      const exit = this.findExitAt(tile.col, tile.row);
-      if (exit) {
-        this.changeZone(exit.targetMap, exit.targetCol, exit.targetRow);
-        return;
-      }
-
-      if (tile.col >= 0 && tile.col < this.mapData.cols && tile.row >= 0 && tile.row < this.mapData.rows) {
-        const path = this.pathfinding.findPath(
-          Math.round(this.player.tileCol), Math.round(this.player.tileRow),
-          tile.col, tile.row,
-        );
-        if (path.length > 0) {
-          this.player.setPath(path);
-          this.player.attackTarget = null;
-        }
-      }
-    });
+    this.game.canvas.addEventListener('contextmenu', this.contextMenuHandler);
+    this.input.on('pointerdown', this.handlePointerDown, this);
 
     if (!this.scene.isActive('UIScene')) {
       this.scene.launch('UIScene', { player: this.player, zone: this });
     } else {
       EventBus.emit('ui:refresh', { player: this.player, zone: this });
     }
-    EventBus.removeAllListeners(GameEvents.PLAYER_DIED);
-    EventBus.on(GameEvents.PLAYER_DIED, () => {
-      // VFXManager handles the fade-to-red via its own listener
-      // Brief white flash on death impact
-      if (this.vfx) {
-        this.vfx.cameraFlash(80, 0.6, 0xffffff);
-        this.vfx.deathBurst(this.player.sprite.x, this.player.sprite.y - 16, 0xcc2222);
-      }
-      // "YOU DIED" text overlay
-      const dp = this.screenPos(0.5, 0.4);
-      const deathText = this.add.text(dp.x, dp.y, '你已死亡', {
-        fontSize: fs(36), color: '#cc2222', fontFamily: '"Cinzel", serif',
-        fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(6 * DPR),
-      }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
-      this.tweens.add({
-        targets: deathText, alpha: 1, duration: 600, ease: 'Power2',
-      });
-      this.time.delayedCall(2000, () => {
-        this.tweens.add({
-          targets: deathText, alpha: 0, duration: 400, onComplete: () => deathText.destroy(),
-        });
-        const camp = this.campPositions[0];
-        this.player.respawnAtCamp(camp.col, camp.row);
-        this.cameras.main.fadeIn(500);
-      });
-    });
-
-    EventBus.removeAllListeners(GameEvents.PLAYER_LEVEL_UP);
-    EventBus.on(GameEvents.PLAYER_LEVEL_UP, (data: { level: number }) => {
-      this.showLevelUpBanner(data.level);
-    });
-
-    EventBus.removeAllListeners(GameEvents.QUEST_COMPLETED);
-    EventBus.on(GameEvents.QUEST_COMPLETED, (data: { questName: string }) => {
-      this.showQuestCompleteBanner(data.questName);
-    });
-
-    EventBus.removeAllListeners(GameEvents.UI_SKILL_CLICK);
-    EventBus.on(GameEvents.UI_SKILL_CLICK, (data: { index: number; skillId: string }) => {
-      this.tryUseSkill(data.skillId, this.time.now);
-    });
+    EventBus.on(GameEvents.PLAYER_DIED, this.handlePlayerDied, this);
+    EventBus.on(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp, this);
+    EventBus.on(GameEvents.QUEST_COMPLETED, this.handleQuestCompleted, this);
+    EventBus.on(GameEvents.UI_SKILL_CLICK, this.handleUiSkillClick, this);
 
     this.exploredZones.add(this.currentMapId);
     this.achievementSystem.update('explore', this.currentMapId);
@@ -361,6 +287,87 @@ export class ZoneScene extends Phaser.Scene {
 
     this.showZoneBanner();
     this.autoSave();
+  }
+
+  private handlePointerDown(pointer: Phaser.Input.Pointer): void {
+    if (pointer.rightButtonDown()) {
+      this.useTownPortal();
+      return;
+    }
+    if (this.player.hp <= 0) return;
+    const tile = worldToTile(pointer.worldX, pointer.worldY);
+
+    const loot = this.findLootAt(tile.col, tile.row);
+    if (loot) { this.pickupLoot(loot); return; }
+
+    const npc = this.findNPCAt(tile.col, tile.row);
+    if (npc && npc.isNearPlayer(this.player.tileCol, this.player.tileRow, 3)) {
+      this.interactNPC(npc);
+      return;
+    }
+
+    const monster = this.findMonsterAt(tile.col, tile.row);
+    if (monster && monster.isAlive()) {
+      this.player.attackTarget = monster.id;
+      const path = this.pathfinding.findPath(
+        Math.round(this.player.tileCol), Math.round(this.player.tileRow),
+        Math.round(monster.tileCol), Math.round(monster.tileRow),
+      );
+      this.player.setPath(path);
+      return;
+    }
+
+    const exit = this.findExitAt(tile.col, tile.row);
+    if (exit) {
+      this.changeZone(exit.targetMap, exit.targetCol, exit.targetRow);
+      return;
+    }
+
+    if (tile.col >= 0 && tile.col < this.mapData.cols && tile.row >= 0 && tile.row < this.mapData.rows) {
+      const path = this.pathfinding.findPath(
+        Math.round(this.player.tileCol), Math.round(this.player.tileRow),
+        tile.col, tile.row,
+      );
+      if (path.length > 0) {
+        this.player.setPath(path);
+        this.player.attackTarget = null;
+      }
+    }
+  }
+
+  private handlePlayerDied(): void {
+    if (this.vfx) {
+      this.vfx.cameraFlash(80, 0.6, 0xffffff);
+      this.vfx.deathBurst(this.player.sprite.x, this.player.sprite.y - 16, 0xcc2222);
+    }
+    const dp = this.screenPos(0.5, 0.4);
+    const deathText = this.add.text(dp.x, dp.y, '你已死亡', {
+      fontSize: fs(36), color: '#cc2222', fontFamily: '"Cinzel", serif',
+      fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(6 * DPR),
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(2500).setAlpha(0);
+    this.tweens.add({
+      targets: deathText, alpha: 1, duration: 600, ease: 'Power2',
+    });
+    this.time.delayedCall(2000, () => {
+      this.tweens.add({
+        targets: deathText, alpha: 0, duration: 400, onComplete: () => deathText.destroy(),
+      });
+      const camp = this.campPositions[0];
+      this.player.respawnAtCamp(camp.col, camp.row);
+      this.cameras.main.fadeIn(500);
+    });
+  }
+
+  private handlePlayerLevelUp(data: { level: number }): void {
+    this.showLevelUpBanner(data.level);
+  }
+
+  private handleQuestCompleted(data: { questName: string }): void {
+    this.showQuestCompleteBanner(data.questName);
+  }
+
+  private handleUiSkillClick(data: { index: number; skillId: string }): void {
+    this.tryUseSkill(data.skillId, this.time.now);
   }
 
   update(time: number, delta: number): void {
@@ -525,6 +532,7 @@ export class ZoneScene extends Phaser.Scene {
               if (this.textures.exists('exit_portal')) {
                 const portal = this.add.image(pos.x, pos.y - 8, 'exit_portal').setScale(1 / TEXTURE_SCALE);
                 portal.setDepth(pos.y + 2);
+                this.exitSprites.set(key, portal);
                 // Apply glow + bloom to exit portals
                 if (this.vfx) {
                   this.vfx.applyGlow(portal, 0x4488ff, 8, 0.1);
@@ -545,6 +553,11 @@ export class ZoneScene extends Phaser.Scene {
         if (sprite) {
           sprite.destroy();
           this.tileSprites[r][c] = null;
+        }
+        const exitSprite = this.exitSprites.get(key);
+        if (exitSprite) {
+          exitSprite.destroy();
+          this.exitSprites.delete(key);
         }
       }
     }
@@ -656,6 +669,7 @@ export class ZoneScene extends Phaser.Scene {
     };
     const tint = tints[this.currentMapId] || 0xccccaa;
 
+    this.ambientDustEmitter?.destroy();
     const emitter = this.add.particles(0, 0, dustKey, {
       x: { min: -GAME_WIDTH, max: GAME_WIDTH * 2 },
       y: { min: -GAME_HEIGHT, max: GAME_HEIGHT * 2 },
@@ -671,6 +685,7 @@ export class ZoneScene extends Phaser.Scene {
     });
     emitter.setScrollFactor(0.3);
     emitter.setDepth(998);
+    this.ambientDustEmitter = emitter;
   }
 
   private registerLightSources(): void {
@@ -1974,15 +1989,55 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    this.input.off('pointerdown', this.handlePointerDown, this);
+    EventBus.off(GameEvents.PLAYER_DIED, this.handlePlayerDied, this);
+    EventBus.off(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp, this);
+    EventBus.off(GameEvents.QUEST_COMPLETED, this.handleQuestCompleted, this);
+    EventBus.off(GameEvents.UI_SKILL_CLICK, this.handleUiSkillClick, this);
+    this.game.canvas.removeEventListener('contextmenu', this.contextMenuHandler);
+    if (this.combatDebounceTimer) {
+      clearTimeout(this.combatDebounceTimer);
+      this.combatDebounceTimer = null;
+    }
+    if (this.mobileControls) {
+      this.mobileControls.destroy();
+      this.mobileControls = null;
+    }
+    if (this.ambientDustEmitter) {
+      this.ambientDustEmitter.destroy();
+      this.ambientDustEmitter = null;
+    }
+    for (const row of this.tileSprites) {
+      for (const tile of row) tile?.destroy();
+    }
+    this.tileSprites = [];
+    this.visibleTiles.clear();
+    for (const sprite of this.decorSprites.values()) sprite.destroy();
+    this.decorSprites.clear();
+    for (const sprite of this.exitSprites.values()) sprite.destroy();
+    this.exitSprites.clear();
     for (const npc of this.npcs) npc.destroy();
     this.npcs = [];
+    for (const monster of this.monsters) {
+      if (monster.sprite.active) monster.sprite.destroy();
+    }
+    this.monsters = [];
+    if (this.player?.sprite?.active) this.player.sprite.destroy();
+    for (const loot of this.lootDrops) loot.sprite.destroy();
+    this.lootDrops = [];
+    for (const potion of this.potionDrops) potion.sprite.destroy();
+    this.potionDrops = [];
     for (const sprite of this.campDecorSprites.values()) sprite.destroy();
     this.campDecorSprites.clear();
     for (const emitter of this.campParticles.values()) emitter.destroy();
     this.campParticles.clear();
     if (this.targetIndicator) { this.targetIndicator.destroy(); this.targetIndicator = null; }
     if (this.vfx) this.vfx.destroy();
+    if (this.lighting) this.lighting.destroy();
     if (this.weather) this.weather.destroy();
     if (this.trails) this.trails.destroy();
+    for (const key of this.textures.getTextureKeys()) {
+      if (key.startsWith('tile_t_')) this.textures.remove(key);
+    }
   }
 }

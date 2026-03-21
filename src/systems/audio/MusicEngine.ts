@@ -329,10 +329,11 @@ export class MusicEngine {
    * Switch to a new zone.  Crossfades over 2 s.
    * Call this instead of setState when changing zones.
    */
-  setZone(ctx: AudioContext, destination: AudioNode, zoneId: string): void {
-    if (this.currentZone === zoneId) return;
+  setZone(ctx: AudioContext, destination: AudioNode, zoneId: string, force: boolean = false): void {
+    const zoneChanged = this.currentZone !== zoneId;
+    if (!force && !zoneChanged) return;
     this.currentZone = zoneId;
-    this.currentState = 'explore';
+    if (zoneChanged) this.currentState = 'explore';
     this._transition(ctx, destination, 2.0);
   }
 
@@ -385,6 +386,12 @@ export class MusicEngine {
   /** Adjust master volume (0–1). */
   setVolume(v: number): void {
     if (this.masterGain) this.masterGain.gain.value = v;
+  }
+
+  /** Rebuild the current zone + state layers after external buffers finish loading. */
+  refresh(ctx: AudioContext, destination: AudioNode): void {
+    if (!this.currentZone) return;
+    this._transition(ctx, destination, 1.0);
   }
 
   // ---------------------------------------------------------------------------

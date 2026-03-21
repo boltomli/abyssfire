@@ -33,6 +33,8 @@ export class MobileControlsSystem {
   private joystickContainer!: Phaser.GameObjects.Container;
   private joystickState: JoystickState = { active: false, pointerId: -1, dx: 0, dy: 0 };
   private joystickRadius: number;
+  private joystickCenterX = 0;
+  private joystickCenterY = 0;
 
   // Skill buttons
   private skillButtons: Phaser.GameObjects.Container[] = [];
@@ -47,6 +49,20 @@ export class MobileControlsSystem {
   // Responsive sizing
   private scale: number;
   private visible: boolean = true;
+  private readonly pointerMoveHandler = (pointer: Phaser.Input.Pointer): void => {
+    if (this.joystickState.active && pointer.id === this.joystickState.pointerId) {
+      this.updateJoystickThumb(pointer.x, pointer.y, this.joystickCenterX, this.joystickCenterY);
+    }
+  };
+  private readonly pointerUpHandler = (pointer: Phaser.Input.Pointer): void => {
+    if (pointer.id === this.joystickState.pointerId) {
+      this.joystickState.active = false;
+      this.joystickState.pointerId = -1;
+      this.joystickState.dx = 0;
+      this.joystickState.dy = 0;
+      this.joystickThumb.setPosition(this.joystickCenterX, this.joystickCenterY);
+    }
+  };
 
   constructor(scene: Phaser.Scene, player: Player) {
     this.scene = scene;
@@ -78,6 +94,8 @@ export class MobileControlsSystem {
     const r = this.joystickRadius;
     const cx = 30 * this.scale + r;
     const cy = GAME_HEIGHT - 30 * this.scale - r;
+    this.joystickCenterX = cx;
+    this.joystickCenterY = cy;
 
     this.joystickContainer = this.scene.add.container(0, 0).setDepth(5000).setScrollFactor(0);
 
@@ -103,21 +121,8 @@ export class MobileControlsSystem {
       this.updateJoystickThumb(pointer.x, pointer.y, cx, cy);
     });
 
-    this.scene.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.joystickState.active && pointer.id === this.joystickState.pointerId) {
-        this.updateJoystickThumb(pointer.x, pointer.y, cx, cy);
-      }
-    });
-
-    this.scene.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.id === this.joystickState.pointerId) {
-        this.joystickState.active = false;
-        this.joystickState.pointerId = -1;
-        this.joystickState.dx = 0;
-        this.joystickState.dy = 0;
-        this.joystickThumb.setPosition(cx, cy);
-      }
-    });
+    this.scene.input.on('pointermove', this.pointerMoveHandler);
+    this.scene.input.on('pointerup', this.pointerUpHandler);
   }
 
   private updateJoystickThumb(px: number, py: number, cx: number, cy: number): void {
@@ -291,6 +296,8 @@ export class MobileControlsSystem {
   }
 
   destroy(): void {
+    this.scene.input.off('pointermove', this.pointerMoveHandler);
+    this.scene.input.off('pointerup', this.pointerUpHandler);
     this.joystickContainer.destroy();
     this.autoCombatBtn.destroy();
     for (const btn of this.skillButtons) btn.destroy();

@@ -16,6 +16,57 @@ export class VFXManager {
   // Low HP vignette
   private dangerVignette: Phaser.FX.Vignette | null = null;
   private dangerActive = false;
+  private readonly handleCombatDamage = (data: {
+    targetId: string;
+    damage: number;
+    isDodged: boolean;
+    isCrit: boolean;
+    isPlayerTarget?: boolean;
+    damageType?: string;
+    targetMaxHP?: number;
+  }): void => {
+    if (data.isDodged) return;
+    const maxHP = data.targetMaxHP || 100;
+    const ratio = data.damage / maxHP;
+
+    if (data.isPlayerTarget) {
+      if (data.isCrit) {
+        this.cameraShake(150, 0.008);
+      } else if (data.damage > 0) {
+        const intensity = Math.max(0.002, Math.min(0.006, ratio * 0.01));
+        const duration = Math.max(50, Math.min(120, 50 + ratio * 100));
+        this.cameraShake(duration, intensity);
+      }
+    } else {
+      const intensity = Math.max(0.001, Math.min(0.005, ratio * 0.008));
+      const duration = Math.max(40, Math.min(100, 40 + ratio * 80));
+      this.cameraShake(duration, intensity);
+      if (data.isCrit) {
+        this.cameraFlash(50, 0.3, 0xffffff);
+      }
+    }
+  };
+  private readonly handlePlayerLevelUp = (): void => {
+    this.cameraFlash(200, 0.5, 0xffd700);
+    this.cameraShake(100, 0.004);
+    this.cameraZoomPulse(1.5, 200, 1.8);
+    this.scene.time.delayedCall(100, () => {
+      const cam = this.scene.cameras.main;
+      const wv = cam.worldView;
+      const centerX = wv.centerX;
+      const centerY = wv.centerY;
+      this.levelUpBurst(centerX, centerY);
+    });
+  };
+  private readonly handlePlayerDied = (): void => {
+    this.cameraFade(600, 80, 10, 10);
+  };
+  private readonly handleItemDropped = (data: { item: { quality: string } }): void => {
+    if (data.item.quality === 'legendary' || data.item.quality === 'set') {
+      this.cameraFlash(300, 0.6, 0xff8800);
+      this.cameraShake(250, 0.015);
+    }
+  };
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -26,66 +77,10 @@ export class VFXManager {
   // ── Event-driven VFX ────────────────────────────────────
 
   private setupEventListeners(): void {
-    // Combat damage — camera shake + flash on crits, scaled by damage ratio
-    EventBus.on(GameEvents.COMBAT_DAMAGE, (data: {
-      targetId: string;
-      damage: number;
-      isDodged: boolean;
-      isCrit: boolean;
-      isPlayerTarget?: boolean;
-      damageType?: string;
-      targetMaxHP?: number;
-    }) => {
-      if (data.isDodged) return;
-      const maxHP = data.targetMaxHP || 100;
-      const ratio = data.damage / maxHP;
-
-      if (data.isPlayerTarget) {
-        if (data.isCrit) {
-          this.cameraShake(150, 0.008);
-        } else if (data.damage > 0) {
-          const intensity = Math.max(0.002, Math.min(0.006, ratio * 0.01));
-          const duration = Math.max(50, Math.min(120, 50 + ratio * 100));
-          this.cameraShake(duration, intensity);
-        }
-      } else {
-        // Player dealing damage — scale with damage dealt
-        const intensity = Math.max(0.001, Math.min(0.005, ratio * 0.008));
-        const duration = Math.max(40, Math.min(100, 40 + ratio * 80));
-        this.cameraShake(duration, intensity);
-        if (data.isCrit) {
-          this.cameraFlash(50, 0.3, 0xffffff);
-        }
-      }
-    });
-
-    // Level up — gold flash + zoom pulse + celebration particles
-    EventBus.on(GameEvents.PLAYER_LEVEL_UP, () => {
-      this.cameraFlash(200, 0.5, 0xffd700);
-      this.cameraShake(100, 0.004);
-      this.cameraZoomPulse(1.5, 200, 1.8);
-      // Delayed particle burst (after flash starts)
-      this.scene.time.delayedCall(100, () => {
-        const cam = this.scene.cameras.main;
-        const wv = cam.worldView;
-        const centerX = wv.centerX;
-        const centerY = wv.centerY;
-        this.levelUpBurst(centerX, centerY);
-      });
-    });
-
-    // Player death — fade to red
-    EventBus.on(GameEvents.PLAYER_DIED, () => {
-      this.cameraFade(600, 80, 10, 10);
-    });
-
-    // Legendary/set item drop — orange flash + shake
-    EventBus.on(GameEvents.ITEM_DROPPED, (data: { item: { quality: string } }) => {
-      if (data.item.quality === 'legendary' || data.item.quality === 'set') {
-        this.cameraFlash(300, 0.6, 0xff8800);
-        this.cameraShake(250, 0.015);
-      }
-    });
+    EventBus.on(GameEvents.COMBAT_DAMAGE, this.handleCombatDamage);
+    EventBus.on(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp);
+    EventBus.on(GameEvents.PLAYER_DIED, this.handlePlayerDied);
+    EventBus.on(GameEvents.ITEM_DROPPED, this.handleItemDropped);
   }
 
   // ── Camera Effects ──────────────────────────────────────
@@ -356,9 +351,9 @@ export class VFXManager {
   // ── Cleanup ─────────────────────────────────────────────
 
   destroy(): void {
-    EventBus.off(GameEvents.COMBAT_DAMAGE);
-    EventBus.off(GameEvents.PLAYER_LEVEL_UP);
-    EventBus.off(GameEvents.PLAYER_DIED);
-    EventBus.off(GameEvents.ITEM_DROPPED);
+    EventBus.off(GameEvents.COMBAT_DAMAGE, this.handleCombatDamage);
+    EventBus.off(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp);
+    EventBus.off(GameEvents.PLAYER_DIED, this.handlePlayerDied);
+    EventBus.off(GameEvents.ITEM_DROPPED, this.handleItemDropped);
   }
 }

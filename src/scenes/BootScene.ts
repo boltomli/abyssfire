@@ -2,7 +2,6 @@ import Phaser from 'phaser';
 import { DPR } from '../config';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
 import { SkillEffectSystem } from '../systems/SkillEffectSystem';
-import { audioManager } from '../systems/audio/AudioManager';
 // import { buildFrameSizeRegistry } from '../graphics/sprites/types';
 // import { TEXTURE_SCALE } from '../config';
 
@@ -89,27 +88,8 @@ export class BootScene extends Phaser.Scene {
     // Tiles:        this.load.image('tile_grass', 'assets/tiles/tile_grass.png');
     // Tile variants: this.load.image('tile_grass_0', 'assets/tiles/tile_grass_0.png');
 
-    // ── Audio assets ─────────────────────
-    const zones = ['emerald_plains', 'twilight_forest', 'anvil_mountains', 'scorching_desert', 'abyss_rift'];
-    const musicStates = ['explore', 'combat', 'victory'];
-    for (const z of zones) {
-      for (const s of musicStates) {
-        this.load.audio(`bgm_${z}_${s}`, `assets/audio/bgm/${z}_${s}.mp3`);
-      }
-    }
-    // SFX external overrides — only load if files are actually shipped.
-    // Currently no SFX mp3 files exist; SFXEngine uses procedural synthesis.
-    // Uncomment when real SFX assets are added to public/assets/audio/sfx/.
-    // const sfxTypes = [
-    //   'hit', 'hit_heavy', 'crit', 'miss', 'block', 'player_hurt', 'monster_death', 'player_death',
-    //   'skill_melee', 'skill_fire', 'skill_ice', 'skill_lightning', 'skill_heal', 'skill_buff',
-    //   'loot_common', 'loot_magic', 'loot_rare', 'loot_legendary', 'equip', 'potion',
-    //   'click', 'panel_open', 'panel_close', 'error',
-    //   'zone_transition', 'quest_complete', 'levelup', 'npc_interact',
-    // ];
-    // for (const t of sfxTypes) {
-    //   this.load.audio(`sfx_${t}`, `assets/audio/sfx/${t}.mp3`);
-    // }
+    // BGM is lazy-loaded by AudioManager on zone entry.
+    // This keeps browser memory bounded instead of decoding all tracks at boot.
   }
 
   create(): void {
@@ -119,23 +99,6 @@ export class BootScene extends Phaser.Scene {
 
     // Skill effect particle textures
     SkillEffectSystem.generateTextures(this);
-
-    // Pass any successfully loaded audio files to the AudioLoader.
-    // Phaser's WebAudioSoundManager decodes audio during loading, so the cache
-    // contains AudioBuffer objects (not raw ArrayBuffers).
-    const loader = audioManager.getLoader();
-    const audioKeys = this.cache.audio.getKeys();
-    for (const key of audioKeys) {
-      const audioData = this.cache.audio.get(key);
-      if (audioData instanceof AudioBuffer) {
-        loader.storeBuffer(key, audioData);
-      } else if (audioData instanceof ArrayBuffer) {
-        const ctx = new AudioContext();
-        loader.decodeAudio(ctx, key, audioData).catch(() => {
-          console.debug(`[BootScene] Failed to decode audio: ${key}`);
-        });
-      }
-    }
 
     this.scene.start('MenuScene');
   }

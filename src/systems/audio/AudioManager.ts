@@ -36,6 +36,8 @@ const DEFAULT_SETTINGS: AudioSettings = {
 // ---------------------------------------------------------------------------
 
 export class AudioManager {
+  private static readonly MUSIC_STATES = ['explore', 'combat', 'victory'] as const;
+
   // Lazy-initialised — null until first getCtx() call.
   private ctx: AudioContext | null = null;
   private musicGain: GainNode | null = null;
@@ -46,6 +48,7 @@ export class AudioManager {
   private sfxEngine: SFXEngine;
 
   private settings: AudioSettings;
+  private zoneMusicRequestId = 0;
 
   constructor() {
     this.loader = new AudioLoader();
@@ -227,6 +230,7 @@ export class AudioManager {
       const ctx = this.getCtx();
       if (!this.musicGain) return;
       this.musicEngine.setZone(ctx, this.musicGain, payload.mapId);
+      void this.loadZoneMusicBuffers(payload.mapId, ctx);
     });
 
     EventBus.on(GameEvents.COMBAT_STATE_CHANGED, (payload: { inCombat?: boolean }) => {
@@ -302,6 +306,29 @@ export class AudioManager {
     } catch (_) {
       // Quota exceeded or private browsing — silently ignore.
     }
+  }
+
+  private async loadZoneMusicBuffers(zoneId: string, ctx: AudioContext): Promise<void> {
+    const requestId = ++this.zoneMusicRequestId;
+    const keepKeys = new Set(
+      AudioManager.MUSIC_STATES.map((state) => `bgm_${zoneId}_${state}`)
+    );
+
+    // Keep only the current zone's music in memory.
+    this.loader.releaseMatching((key) => key.startsWith('bgm_') && !keepKeys.has(key));
+
+    await Promise.all(
+      AudioManager.MUSIC_STATES.map(async (state) => {
+        const key = `bgm_${zoneId}_${state}`;
+        const url = `${import.meta.env.BASE_URL}assets/audio/bgm/${zoneId}_${state}.mp3`;
+        await this.loader.loadAudioFromUrl(ctx, key, url);
+      }),
+    );
+
+    if (requestId !== this.zoneMusicRequestId) return;
+    if (!this.ctx || !this.musicGain) return;
+
+    this.musicEngine.refresh(this.ctx, this.musicGain);
   }
 }
 

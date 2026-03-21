@@ -53,6 +53,14 @@ export class LightingSystem {
   private renderW = 0;
   private renderH = 0;
   private readonly texKey = 'lighting_overlay';
+  private readonly keydownHandler = (e: KeyboardEvent): void => {
+    if (e.code === 'Backquote') {
+      e.preventDefault();
+      this.debugVisible = !this.debugVisible;
+      if (this.debugEl) this.debugEl.style.display = this.debugVisible ? 'block' : 'none';
+      this.debugGfx.setVisible(this.debugVisible);
+    }
+  };
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -88,14 +96,7 @@ export class LightingSystem {
       whiteSpace: 'pre', display: 'none', lineHeight: '1.4',
     });
     document.body.appendChild(this.debugEl);
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Backquote') {
-        e.preventDefault();
-        this.debugVisible = !this.debugVisible;
-        if (this.debugEl) this.debugEl.style.display = this.debugVisible ? 'block' : 'none';
-        this.debugGfx.setVisible(this.debugVisible);
-      }
-    });
+    window.addEventListener('keydown', this.keydownHandler);
   }
 
   private resizeCanvas(camW: number, camH: number): void {
@@ -315,9 +316,13 @@ export class LightingSystem {
     this.debugGfx?.destroy();
     this.lights = [];
     this.flickerSeeds.clear();
+    window.removeEventListener('keydown', this.keydownHandler);
     if (this.debugEl) {
       this.debugEl.remove();
       this.debugEl = null;
+    }
+    if (this.scene.textures.exists(this.texKey)) {
+      this.scene.textures.remove(this.texKey);
     }
   }
 }

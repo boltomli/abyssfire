@@ -75,6 +75,7 @@ export class UIScene extends Phaser.Scene {
   private autoLootText!: Phaser.GameObjects.Text;
   private contextPopup: Phaser.GameObjects.Container | null = null;
   private audioPanel: Phaser.GameObjects.Container | null = null;
+  private audioPanelInputCleanup: Array<() => void> = [];
 
   constructor() {
     super({ key: 'UIScene' });
@@ -306,30 +307,45 @@ export class UIScene extends Phaser.Scene {
   }
 
   private setupEventListeners(): void {
-    EventBus.on(GameEvents.LOG_MESSAGE, (data: { text: string; type: string }) => {
-      this.logMessages.push(data);
-      if (this.logMessages.length > LOG_MAX_LINES) this.logMessages.shift();
-      this.updateLogDisplay();
-    });
-    EventBus.on(GameEvents.SHOP_OPEN, (data: { npcId: string; shopItems: string[]; type: string }) => {
-      this.openShop(data);
-    });
-    EventBus.on(GameEvents.NPC_INTERACT, (data: { npcName: string; dialogue: string; actions: { label: string; callback: () => void }[] }) => {
-      this.openDialogue(data);
-    });
-    EventBus.on(GameEvents.UI_TOGGLE_PANEL, (data: { panel: string }) => {
-      if (data.panel === 'inventory') this.toggleInventory();
-      if (data.panel === 'map') this.toggleMap();
-      if (data.panel === 'skills') this.toggleSkillTree();
-      if (data.panel === 'character') this.toggleCharacter();
-      if (data.panel === 'homestead') this.toggleHomestead();
-      if (data.panel === 'quest') this.toggleQuestLog();
-      if (data.panel === 'audio') this.toggleAudioSettings();
-    });
-    EventBus.on('ui:refresh', (data: { player: Player; zone: ZoneScene }) => {
-      this.player = data.player;
-      this.zone = data.zone;
-    });
+    EventBus.on(GameEvents.LOG_MESSAGE, this.handleLogMessage, this);
+    EventBus.on(GameEvents.SHOP_OPEN, this.handleShopOpen, this);
+    EventBus.on(GameEvents.NPC_INTERACT, this.handleNpcInteract, this);
+    EventBus.on(GameEvents.UI_TOGGLE_PANEL, this.handlePanelToggle, this);
+    EventBus.on('ui:refresh', this.handleUiRefresh, this);
+  }
+
+  private handleLogMessage(data: { text: string; type: string }): void {
+    this.logMessages.push(data);
+    if (this.logMessages.length > LOG_MAX_LINES) this.logMessages.shift();
+    this.updateLogDisplay();
+  }
+
+  private handleShopOpen(data: { npcId: string; shopItems: string[]; type: string }): void {
+    this.openShop(data);
+  }
+
+  private handleNpcInteract(data: { npcName: string; dialogue: string; actions: { label: string; callback: () => void }[] }): void {
+    this.openDialogue(data);
+  }
+
+  private handlePanelToggle(data: { panel: string }): void {
+    if (data.panel === 'inventory') this.toggleInventory();
+    if (data.panel === 'map') this.toggleMap();
+    if (data.panel === 'skills') this.toggleSkillTree();
+    if (data.panel === 'character') this.toggleCharacter();
+    if (data.panel === 'homestead') this.toggleHomestead();
+    if (data.panel === 'quest') this.toggleQuestLog();
+    if (data.panel === 'audio') this.toggleAudioSettings();
+  }
+
+  private handleUiRefresh(data: { player: Player; zone: ZoneScene }): void {
+    this.player = data.player;
+    this.zone = data.zone;
+  }
+
+  private cleanupAudioPanelInputHandlers(): void {
+    for (const cleanup of this.audioPanelInputCleanup) cleanup();
+    this.audioPanelInputCleanup = [];
   }
 
   private updateLogDisplay(): void {
@@ -1500,7 +1516,12 @@ export class UIScene extends Phaser.Scene {
 
   // --- Audio Settings Panel ---
   private toggleAudioSettings(): void {
-    if (this.audioPanel) { this.audioPanel.destroy(); this.audioPanel = null; return; }
+    if (this.audioPanel) {
+      this.cleanupAudioPanelInputHandlers();
+      this.audioPanel.destroy();
+      this.audioPanel = null;
+      return;
+    }
     this.closeAllPanels();
     const pw = px(360), ph = px(180), panelX = (W - pw) / 2, panelY = (H - ph) / 2;
     this.audioPanel = this.add.container(panelX, panelY).setDepth(4000);
@@ -1538,8 +1559,12 @@ export class UIScene extends Phaser.Scene {
         onVolume(v);
       };
       hitArea.on('pointerdown', (p: Phaser.Input.Pointer) => { dragging = true; updateSlider(p.x); });
-      this.input.on('pointermove', (p: Phaser.Input.Pointer) => { if (dragging) updateSlider(p.x); });
-      this.input.on('pointerup', () => { dragging = false; });
+      const pointerMoveHandler = (p: Phaser.Input.Pointer) => { if (dragging) updateSlider(p.x); };
+      const pointerUpHandler = () => { dragging = false; };
+      this.input.on('pointermove', pointerMoveHandler);
+      this.input.on('pointerup', pointerUpHandler);
+      this.audioPanelInputCleanup.push(() => this.input.off('pointermove', pointerMoveHandler));
+      this.audioPanelInputCleanup.push(() => this.input.off('pointerup', pointerUpHandler));
 
       // Mute button
       const muteBtn = this.add.text(sliderX + sliderW + px(42), y, muted ? '[静音]' : '[开启]', {
@@ -1591,7 +1616,11 @@ export class UIScene extends Phaser.Scene {
     if (this.charPanel) { this.charPanel.destroy(); this.charPanel = null; }
     if (this.homesteadPanel) { this.homesteadPanel.destroy(); this.homesteadPanel = null; }
     if (this.questLogPanel) { this.questLogPanel.destroy(); this.questLogPanel = null; }
-    if (this.audioPanel) { this.audioPanel.destroy(); this.audioPanel = null; }
+    if (this.audioPanel) {
+      this.cleanupAudioPanelInputHandlers();
+      this.audioPanel.destroy();
+      this.audioPanel = null;
+    }
     this.hideItemTooltip();
     this.hideContextPopup();
     this.closeDialogue();
@@ -1608,11 +1637,13 @@ export class UIScene extends Phaser.Scene {
   }
 
   shutdown(): void {
-    EventBus.removeAllListeners(GameEvents.LOG_MESSAGE);
-    EventBus.removeAllListeners(GameEvents.SHOP_OPEN);
-    EventBus.removeAllListeners(GameEvents.NPC_INTERACT);
-    EventBus.removeAllListeners(GameEvents.UI_TOGGLE_PANEL);
-    EventBus.removeAllListeners('ui:refresh');
+    this.closeAllPanels();
+    this.cleanupAudioPanelInputHandlers();
+    EventBus.off(GameEvents.LOG_MESSAGE, this.handleLogMessage, this);
+    EventBus.off(GameEvents.SHOP_OPEN, this.handleShopOpen, this);
+    EventBus.off(GameEvents.NPC_INTERACT, this.handleNpcInteract, this);
+    EventBus.off(GameEvents.UI_TOGGLE_PANEL, this.handlePanelToggle, this);
+    EventBus.off('ui:refresh', this.handleUiRefresh, this);
   }
 
   /** Interpolate HP bar color: green -> yellow -> red based on ratio */
