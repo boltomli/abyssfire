@@ -3,6 +3,7 @@ import { GAME_WIDTH, GAME_HEIGHT, DPR } from '../config';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import { getItemBase } from '../data/items/bases';
 import { AllMaps, MapOrder } from '../data/maps/index';
+import { getSkillManaCost, getSkillCooldown, getSkillDamageMultiplier, getSkillBuffValue, getSkillBuffDuration, getSkillAoeRadius } from '../systems/CombatSystem';
 import { NPCDefinitions } from '../data/npcs';
 import { audioManager } from '../systems/audio/AudioManager';
 import type { Player } from '../entities/Player';
@@ -232,9 +233,15 @@ export class UIScene extends Phaser.Scene {
       const container = this.add.container(x + slotSize / 2, y).setDepth(3000);
       const bg = this.add.rectangle(0, 0, slotSize, slotSize, 0x1a1a2e).setStrokeStyle(1.5 * DPR, 0x555566);
       container.add(bg);
-      container.add(this.add.text(0, px(-6), skill.name.substring(0, 2), {
-        fontSize: fs(16), color: '#e0d8cc', fontFamily: FONT, fontStyle: 'bold',
-      }).setOrigin(0.5));
+      const iconKey = `skill_icon_${skill.id}`;
+      if (this.textures.exists(iconKey)) {
+        container.add(this.add.image(0, px(-2), iconKey)
+          .setDisplaySize(slotSize - px(6), slotSize - px(6)));
+      } else {
+        container.add(this.add.text(0, px(-6), skill.name.substring(0, 2), {
+          fontSize: fs(16), color: '#e0d8cc', fontFamily: FONT, fontStyle: 'bold',
+        }).setOrigin(0.5));
+      }
       container.add(this.add.text(0, px(14), `${i + 1}`, {
         fontSize: fs(12), color: '#666680', fontFamily: FONT,
       }).setOrigin(0.5));
@@ -764,69 +771,435 @@ export class UIScene extends Phaser.Scene {
   }
 
   // --- Skill Tree Panel (K) ---
+  private skillTooltip: Phaser.GameObjects.Container | null = null;
+
   private toggleSkillTree(): void {
-    if (this.skillPanel) { this.skillPanel.destroy(); this.skillPanel = null; return; }
+    if (this.skillPanel) { this.skillPanel.destroy(); this.skillPanel = null; this.skillTooltip?.destroy(); this.skillTooltip = null; return; }
     this.closeAllPanels();
-    const pw = px(480), ph = px(420), panelX = (W - pw) / 2, panelY = px(10);
+
+    const TREE_NAMES: Record<string, string> = {
+      combat_master: '进攻大师', guardian: '守护者',
+      fire: '烈焰', frost: '寒冰', arcane: '奥术',
+      assassination: '暗杀', archery: '射术', traps: '陷阱',
+    };
+    const TREE_COLORS: Record<string, number> = {
+      combat_master: 0xd4a017, guardian: 0xf1c40f,
+      fire: 0xe74c3c, frost: 0x5dade2, arcane: 0x8e44ad,
+      assassination: 0x27ae60, archery: 0xcc8844, traps: 0xff6600,
+    };
+    const DMG_COLORS: Record<string, number> = {
+      physical: 0xcccccc, fire: 0xff6633, ice: 0x66ccff,
+      lightning: 0x5dade2, poison: 0x33cc33, arcane: 0xbb77ff,
+    };
+    const DMG_NAMES: Record<string, string> = {
+      physical: '物理', fire: '火焰', ice: '冰霜',
+      lightning: '闪电', poison: '毒素', arcane: '奥术',
+    };
+
+    const pw = px(660), ph = px(500);
+    const panelX = (W - pw) / 2, panelY = px(5);
     this.skillPanel = this.add.container(panelX, panelY).setDepth(4000);
     this.animatePanelOpen(this.skillPanel);
-    this.skillPanel.add(this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0x8e44ad));
-    this.skillPanel.add(this.add.text(pw / 2, px(10), `技能树 - ${this.player.classData.name}`, {
-      fontSize: fs(17), color: '#b08cce', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
-    this.skillPanel.add(this.add.text(pw / 2, px(28), `剩余技能点: ${this.player.freeSkillPoints}`, {
-      fontSize: fs(13), color: '#f1c40f', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
-    const closeBtn = this.add.text(pw - px(14), px(8), 'X', {
-      fontSize: fs(18), color: '#e74c3c', fontFamily: FONT,
-    }).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => this.toggleSkillTree());
-    this.skillPanel.add(closeBtn);
 
+    // Background with double border
+    const bg = this.add.graphics().setDepth(0);
+    bg.fillStyle(0x0d0d1a, 0.97);
+    bg.fillRoundedRect(0, 0, pw, ph, px(8));
+    bg.lineStyle(Math.round(2 * DPR), 0x8e44ad, 0.6);
+    bg.strokeRoundedRect(0, 0, pw, ph, px(8));
+    bg.lineStyle(Math.round(1 * DPR), 0x8e44ad, 0.15);
+    bg.strokeRoundedRect(px(4), px(4), pw - px(8), ph - px(8), px(6));
+    this.skillPanel.add(bg);
+
+    // Header bar with gradient
+    const headerH = px(50);
+    const headerBg = this.add.graphics();
+    headerBg.fillStyle(0x14142e, 1);
+    headerBg.fillRect(px(4), px(4), pw - px(8), headerH);
+    headerBg.fillGradientStyle(0x8e44ad, 0x8e44ad, 0x14142e, 0x14142e, 0.15, 0.15, 0, 0);
+    headerBg.fillRect(px(4), px(4), pw - px(8), headerH);
+    this.skillPanel.add(headerBg);
+
+    this.skillPanel.add(this.add.text(pw / 2, px(10), '技 能 树', {
+      fontSize: fs(20), color: '#d4b8e8', fontFamily: TITLE_FONT, fontStyle: 'bold',
+    }).setOrigin(0.5, 0));
+    const spColor = this.player.freeSkillPoints > 0 ? '#f1c40f' : '#555566';
+    this.skillPanel.add(this.add.text(pw / 2, px(33), `${this.player.classData.name}  ·  剩余技能点: ${this.player.freeSkillPoints}`, {
+      fontSize: fs(13), color: spColor, fontFamily: FONT,
+    }).setOrigin(0.5, 0));
+
+    // Close button
+    const closeBg = this.add.circle(pw - px(18), px(18), px(12), 0x331111, 0.6).setInteractive({ useHandCursor: true });
+    const closeX = this.add.text(pw - px(18), px(18), '\u2715', {
+      fontSize: fs(14), color: '#e74c3c', fontFamily: FONT, fontStyle: 'bold',
+    }).setOrigin(0.5);
+    closeBg.on('pointerdown', () => this.toggleSkillTree());
+    closeBg.on('pointerover', () => closeBg.setFillStyle(0x551111, 0.9));
+    closeBg.on('pointerout', () => closeBg.setFillStyle(0x331111, 0.6));
+    this.skillPanel.add(closeBg);
+    this.skillPanel.add(closeX);
+
+    // Gather trees
     const trees = new Map<string, typeof this.player.classData.skills>();
     for (const skill of this.player.classData.skills) {
       if (!trees.has(skill.tree)) trees.set(skill.tree, []);
       trees.get(skill.tree)!.push(skill);
     }
+
+    const treeCount = trees.size;
+    const margin = px(10);
+    const gapBetween = px(8);
+    const treeW = Math.floor((pw - margin * 2 - gapBetween * (treeCount - 1)) / treeCount);
+    const contentTop = headerH + px(12);
+    const contentH = ph - contentTop - px(20);
+
+    // Card dimensions
+    const cardW = treeW - px(12);
+    const cardH = px(68);
+    const iconSize = px(38);
+
+    // Tooltip builder
+    const showTooltip = (skill: typeof this.player.classData.skills[0], cardWorldX: number, cardWorldY: number) => {
+      this.skillTooltip?.destroy();
+      const level = this.player.getSkillLevel(skill.id);
+      const scaledDmg = getSkillDamageMultiplier(skill, level);
+      const scaledMana = getSkillManaCost(skill, level);
+      const scaledCD = getSkillCooldown(skill, level);
+      const scaledAoe = getSkillAoeRadius(skill, level);
+      const dmgName = DMG_NAMES[skill.damageType] ?? skill.damageType;
+
+      const lines: string[] = [];
+      lines.push(skill.description);
+      lines.push('');
+      if (skill.damageMultiplier > 0) lines.push(`伤害: ${Math.round(scaledDmg * 100)}% ${dmgName}`);
+      lines.push(`消耗: ${scaledMana} MP`);
+      lines.push(`冷却: ${(scaledCD / 1000).toFixed(1)}s`);
+      lines.push(`范围: ${skill.range}格`);
+      if (skill.aoe && scaledAoe > 0) lines.push(`AOE半径: ${scaledAoe.toFixed(1)}格`);
+      if (skill.critBonus) lines.push(`暴击加成: +${skill.critBonus}%`);
+      if (skill.stunDuration) lines.push(`眩晕: ${(skill.stunDuration / 1000).toFixed(1)}s`);
+      if (skill.buff) {
+        const buffVal = getSkillBuffValue(skill, level);
+        const buffDur = getSkillBuffDuration(skill, level);
+        lines.push(`增益: ${skill.buff.stat} +${Math.round(buffVal * 100)}% (${(buffDur / 1000).toFixed(0)}s)`);
+      }
+
+      // Synergy info
+      if (skill.synergies && skill.synergies.length > 0) {
+        lines.push('');
+        lines.push('─ 协同增益 ─');
+        for (const syn of skill.synergies) {
+          const synSkill = this.player.classData.skills.find(s => s.id === syn.skillId);
+          const synLv = this.player.getSkillLevel(syn.skillId);
+          if (synSkill) {
+            const bonus = Math.round(syn.damagePerLevel * synLv * 100);
+            lines.push(`${synSkill.name}: +${syn.damagePerLevel * 100}%/级 (当前+${bonus}%)`);
+          }
+        }
+      }
+
+      // Next level preview
+      if (level < skill.maxLevel) {
+        lines.push('');
+        lines.push(`─ 下一级 (Lv${level + 1}) ─`);
+        const nextDmg = getSkillDamageMultiplier(skill, level + 1);
+        const nextMana = getSkillManaCost(skill, level + 1);
+        const nextCD = getSkillCooldown(skill, level + 1);
+        if (skill.damageMultiplier > 0) {
+          const delta = Math.round((nextDmg - scaledDmg) * 100);
+          lines.push(`伤害: ${Math.round(nextDmg * 100)}% (+${delta}%)`);
+        }
+        if (nextMana !== scaledMana) lines.push(`消耗: ${nextMana} MP`);
+        if (nextCD !== scaledCD) lines.push(`冷却: ${(nextCD / 1000).toFixed(1)}s`);
+      }
+
+      const tipW = px(280);
+      const tipPad = px(12);
+      const wrapW = tipW - tipPad * 2;
+      const tipText = lines.join('\n');
+
+      // Measure header first
+      const tipHeader = this.add.text(0, 0, `${skill.name} (${skill.nameEn})`, {
+        fontSize: fs(12), color: '#f0e8d0', fontFamily: FONT, fontStyle: 'bold',
+        wordWrap: { width: wrapW, useAdvancedWrap: true },
+      });
+      const headerH = tipHeader.height;
+      const headerBottom = tipPad + headerH + px(6);
+
+      // Body text positioned below header
+      const textObj = this.add.text(tipPad, headerBottom, tipText, {
+        fontSize: fs(11), color: '#ddd8cc', fontFamily: FONT, lineSpacing: px(2),
+        wordWrap: { width: wrapW, useAdvancedWrap: true },
+      });
+
+      const finalH = textObj.y + textObj.height + tipPad;
+
+      // Position tooltip to the right of card, or left if not enough space
+      let tipX = cardWorldX + cardW + px(8);
+      if (tipX + tipW > W) tipX = cardWorldX - tipW - px(8);
+      let tipY = cardWorldY;
+      if (tipY + finalH > H) tipY = H - finalH - px(4);
+      if (tipY < px(4)) tipY = px(4);
+
+      this.skillTooltip = this.add.container(tipX, tipY).setDepth(5000);
+      const tipBg = this.add.graphics();
+      tipBg.fillStyle(0x0a0a18, 0.97);
+      tipBg.fillRoundedRect(0, 0, tipW, finalH, px(4));
+      tipBg.lineStyle(Math.round(2 * DPR), 0x8e44ad, 0.7);
+      tipBg.strokeRoundedRect(0, 0, tipW, finalH, px(4));
+      this.skillTooltip.add(tipBg);
+      tipHeader.setPosition(tipW / 2, tipPad).setOrigin(0.5, 0);
+      this.skillTooltip.add(tipHeader);
+      this.skillTooltip.add(textObj);
+    };
+
+    const hideTooltip = () => {
+      this.skillTooltip?.destroy();
+      this.skillTooltip = null;
+    };
+
     let treeIdx = 0;
-    const treeW = (pw - px(24)) / Math.max(trees.size, 1);
-    for (const [treeName, skills] of trees) {
-      const tx = px(12) + treeIdx * treeW;
-      this.skillPanel.add(this.add.text(tx + treeW / 2, px(46), treeName, {
-        fontSize: fs(13), color: '#c0934a', fontFamily: FONT,
+    for (const [treeName, treeSkills] of trees) {
+      const treeColor = TREE_COLORS[treeName] ?? 0x888888;
+      const treeColorHex = '#' + treeColor.toString(16).padStart(6, '0');
+      const tx = margin + treeIdx * (treeW + gapBetween);
+      const tcx = tx + treeW / 2;
+
+      // Tree column background
+      const colBg = this.add.graphics();
+      colBg.fillStyle(0x0e0e20, 0.6);
+      colBg.fillRoundedRect(tx, contentTop, treeW, contentH, px(5));
+      colBg.lineStyle(Math.round(1 * DPR), treeColor, 0.2);
+      colBg.strokeRoundedRect(tx, contentTop, treeW, contentH, px(5));
+      this.skillPanel.add(colBg);
+
+      // Tree header with accent
+      const treeHeaderY = contentTop + px(6);
+      const displayName = TREE_NAMES[treeName] ?? treeName;
+      this.skillPanel.add(this.add.text(tcx, treeHeaderY, `─ ${displayName} ─`, {
+        fontSize: fs(13), color: treeColorHex, fontFamily: FONT, fontStyle: 'bold',
       }).setOrigin(0.5, 0));
-      skills.forEach((skill, si) => {
-        const sy = px(65) + si * px(60);
+
+      // Sort skills by tier
+      const sortedSkills = [...treeSkills].sort((a, b) => a.tier - b.tier);
+      const skillStartY = treeHeaderY + px(26);
+      const cardGap = px(10);
+
+      sortedSkills.forEach((skill, si) => {
         const level = this.player.getSkillLevel(skill.id);
         const canLevel = this.player.freeSkillPoints > 0 && level < skill.maxLevel;
-        const slotBg = this.add.rectangle(tx + treeW / 2, sy + px(12), treeW - px(14), px(52), 0x1a1a2e)
-          .setStrokeStyle(Math.round(1 * DPR), canLevel ? 0xf1c40f : 0x333344).setOrigin(0.5, 0);
-        this.skillPanel!.add(slotBg);
-        this.skillPanel!.add(this.add.text(tx + treeW / 2, sy + px(16), skill.name, {
-          fontSize: fs(13), color: '#e0d8cc', fontFamily: FONT,
-        }).setOrigin(0.5, 0));
-        this.skillPanel!.add(this.add.text(tx + treeW / 2, sy + px(32), `Lv.${level}/${skill.maxLevel}  MP:${skill.manaCost}  CD:${(skill.cooldown / 1000).toFixed(1)}s`, {
-          fontSize: fs(12), color: '#888', fontFamily: FONT,
-        }).setOrigin(0.5, 0));
-        this.skillPanel!.add(this.add.text(tx + treeW / 2, sy + px(46), skill.description, {
-          fontSize: fs(11), color: '#666', fontFamily: FONT, wordWrap: { width: treeW - px(20) },
-        }).setOrigin(0.5, 0));
+        const isLearned = level > 0;
+        const isMaxed = level >= skill.maxLevel;
+        const cardX = tcx - cardW / 2;
+        const cardY = skillStartY + si * (cardH + cardGap);
+        const dmgColor = DMG_COLORS[skill.damageType] ?? 0xcccccc;
+        const dmgColorHex = '#' + dmgColor.toString(16).padStart(6, '0');
+
+        // Connection line to next card
+        if (si < sortedSkills.length - 1) {
+          const lineGfx = this.add.graphics();
+          const lineAlpha = isLearned ? 0.5 : 0.12;
+          lineGfx.lineStyle(Math.round(2 * DPR), treeColor, lineAlpha);
+          lineGfx.beginPath();
+          lineGfx.moveTo(tcx, cardY + cardH);
+          lineGfx.lineTo(tcx, cardY + cardH + cardGap);
+          lineGfx.strokePath();
+          // Arrow
+          const arrowY = cardY + cardH + cardGap - px(1);
+          lineGfx.fillStyle(treeColor, lineAlpha);
+          lineGfx.fillTriangle(tcx, arrowY + px(2), tcx - px(4), arrowY - px(4), tcx + px(4), arrowY - px(4));
+          this.skillPanel!.add(lineGfx);
+        }
+
+        // Card background - bordered rectangle
+        const cardGfx = this.add.graphics();
+        const cardBgColor = isLearned ? 0x161630 : 0x0c0c18;
+        const borderColor = isMaxed ? 0xf1c40f : (canLevel ? 0x44dd44 : (isLearned ? treeColor : 0x2a2a3e));
+        const borderAlpha = isLearned ? 0.9 : 0.4;
+        cardGfx.fillStyle(cardBgColor, 0.95);
+        cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(4));
+        cardGfx.lineStyle(Math.round(isMaxed ? 2 * DPR : 1.5 * DPR), borderColor, borderAlpha);
+        cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(4));
+        // Maxed golden glow
+        if (isMaxed) {
+          cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.15);
+          cardGfx.strokeRoundedRect(cardX - px(2), cardY - px(2), cardW + px(4), cardH + px(4), px(5));
+        }
+        this.skillPanel!.add(cardGfx);
+
+        // Icon area (left side of card) — square with dark background
+        const iconX = cardX + px(6);
+        const iconY = cardY + (cardH - iconSize) / 2;
+        const iconGfx = this.add.graphics();
+        iconGfx.fillStyle(0x080810, 0.9);
+        iconGfx.fillRoundedRect(iconX, iconY, iconSize, iconSize, px(3));
+        iconGfx.lineStyle(Math.round(1 * DPR), dmgColor, isLearned ? 0.6 : 0.2);
+        iconGfx.strokeRoundedRect(iconX, iconY, iconSize, iconSize, px(3));
+        this.skillPanel!.add(iconGfx);
+
+        // Skill icon texture
+        const iconKey = `skill_icon_${skill.id}`;
+        const iconCx = iconX + iconSize / 2;
+        const iconCy = iconY + iconSize / 2;
+        if (this.textures.exists(iconKey)) {
+          const iconImg = this.add.image(iconCx, iconCy, iconKey)
+            .setDisplaySize(iconSize - px(4), iconSize - px(4))
+            .setAlpha(isLearned ? 1 : 0.35);
+          this.skillPanel!.add(iconImg);
+        } else {
+          // Fallback: colored dot + tier
+          const dotR = px(6);
+          iconGfx.fillStyle(dmgColor, isLearned ? 0.6 : 0.15);
+          iconGfx.fillCircle(iconCx, iconCy, dotR);
+          this.skillPanel!.add(this.add.text(iconCx, iconCy, `T${skill.tier}`, {
+            fontSize: fs(11), color: isLearned ? '#ccc' : '#444', fontFamily: FONT, fontStyle: 'bold',
+          }).setOrigin(0.5));
+        }
+
+        // Text area (right side of card)
+        const textX = iconX + iconSize + px(8);
+        const textAreaW = cardW - iconSize - px(22);
+
+        // Skill name
+        const nameColor = isMaxed ? '#f1c40f' : (isLearned ? '#e8e0d0' : '#777788');
+        this.skillPanel!.add(this.add.text(textX, cardY + px(8), skill.name, {
+          fontSize: fs(13), color: nameColor, fontFamily: FONT, fontStyle: 'bold',
+        }));
+
+        // Level bar — visual Lv / maxLv
+        const lvBarX = textX;
+        const lvBarY = cardY + px(26);
+        const lvBarW = Math.min(textAreaW - px(40), px(80));
+        const lvBarH = px(6);
+        const lvBarBg = this.add.graphics();
+        lvBarBg.fillStyle(0x1a1a2e, 1);
+        lvBarBg.fillRoundedRect(lvBarX, lvBarY, lvBarW, lvBarH, px(2));
+        const fillW = skill.maxLevel > 0 ? Math.round((level / skill.maxLevel) * lvBarW) : 0;
+        if (fillW > 0) {
+          lvBarBg.fillStyle(isMaxed ? 0xf1c40f : treeColor, 0.8);
+          lvBarBg.fillRoundedRect(lvBarX, lvBarY, fillW, lvBarH, px(2));
+        }
+        lvBarBg.lineStyle(Math.round(1 * DPR), treeColor, 0.3);
+        lvBarBg.strokeRoundedRect(lvBarX, lvBarY, lvBarW, lvBarH, px(2));
+        this.skillPanel!.add(lvBarBg);
+
+        // Level text next to bar
+        const lvColor = isMaxed ? '#f1c40f' : (isLearned ? '#aaaacc' : '#555566');
+        this.skillPanel!.add(this.add.text(lvBarX + lvBarW + px(4), lvBarY - px(1), `${level}/${skill.maxLevel}`, {
+          fontSize: fs(10), color: lvColor, fontFamily: FONT,
+        }));
+
+        // Stats row: damage%, mana, cooldown
+        const scaledDmg = getSkillDamageMultiplier(skill, level);
+        const scaledMana = getSkillManaCost(skill, level);
+        const scaledCD = getSkillCooldown(skill, level);
+        const statsY = cardY + px(38);
+        let statsStr = '';
+        if (skill.damageMultiplier > 0) statsStr += `${Math.round(scaledDmg * 100)}%`;
+        statsStr += `  MP${scaledMana}  CD${(scaledCD / 1000).toFixed(1)}s`;
+        this.skillPanel!.add(this.add.text(textX, statsY, statsStr, {
+          fontSize: fs(10), color: '#666680', fontFamily: FONT,
+        }));
+
+        // Damage type label
+        const dmgName = DMG_NAMES[skill.damageType] ?? '';
+        if (dmgName) {
+          this.skillPanel!.add(this.add.text(textX, statsY + px(13), dmgName, {
+            fontSize: fs(9), color: dmgColorHex, fontFamily: FONT,
+          }));
+        }
+
+        // Synergy indicator dot
+        if (skill.synergies && skill.synergies.length > 0 && isLearned) {
+          let hasActiveSyn = false;
+          for (const syn of skill.synergies) {
+            if (this.player.getSkillLevel(syn.skillId) > 0) { hasActiveSyn = true; break; }
+          }
+          if (hasActiveSyn) {
+            const synDot = this.add.graphics();
+            synDot.fillStyle(0x7766cc, 0.8);
+            synDot.fillCircle(cardX + cardW - px(10), cardY + px(10), px(4));
+            this.skillPanel!.add(synDot);
+          }
+        }
+
+        // Hover area over entire card for tooltip
+        const cardHit = this.add.rectangle(cardX + cardW / 2, cardY + cardH / 2, cardW, cardH, 0x000000, 0)
+          .setInteractive({ useHandCursor: false });
+        cardHit.on('pointerover', () => {
+          cardGfx.clear();
+          cardGfx.fillStyle(isLearned ? 0x1c1c3e : 0x101020, 0.98);
+          cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(4));
+          cardGfx.lineStyle(Math.round(2 * DPR), borderColor, 1);
+          cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(4));
+          showTooltip(skill, panelX + cardX, panelY + cardY);
+        });
+        cardHit.on('pointerout', () => {
+          cardGfx.clear();
+          cardGfx.fillStyle(cardBgColor, 0.95);
+          cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(4));
+          cardGfx.lineStyle(Math.round(isMaxed ? 2 * DPR : 1.5 * DPR), borderColor, borderAlpha);
+          cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(4));
+          if (isMaxed) {
+            cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.15);
+            cardGfx.strokeRoundedRect(cardX - px(2), cardY - px(2), cardW + px(4), cardH + px(4), px(5));
+          }
+          hideTooltip();
+        });
+        this.skillPanel!.add(cardHit);
+
+        // + Button — bottom right of card (added AFTER cardHit so it sits on top and receives clicks)
         if (canLevel) {
-          const plusBtn = this.add.text(tx + treeW - px(14), sy + px(16), '+', {
-            fontSize: fs(18), color: '#27ae60', fontFamily: FONT, fontStyle: 'bold',
-          }).setInteractive({ useHandCursor: true });
-          plusBtn.on('pointerdown', () => {
+          const btnSize = px(20);
+          const btnX = cardX + cardW - btnSize - px(5);
+          const btnY = cardY + cardH - btnSize - px(5);
+          const btnBg = this.add.graphics();
+          btnBg.fillStyle(0x1a3a1a, 0.9);
+          btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+          btnBg.lineStyle(Math.round(1 * DPR), 0x27ae60, 0.8);
+          btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+          this.skillPanel!.add(btnBg);
+          const btnText = this.add.text(btnX + btnSize / 2, btnY + btnSize / 2, '+', {
+            fontSize: fs(14), color: '#27ae60', fontFamily: FONT, fontStyle: 'bold',
+          }).setOrigin(0.5);
+          this.skillPanel!.add(btnText);
+
+          const hitArea = this.add.rectangle(btnX + btnSize / 2, btnY + btnSize / 2, btnSize, btnSize, 0x000000, 0)
+            .setInteractive({ useHandCursor: true });
+          hitArea.on('pointerover', () => {
+            btnBg.clear();
+            btnBg.fillStyle(0x225522, 1);
+            btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+            btnBg.lineStyle(Math.round(2 * DPR), 0x44dd44, 1);
+            btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+            btnText.setColor('#44dd44');
+          });
+          hitArea.on('pointerout', () => {
+            btnBg.clear();
+            btnBg.fillStyle(0x1a3a1a, 0.9);
+            btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+            btnBg.lineStyle(Math.round(1 * DPR), 0x27ae60, 0.8);
+            btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+            btnText.setColor('#27ae60');
+          });
+          hitArea.on('pointerdown', () => {
             if (this.player.freeSkillPoints > 0) {
               this.player.freeSkillPoints--;
               this.player.skillLevels.set(skill.id, level + 1);
               this.toggleSkillTree(); this.toggleSkillTree();
             }
           });
-          this.skillPanel!.add(plusBtn);
+          this.skillPanel!.add(hitArea);
         }
       });
+
       treeIdx++;
     }
+
+    // Footer
+    this.skillPanel.add(this.add.text(pw / 2, ph - px(12), '按 K 关闭  ·  悬停查看详情', {
+      fontSize: fs(10), color: '#3a3a4a', fontFamily: FONT,
+    }).setOrigin(0.5));
   }
 
   // --- Character Stats Panel (C) ---
@@ -1632,6 +2005,7 @@ export class UIScene extends Phaser.Scene {
     if (this.shopPanel) { this.shopPanel.destroy(); this.shopPanel = null; }
     if (this.mapPanel) { this.mapPanel.destroy(); this.mapPanel = null; }
     if (this.skillPanel) { this.skillPanel.destroy(); this.skillPanel = null; }
+    if (this.skillTooltip) { this.skillTooltip.destroy(); this.skillTooltip = null; }
     if (this.charPanel) { this.charPanel.destroy(); this.charPanel = null; }
     if (this.homesteadPanel) { this.homesteadPanel.destroy(); this.homesteadPanel = null; }
     if (this.questLogPanel) { this.questLogPanel.destroy(); this.questLogPanel = null; }
@@ -1740,7 +2114,7 @@ export class UIScene extends Phaser.Scene {
           if (cdText.text !== nextText) cdText.setText(nextText);
         }
         // Fade overlay alpha based on cooldown progress
-        const totalCd = (skills[i].cooldown ?? 1) * 1000;
+        const totalCd = getSkillCooldown(skills[i], this.player.getSkillLevel(skills[i].id));
         this.skillCooldownOverlays[i].alpha = 0.3 + 0.4 * (remaining / totalCd);
       } else {
         if (cdText?.active && cdText.visible) cdText.setVisible(false);

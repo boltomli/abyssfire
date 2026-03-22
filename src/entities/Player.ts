@@ -4,6 +4,7 @@ import { cartToIso } from '../utils/IsometricUtils';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import type { ClassDefinition, SkillDefinition, Stats } from '../data/types';
 import type { CombatEntity, ActiveBuff } from '../systems/CombatSystem';
+import { getSkillManaCost, getSkillCooldown } from '../systems/CombatSystem';
 import { CharacterAnimator, getAnimConfig } from '../systems/CharacterAnimator';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
 
@@ -263,11 +264,12 @@ export class Player {
     return now >= cd;
   }
 
-  useSkill(id: string, now: number): void {
+  useSkill(id: string, now: number, level?: number): void {
     const skill = this.getSkill(id);
     if (!skill) return;
-    this.skillCooldowns.set(id, now + skill.cooldown);
-    this.mana = Math.max(0, this.mana - skill.manaCost);
+    const slevel = level ?? this.getSkillLevel(id);
+    this.skillCooldowns.set(id, now + getSkillCooldown(skill, slevel));
+    this.mana = Math.max(0, this.mana - getSkillManaCost(skill, slevel));
     EventBus.emit(GameEvents.SKILL_USED, { skillId: id, damageType: skill.damageType });
     EventBus.emit(GameEvents.PLAYER_MANA_CHANGED, { mana: this.mana, maxMana: this.maxMana });
   }

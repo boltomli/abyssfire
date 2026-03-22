@@ -139,6 +139,441 @@ export class SkillEffectSystem {
     g.destroy();
   }
 
+  // ── Generate 64×64 procedural skill icons ────────────────
+  static generateSkillIcons(scene: Phaser.Scene): void {
+    const S = 64; // icon size
+    const C = S / 2; // center
+    const g = scene.add.graphics();
+    const P = Phaser.Geom.Point;
+
+    const fillBg = (color: number, alpha = 0.35) => {
+      g.clear();
+      g.fillStyle(0x0c0c18, 1);
+      g.fillRect(0, 0, S, S);
+      g.fillStyle(color, alpha);
+      g.fillRect(0, 0, S, S);
+    };
+
+    // ═══ WARRIOR ═══
+
+    // slash — diagonal sword swing
+    fillBg(0x663322);
+    g.lineStyle(5, 0xcccccc, 0.9);
+    g.beginPath(); g.moveTo(14, 8); g.lineTo(50, 56); g.strokePath();
+    g.lineStyle(3, 0xffffff, 0.7);
+    g.beginPath(); g.moveTo(14, 8); g.lineTo(50, 56); g.strokePath();
+    g.fillStyle(0x8B4513, 1); g.fillRect(44, 48, 10, 6);
+    g.fillStyle(0xddaa44, 0.8); g.fillRect(38, 46, 8, 3);
+    // swing arc
+    g.lineStyle(2, 0xffdd88, 0.5);
+    g.beginPath();
+    g.arc(32, 32, 24, Phaser.Math.DegToRad(-120), Phaser.Math.DegToRad(-30), false);
+    g.strokePath();
+    g.generateTexture('skill_icon_slash', S, S);
+
+    // whirlwind — spinning blades circle
+    fillBg(0x553311);
+    for (let a = 0; a < 360; a += 60) {
+      const rad = Phaser.Math.DegToRad(a);
+      const x1 = C + Math.cos(rad) * 8, y1 = C + Math.sin(rad) * 8;
+      const x2 = C + Math.cos(rad) * 26, y2 = C + Math.sin(rad) * 26;
+      g.lineStyle(3, 0xccccdd, 0.8);
+      g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.strokePath();
+    }
+    g.lineStyle(2, 0xaabbcc, 0.4);
+    g.strokeCircle(C, C, 22);
+    g.lineStyle(1, 0xffffff, 0.3);
+    g.strokeCircle(C, C, 16);
+    g.fillStyle(0xffffff, 0.15);
+    g.fillCircle(C, C, 6);
+    g.generateTexture('skill_icon_whirlwind', S, S);
+
+    // war_stomp — ground impact shockwave
+    fillBg(0x664422);
+    g.fillStyle(0x886644, 0.8);
+    g.fillTriangle(C, 12, C - 14, 44, C + 14, 44); // boot/foot
+    g.fillStyle(0xaa8866, 0.6);
+    g.fillTriangle(C, 16, C - 10, 40, C + 10, 40);
+    // shockwave rings
+    g.lineStyle(2, 0xffcc44, 0.7);
+    g.strokeCircle(C, 48, 12);
+    g.lineStyle(1.5, 0xffcc44, 0.4);
+    g.strokeCircle(C, 48, 20);
+    g.lineStyle(1, 0xffcc44, 0.2);
+    g.strokeCircle(C, 48, 28);
+    // cracks
+    g.lineStyle(1.5, 0xddaa33, 0.6);
+    g.beginPath(); g.moveTo(C, 48); g.lineTo(C - 18, 58); g.strokePath();
+    g.beginPath(); g.moveTo(C, 48); g.lineTo(C + 16, 60); g.strokePath();
+    g.beginPath(); g.moveTo(C, 48); g.lineTo(C - 8, 62); g.strokePath();
+    g.generateTexture('skill_icon_war_stomp', S, S);
+
+    // shield_wall — a sturdy shield
+    fillBg(0x223366);
+    // Shield shape
+    g.fillStyle(0x556688, 0.9);
+    g.fillPoints([
+      new P(C, 8), new P(C + 20, 14), new P(C + 18, 42), new P(C, 56),
+      new P(C - 18, 42), new P(C - 20, 14),
+    ], true);
+    g.fillStyle(0x6688aa, 0.7);
+    g.fillPoints([
+      new P(C, 12), new P(C + 16, 17), new P(C + 14, 39), new P(C, 51),
+      new P(C - 14, 39), new P(C - 16, 17),
+    ], true);
+    // Cross emblem
+    g.fillStyle(0xddcc88, 0.8);
+    g.fillRect(C - 2, 18, 4, 28);
+    g.fillRect(C - 10, 28, 20, 4);
+    // Border
+    g.lineStyle(2, 0xccbb77, 0.6);
+    g.strokePoints([
+      new P(C, 8), new P(C + 20, 14), new P(C + 18, 42), new P(C, 56),
+      new P(C - 18, 42), new P(C - 20, 14), new P(C, 8),
+    ], false);
+    g.generateTexture('skill_icon_shield_wall', S, S);
+
+    // taunt_roar — roaring shockwave mouth
+    fillBg(0x662222);
+    // Head silhouette
+    g.fillStyle(0x996644, 0.7);
+    g.fillCircle(C, 26, 14);
+    g.fillStyle(0x886644, 0.6);
+    g.fillRect(C - 10, 26, 20, 14);
+    // Open mouth
+    g.fillStyle(0xcc3333, 0.8);
+    g.fillCircle(C, 36, 8);
+    g.fillStyle(0x440000, 0.9);
+    g.fillCircle(C, 36, 5);
+    // Sound waves
+    g.lineStyle(2, 0xff6644, 0.6);
+    g.beginPath(); g.arc(C, 36, 14, Phaser.Math.DegToRad(-40), Phaser.Math.DegToRad(40), false); g.strokePath();
+    g.lineStyle(1.5, 0xff6644, 0.4);
+    g.beginPath(); g.arc(C, 36, 20, Phaser.Math.DegToRad(-35), Phaser.Math.DegToRad(35), false); g.strokePath();
+    g.lineStyle(1, 0xff6644, 0.25);
+    g.beginPath(); g.arc(C, 36, 26, Phaser.Math.DegToRad(-30), Phaser.Math.DegToRad(30), false); g.strokePath();
+    g.generateTexture('skill_icon_taunt_roar', S, S);
+
+    // vengeful_wrath — burning fist
+    fillBg(0x662200);
+    // Fist
+    g.fillStyle(0xbb8855, 0.9);
+    g.fillRoundedRect(C - 10, 22, 20, 22, 4);
+    g.fillStyle(0xaa7744, 0.8);
+    g.fillRect(C - 8, 20, 5, 8);
+    g.fillRect(C - 2, 18, 5, 10);
+    g.fillRect(C + 4, 20, 5, 8);
+    g.fillStyle(0x997744, 0.7);
+    g.fillRect(C - 12, 30, 6, 14);
+    // Flames around fist
+    g.fillStyle(0xff4400, 0.6);
+    g.fillTriangle(C - 14, 24, C - 18, 8, C - 6, 20);
+    g.fillTriangle(C, 18, C - 4, 4, C + 4, 16);
+    g.fillTriangle(C + 14, 24, C + 18, 8, C + 6, 20);
+    g.fillStyle(0xffaa00, 0.5);
+    g.fillTriangle(C - 10, 22, C - 12, 12, C - 4, 20);
+    g.fillTriangle(C + 10, 22, C + 12, 12, C + 4, 20);
+    g.fillStyle(0xffdd44, 0.3);
+    g.fillTriangle(C, 20, C - 2, 10, C + 2, 18);
+    g.generateTexture('skill_icon_vengeful_wrath', S, S);
+
+    // ═══ MAGE ═══
+
+    // fireball — flaming orb
+    fillBg(0x441100);
+    g.fillStyle(0xff4400, 0.7);
+    g.fillCircle(C, C + 4, 16);
+    g.fillStyle(0xff6600, 0.8);
+    g.fillCircle(C, C + 4, 12);
+    g.fillStyle(0xffaa00, 0.9);
+    g.fillCircle(C, C + 4, 8);
+    g.fillStyle(0xffdd44, 0.8);
+    g.fillCircle(C, C + 2, 4);
+    // Flame trail
+    g.fillStyle(0xff4400, 0.5);
+    g.fillTriangle(C - 8, C - 4, C, C - 24, C + 8, C - 4);
+    g.fillStyle(0xff6600, 0.4);
+    g.fillTriangle(C - 4, C - 6, C + 3, C - 18, C + 6, C - 2);
+    g.fillStyle(0xffaa00, 0.3);
+    g.fillTriangle(C - 2, C - 8, C, C - 14, C + 2, C - 4);
+    g.generateTexture('skill_icon_fireball', S, S);
+
+    // meteor — falling rock with fire trail
+    fillBg(0x331100);
+    // Fire trail (upper left)
+    g.fillStyle(0xff4400, 0.4);
+    g.fillTriangle(8, 4, 22, 18, 12, 22);
+    g.fillStyle(0xff6600, 0.3);
+    g.fillTriangle(12, 8, 26, 22, 16, 26);
+    g.fillStyle(0xffaa00, 0.2);
+    g.fillTriangle(16, 12, 28, 26, 20, 28);
+    // Rock
+    g.fillStyle(0x664422, 0.9);
+    g.fillCircle(C + 4, C + 6, 14);
+    g.fillStyle(0x886644, 0.7);
+    g.fillCircle(C + 4, C + 6, 10);
+    g.fillStyle(0xaa8866, 0.4);
+    g.fillCircle(C + 2, C + 3, 6);
+    // Impact glow
+    g.fillStyle(0xff6600, 0.3);
+    g.fillCircle(C + 4, C + 6, 20);
+    g.generateTexture('skill_icon_meteor', S, S);
+
+    // blizzard — snowflakes and ice shards
+    fillBg(0x112244);
+    // Snowflakes (simple crosses at various positions)
+    const snowPositions = [[18, 14], [42, 18], [26, 38], [46, 44], [14, 48]];
+    for (const [sx, sy] of snowPositions) {
+      g.lineStyle(1.5, 0xccddff, 0.7);
+      g.beginPath(); g.moveTo(sx - 4, sy); g.lineTo(sx + 4, sy); g.strokePath();
+      g.beginPath(); g.moveTo(sx, sy - 4); g.lineTo(sx, sy + 4); g.strokePath();
+      g.beginPath(); g.moveTo(sx - 3, sy - 3); g.lineTo(sx + 3, sy + 3); g.strokePath();
+      g.beginPath(); g.moveTo(sx + 3, sy - 3); g.lineTo(sx - 3, sy + 3); g.strokePath();
+    }
+    // Wind lines
+    g.lineStyle(1, 0x88aadd, 0.3);
+    g.beginPath(); g.moveTo(4, 20); g.lineTo(60, 16); g.strokePath();
+    g.beginPath(); g.moveTo(8, 34); g.lineTo(56, 30); g.strokePath();
+    g.beginPath(); g.moveTo(2, 48); g.lineTo(58, 46); g.strokePath();
+    // Central ice shard
+    g.fillStyle(0x88ccff, 0.6);
+    g.fillPoints([new P(C, 10), new P(C + 6, C), new P(C, C + 10), new P(C - 6, C)], true);
+    g.generateTexture('skill_icon_blizzard', S, S);
+
+    // ice_armor — crystalline armor/shell
+    fillBg(0x113355);
+    // Body outline
+    g.fillStyle(0x88ccff, 0.5);
+    g.fillPoints([
+      new P(C, 6), new P(C + 18, 18), new P(C + 16, 46),
+      new P(C, 58), new P(C - 16, 46), new P(C - 18, 18),
+    ], true);
+    // Crystal facets
+    g.fillStyle(0xaaddff, 0.6);
+    g.fillPoints([new P(C, 10), new P(C + 12, 20), new P(C, 34), new P(C - 12, 20)], true);
+    g.fillStyle(0xcceeFF, 0.4);
+    g.fillPoints([new P(C, 14), new P(C + 8, 22), new P(C, 30), new P(C - 8, 22)], true);
+    // Shine
+    g.fillStyle(0xffffff, 0.4);
+    g.fillCircle(C - 4, 18, 3);
+    // Border
+    g.lineStyle(1.5, 0x88ccff, 0.6);
+    g.strokePoints([
+      new P(C, 6), new P(C + 18, 18), new P(C + 16, 46),
+      new P(C, 58), new P(C - 16, 46), new P(C - 18, 18), new P(C, 6),
+    ], false);
+    g.generateTexture('skill_icon_ice_armor', S, S);
+
+    // chain_lightning — branching lightning bolts
+    fillBg(0x112255);
+    // Main bolt
+    g.lineStyle(3, 0x88aaff, 0.9);
+    g.beginPath();
+    g.moveTo(12, 6); g.lineTo(20, 18); g.lineTo(14, 24);
+    g.lineTo(28, 36); g.lineTo(22, 40); g.lineTo(34, 54);
+    g.strokePath();
+    g.lineStyle(1.5, 0xccddff, 0.6);
+    g.beginPath();
+    g.moveTo(12, 6); g.lineTo(20, 18); g.lineTo(14, 24);
+    g.lineTo(28, 36); g.lineTo(22, 40); g.lineTo(34, 54);
+    g.strokePath();
+    // Branch 1
+    g.lineStyle(2, 0x88aaff, 0.6);
+    g.beginPath(); g.moveTo(20, 18); g.lineTo(36, 22); g.lineTo(48, 16); g.strokePath();
+    // Branch 2
+    g.beginPath(); g.moveTo(28, 36); g.lineTo(42, 40); g.lineTo(52, 48); g.strokePath();
+    // Glow at origin
+    g.fillStyle(0xaaccff, 0.3);
+    g.fillCircle(12, 6, 6);
+    g.generateTexture('skill_icon_chain_lightning', S, S);
+
+    // mana_shield — arcane bubble shield
+    fillBg(0x220044);
+    // Outer shield circle
+    g.lineStyle(3, 0x9966ff, 0.6);
+    g.strokeCircle(C, C, 24);
+    g.lineStyle(1.5, 0xbb88ff, 0.4);
+    g.strokeCircle(C, C, 20);
+    // Inner glow
+    g.fillStyle(0x6633cc, 0.25);
+    g.fillCircle(C, C, 22);
+    g.fillStyle(0x8855ff, 0.15);
+    g.fillCircle(C, C, 16);
+    // Rune/symbol inside — simple star
+    g.lineStyle(1.5, 0xcc99ff, 0.7);
+    const runeR = 10;
+    for (let i = 0; i < 5; i++) {
+      const a1 = Phaser.Math.DegToRad(i * 72 - 90);
+      const a2 = Phaser.Math.DegToRad(((i + 2) % 5) * 72 - 90);
+      g.beginPath();
+      g.moveTo(C + Math.cos(a1) * runeR, C + Math.sin(a1) * runeR);
+      g.lineTo(C + Math.cos(a2) * runeR, C + Math.sin(a2) * runeR);
+      g.strokePath();
+    }
+    // Sparkles
+    g.fillStyle(0xddbbff, 0.6);
+    g.fillCircle(C - 8, C - 12, 2);
+    g.fillCircle(C + 10, C - 6, 1.5);
+    g.fillCircle(C + 6, C + 14, 2);
+    g.generateTexture('skill_icon_mana_shield', S, S);
+
+    // ═══ ROGUE ═══
+
+    // backstab — dagger pointing down
+    fillBg(0x222233);
+    // Blade
+    g.fillStyle(0xccccdd, 0.9);
+    g.fillPoints([new P(C, 8), new P(C + 5, 36), new P(C, 40), new P(C - 5, 36)], true);
+    g.fillStyle(0xeeeeff, 0.5);
+    g.fillPoints([new P(C, 10), new P(C + 2, 34), new P(C, 38), new P(C - 2, 34)], true);
+    // Guard
+    g.fillStyle(0xddaa44, 0.9);
+    g.fillRect(C - 10, 38, 20, 4);
+    // Handle
+    g.fillStyle(0x664422, 0.9);
+    g.fillRect(C - 3, 42, 6, 14);
+    g.fillStyle(0x553311, 0.7);
+    g.fillRect(C - 4, 44, 8, 3);
+    g.fillRect(C - 4, 50, 8, 3);
+    // Blood drops
+    g.fillStyle(0xcc2222, 0.6);
+    g.fillCircle(C + 8, 20, 2.5);
+    g.fillCircle(C + 12, 26, 2);
+    g.fillCircle(C + 6, 30, 1.5);
+    g.generateTexture('skill_icon_backstab', S, S);
+
+    // poison_blade — dripping green blade
+    fillBg(0x113311);
+    // Blade (angled)
+    g.fillStyle(0x99aa88, 0.9);
+    g.fillPoints([new P(18, 8), new P(24, 10), new P(46, 40), new P(42, 44)], true);
+    g.fillStyle(0xbbcc99, 0.5);
+    g.fillPoints([new P(20, 10), new P(23, 12), new P(44, 40), new P(42, 42)], true);
+    // Guard + handle
+    g.fillStyle(0x556633, 0.9);
+    g.fillRect(40, 40, 14, 4);
+    g.fillStyle(0x664422, 0.9);
+    g.fillRoundedRect(46, 44, 6, 12, 2);
+    // Poison drips
+    g.fillStyle(0x33cc33, 0.8);
+    g.fillCircle(28, 24, 3);
+    g.fillTriangle(28, 21, 26, 24, 30, 24);
+    g.fillStyle(0x44dd44, 0.7);
+    g.fillCircle(34, 34, 2.5);
+    g.fillTriangle(34, 31, 32, 34, 36, 34);
+    g.fillStyle(0x22bb22, 0.6);
+    g.fillCircle(24, 36, 2);
+    g.fillCircle(30, 44, 2.5);
+    g.generateTexture('skill_icon_poison_blade', S, S);
+
+    // vanish — shadow cloak / smoke
+    fillBg(0x111122);
+    // Dark figure silhouette
+    g.fillStyle(0x222244, 0.7);
+    g.fillCircle(C, 18, 10); // head
+    g.fillTriangle(C - 16, 56, C, 22, C + 16, 56); // cloak
+    g.fillStyle(0x333355, 0.5);
+    g.fillCircle(C, 18, 8);
+    g.fillTriangle(C - 12, 52, C, 24, C + 12, 52);
+    // Fade/dissolve particles
+    g.fillStyle(0x555588, 0.4);
+    g.fillCircle(C - 14, 32, 4);
+    g.fillCircle(C + 16, 28, 3);
+    g.fillCircle(C - 10, 46, 3.5);
+    g.fillCircle(C + 12, 44, 4);
+    g.fillStyle(0x444477, 0.25);
+    g.fillCircle(C - 20, 38, 5);
+    g.fillCircle(C + 20, 36, 4.5);
+    g.fillCircle(C, 52, 3);
+    // Glowing eyes
+    g.fillStyle(0xccaaff, 0.8);
+    g.fillCircle(C - 4, 17, 1.5);
+    g.fillCircle(C + 4, 17, 1.5);
+    g.generateTexture('skill_icon_vanish', S, S);
+
+    // multishot — three arrows fanning out
+    fillBg(0x222222);
+    // Central arrow
+    g.fillStyle(0xcccccc, 0.9);
+    g.fillRect(C - 1.5, 14, 3, 30);
+    g.fillStyle(0xeeeeee, 0.9);
+    g.fillTriangle(C, 8, C - 4, 16, C + 4, 16);
+    g.fillStyle(0x886644, 0.7);
+    g.fillRect(C - 3, 42, 6, 4);
+    // Left arrow
+    g.fillStyle(0xbbbbbb, 0.7);
+    const la = Phaser.Math.DegToRad(-15);
+    g.save?.();
+    g.fillRect(12, 18, 3, 26);
+    g.fillTriangle(13, 12, 8, 20, 18, 20);
+    g.fillStyle(0x886644, 0.5);
+    g.fillRect(10, 42, 6, 4);
+    // Right arrow
+    g.fillStyle(0xbbbbbb, 0.7);
+    g.fillRect(48, 18, 3, 26);
+    g.fillTriangle(49, 12, 44, 20, 54, 20);
+    g.fillStyle(0x886644, 0.5);
+    g.fillRect(46, 42, 6, 4);
+    g.generateTexture('skill_icon_multishot', S, S);
+
+    // arrow_rain — arrows falling from sky
+    fillBg(0x1a1a22);
+    // Sky cloud/arc
+    g.fillStyle(0x334455, 0.5);
+    g.fillCircle(C - 8, 10, 10);
+    g.fillCircle(C + 8, 10, 10);
+    g.fillCircle(C, 6, 10);
+    // Falling arrows
+    const arrowXs = [14, 26, 38, 50];
+    for (const ax of arrowXs) {
+      const ay = 18 + (ax % 7) * 3;
+      g.fillStyle(0xbbbbcc, 0.8);
+      g.fillRect(ax - 1, ay, 2, 22);
+      g.fillStyle(0xddddee, 0.9);
+      g.fillTriangle(ax, ay + 22, ax - 3, ay + 16, ax + 3, ay + 16);
+      g.fillStyle(0x886644, 0.5);
+      g.fillRect(ax - 2, ay, 4, 3);
+    }
+    // Impact marks on ground
+    g.lineStyle(1, 0xffcc44, 0.4);
+    g.strokeCircle(20, 56, 4);
+    g.strokeCircle(44, 54, 3);
+    g.generateTexture('skill_icon_arrow_rain', S, S);
+
+    // explosive_trap — bomb/mine
+    fillBg(0x331111);
+    // Mine body
+    g.fillStyle(0x664444, 0.9);
+    g.fillCircle(C, C + 4, 14);
+    g.fillStyle(0x885555, 0.7);
+    g.fillCircle(C, C + 4, 10);
+    // Danger symbol (skull-like: two dots + line)
+    g.fillStyle(0xff4444, 0.8);
+    g.fillCircle(C - 5, C + 2, 2.5);
+    g.fillCircle(C + 5, C + 2, 2.5);
+    g.fillRect(C - 4, C + 7, 8, 2);
+    // Fuse on top
+    g.lineStyle(2, 0xaa8844, 0.8);
+    g.beginPath(); g.moveTo(C, C - 10); g.lineTo(C + 6, C - 18); g.strokePath();
+    // Spark at fuse tip
+    g.fillStyle(0xffdd44, 0.9);
+    g.fillCircle(C + 6, C - 18, 3);
+    g.fillStyle(0xffaa00, 0.5);
+    g.fillCircle(C + 6, C - 18, 5);
+    // Explosion lines
+    g.lineStyle(1.5, 0xff6633, 0.4);
+    for (let a = 0; a < 360; a += 45) {
+      const rad = Phaser.Math.DegToRad(a);
+      g.beginPath();
+      g.moveTo(C + Math.cos(rad) * 18, C + 4 + Math.sin(rad) * 18);
+      g.lineTo(C + Math.cos(rad) * 26, C + 4 + Math.sin(rad) * 26);
+      g.strokePath();
+    }
+    g.generateTexture('skill_icon_explosive_trap', S, S);
+
+    g.destroy();
+  }
+
   // ── Play a skill effect ──────────────────────────────────
   play(
     skillId: string,
@@ -153,6 +588,9 @@ export class SkillEffectSystem {
       case 'slash': this.effectSlash(casterX, casterY); break;
       case 'whirlwind': this.effectWhirlwind(casterX, casterY); break;
       case 'shield_wall': this.effectShieldWall(casterX, casterY); break;
+      case 'war_stomp': this.effectWarStomp(casterX, casterY); break;
+      case 'taunt_roar': this.effectTauntRoar(casterX, casterY); break;
+      case 'vengeful_wrath': this.effectVengefulWrath(casterX, casterY); break;
       // Mage
       case 'fireball': this.effectFireball(casterX, casterY, targetX ?? casterX, targetY ?? casterY); break;
       case 'blizzard': this.effectBlizzard(targetX ?? casterX, targetY ?? casterY); break;
@@ -173,136 +611,97 @@ export class SkillEffectSystem {
     }
   }
 
+  // ── Helpers ────────────────────────────────────────────────
+
+  private burst(x: number, y: number, tex: string, tint: number, count: number, cfg: {
+    speed?: number; lifespan?: number; scale?: { start: number; end: number };
+    alpha?: { start: number; end: number }; blend?: Phaser.BlendModes | string;
+    gravityY?: number; angle?: { min: number; max: number };
+  } = {}): Phaser.GameObjects.Particles.ParticleEmitter {
+    const e = this.scene.add.particles(x, y, tex, {
+      tint,
+      speed: cfg.speed ?? 120,
+      lifespan: cfg.lifespan ?? 500,
+      scale: cfg.scale ?? { start: 0.8, end: 0 },
+      alpha: cfg.alpha ?? { start: 1, end: 0 },
+      blendMode: (cfg.blend as Phaser.BlendModes) ?? 'ADD',
+      gravityY: cfg.gravityY ?? 0,
+      angle: cfg.angle ?? { min: 0, max: 360 },
+      emitting: false,
+    }).setDepth(EFFECT_DEPTH);
+    e.explode(count);
+    this.scene.time.delayedCall((cfg.lifespan ?? 500) + 200, () => e.destroy());
+    return e;
+  }
+
+  private flash(x: number, y: number, color: number, radius: number, dur = 200): void {
+    const f = this.scene.add.circle(x, y, radius, color, 0.8).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    this.scene.tweens.add({ targets: f, scaleX: 3, scaleY: 3, alpha: 0, duration: dur, ease: 'Power3', onComplete: () => f.destroy() });
+  }
+
+  private ring(x: number, y: number, color: number, startR: number, endScale: number, dur: number, lineW = 3): void {
+    const g = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    g.lineStyle(lineW, color, 0.9);
+    g.strokeCircle(x, y, startR);
+    this.scene.tweens.add({ targets: g, scaleX: endScale, scaleY: endScale * 0.6, alpha: 0, duration: dur, ease: 'Power2', onComplete: () => g.destroy() });
+  }
+
   // ── Play basic attack effect ─────────────────────────────
   playAttack(attackerX: number, attackerY: number, targetX: number, targetY: number, isPlayer: boolean): void {
     const x = targetX;
     const y = targetY - 16;
-    const angle = Math.atan2(targetY - attackerY, targetX - attackerX);
-    const scale = isPlayer ? 1 : 0.7;
+    const angle = Phaser.Math.RadToDeg(Math.atan2(targetY - attackerY, targetX - attackerX));
+    const s = isPlayer ? 1 : 0.7;
 
-    // Slash line
-    const slash = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
-    slash.lineStyle(3 * scale, 0xffffff, 0.9);
+    // White slash line
+    const slash = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    slash.lineStyle(4 * s, 0xffffff, 1);
     slash.beginPath();
-    const len = 20 * scale;
-    slash.moveTo(x - Math.cos(angle) * len, y - Math.sin(angle) * len);
-    slash.lineTo(x + Math.cos(angle) * len, y + Math.sin(angle) * len);
+    const len = 24 * s;
+    const rad = Phaser.Math.DegToRad(angle);
+    slash.moveTo(x - Math.cos(rad) * len, y - Math.sin(rad) * len);
+    slash.lineTo(x + Math.cos(rad) * len, y + Math.sin(rad) * len);
     slash.strokePath();
+    this.scene.tweens.add({ targets: slash, alpha: 0, duration: 250, ease: 'Power2', onComplete: () => slash.destroy() });
 
-    this.scene.tweens.add({
-      targets: slash,
-      alpha: 0,
-      duration: 200,
-      ease: 'Power2',
-      onComplete: () => slash.destroy(),
-    });
-
-    // Small spark burst
-    for (let i = 0; i < 4; i++) {
-      const spark = this.scene.add.image(x, y, 'particle_spark')
-        .setDepth(EFFECT_DEPTH).setTint(0xffffaa).setScale(0.8 * scale).setAlpha(0.9);
-      const a = Math.random() * Math.PI * 2;
-      const dist = 8 + Math.random() * 12;
-      this.scene.tweens.add({
-        targets: spark,
-        x: x + Math.cos(a) * dist,
-        y: y + Math.sin(a) * dist,
-        alpha: 0,
-        scale: 0.2,
-        duration: 200,
-        ease: 'Power2',
-        onComplete: () => spark.destroy(),
-      });
-    }
+    this.burst(x, y, 'particle_spark', 0xffffaa, 8, { speed: 100 * s, lifespan: 300, scale: { start: 1 * s, end: 0 } });
   }
 
   // ── Play monster attack effect ───────────────────────────
   playMonsterAttack(x: number, y: number): void {
     const cy = y - 16;
-
-    // 3 parallel claw marks
-    const claw = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
+    const claw = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
     for (let i = -1; i <= 1; i++) {
-      const ox = i * 6;
-      claw.lineStyle(2, 0xe74c3c, 0.9);
+      claw.lineStyle(3, 0xff4444, 0.9);
       claw.beginPath();
-      claw.moveTo(x + ox - 4, cy - 10);
-      claw.lineTo(x + ox + 4, cy + 10);
+      claw.moveTo(x + i * 8 - 6, cy - 14);
+      claw.lineTo(x + i * 8 + 6, cy + 14);
       claw.strokePath();
     }
-
-    this.scene.tweens.add({
-      targets: claw,
-      alpha: 0,
-      duration: 250,
-      ease: 'Power2',
-      onComplete: () => claw.destroy(),
-    });
-
-    // Small red particles
-    for (let i = 0; i < 5; i++) {
-      const p = this.scene.add.image(x, cy, 'particle_circle')
-        .setDepth(EFFECT_DEPTH).setTint(0xff4444).setScale(0.6).setAlpha(0.8);
-      const a = Math.random() * Math.PI * 2;
-      const dist = 6 + Math.random() * 10;
-      this.scene.tweens.add({
-        targets: p,
-        x: x + Math.cos(a) * dist,
-        y: cy + Math.sin(a) * dist,
-        alpha: 0,
-        scale: 0.1,
-        duration: 250,
-        ease: 'Power2',
-        onComplete: () => p.destroy(),
-      });
-    }
+    this.scene.tweens.add({ targets: claw, alpha: 0, duration: 300, ease: 'Power2', onComplete: () => claw.destroy() });
+    this.burst(x, cy, 'particle_circle', 0xff4444, 8, { speed: 80, lifespan: 350, scale: { start: 0.8, end: 0 } });
   }
 
   playMonsterRangedAttack(sx: number, sy: number, tx: number, ty: number, color: number = 0xff6600): void {
-    const startX = sx, startY = sy - 16;
-    const endX = tx, endY = ty - 16;
+    const startX = sx, startY = sy - 16, endX = tx, endY = ty - 16;
     const dist = Phaser.Math.Distance.Between(startX, startY, endX, endY);
-    const duration = Math.max(150, Math.min(400, dist * 2));
+    const duration = Math.max(200, Math.min(500, dist * 2));
 
-    // Projectile
-    const proj = this.scene.add.circle(startX, startY, 5, color, 0.9).setDepth(EFFECT_DEPTH);
-    const glow = this.scene.add.circle(startX, startY, 9, color, 0.3).setDepth(EFFECT_DEPTH);
+    const proj = this.scene.add.circle(startX, startY, 7, color, 1).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    const glow = this.scene.add.circle(startX, startY, 14, color, 0.4).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
 
-    // Trail particles during flight
-    const trailTimer = this.scene.time.addEvent({
-      delay: 30,
-      repeat: Math.floor(duration / 30),
-      callback: () => {
-        const p = this.scene.add.circle(proj.x, proj.y, 3, color, 0.6).setDepth(EFFECT_DEPTH);
-        this.scene.tweens.add({
-          targets: p, alpha: 0, scale: 0.1, duration: 200,
-          onComplete: () => p.destroy(),
-        });
-      },
-    });
+    const trail = this.scene.add.particles(startX, startY, 'particle_circle', {
+      follow: proj, tint: color, speed: { min: 10, max: 30 }, lifespan: 250,
+      scale: { start: 0.7, end: 0 }, alpha: { start: 0.8, end: 0 }, blendMode: 'ADD',
+      frequency: 20, quantity: 2,
+    }).setDepth(EFFECT_DEPTH);
 
-    // Flight
     this.scene.tweens.add({
-      targets: [proj, glow],
-      x: endX, y: endY,
-      duration,
-      ease: 'Power1',
+      targets: [proj, glow], x: endX, y: endY, duration, ease: 'Power1',
       onComplete: () => {
-        proj.destroy();
-        glow.destroy();
-        trailTimer.destroy();
-        // Impact burst
-        for (let i = 0; i < 6; i++) {
-          const a = Math.random() * Math.PI * 2;
-          const d = 5 + Math.random() * 10;
-          const p = this.scene.add.circle(endX, endY, 3, color, 0.8).setDepth(EFFECT_DEPTH);
-          this.scene.tweens.add({
-            targets: p,
-            x: endX + Math.cos(a) * d, y: endY + Math.sin(a) * d,
-            alpha: 0, scale: 0.1, duration: 250,
-            onComplete: () => p.destroy(),
-          });
-        }
+        proj.destroy(); glow.destroy(); trail.stop(); this.scene.time.delayedCall(300, () => trail.destroy());
+        this.burst(endX, endY, 'particle_spark', color, 10, { speed: 120, lifespan: 350 });
+        this.flash(endX, endY, color, 8);
       },
     });
   }
@@ -314,179 +713,181 @@ export class SkillEffectSystem {
   private effectSlash(cx: number, cy: number): void {
     const y = cy - 16;
 
-    // 3 arc segments expanding and fading
+    // Bright wide arc sweep using graphics + additive blend
     for (let i = 0; i < 3; i++) {
-      const arc = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
-      const startAngle = -0.8 + i * 0.5;
-      const endAngle = startAngle + 0.6;
-      const radius = 16 + i * 6;
-      arc.lineStyle(3 - i * 0.5, Phaser.Display.Color.Interpolate.ColorWithColor(
-        Phaser.Display.Color.ValueToColor(0xffffff),
-        Phaser.Display.Color.ValueToColor(0xf1c40f),
-        3, i
-      ).color as unknown as number, 0.9);
-
-      // Workaround: draw arc manually with line segments
-      const steps = 12;
+      const arc = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      const startAngle = Phaser.Math.DegToRad(-140 + i * 15);
+      const endAngle = Phaser.Math.DegToRad(-20 + i * 15);
+      const radius = 28 + i * 10;
+      const colors = [0xffffff, 0xf1c40f, 0xff8800];
+      arc.lineStyle(4 - i, colors[i], 1);
       arc.beginPath();
+      const steps = 16;
       for (let s = 0; s <= steps; s++) {
         const a = startAngle + (endAngle - startAngle) * (s / steps);
         const px = cx + Math.cos(a) * radius;
         const py = y + Math.sin(a) * radius;
-        if (s === 0) arc.moveTo(px, py);
-        else arc.lineTo(px, py);
+        if (s === 0) arc.moveTo(px, py); else arc.lineTo(px, py);
       }
       arc.strokePath();
-
-      this.scene.tweens.add({
-        targets: arc,
-        scaleX: 2,
-        scaleY: 2,
-        alpha: 0,
-        duration: 400,
-        delay: i * 40,
-        ease: 'Power2',
-        onComplete: () => arc.destroy(),
-      });
+      this.scene.tweens.add({ targets: arc, scaleX: 1.8, scaleY: 1.8, alpha: 0, duration: 350, delay: i * 30, ease: 'Power2', onComplete: () => arc.destroy() });
     }
 
-    // Spark particles along the arc
-    for (let i = 0; i < 8; i++) {
-      const a = -0.8 + Math.random() * 2.0;
-      const r = 20 + Math.random() * 20;
-      const px = cx + Math.cos(a) * r;
-      const py = y + Math.sin(a) * r;
-      const spark = this.scene.add.image(cx, y, 'particle_spark')
-        .setDepth(EFFECT_DEPTH).setTint(0xf1c40f).setScale(0.8).setAlpha(0.9);
-      this.scene.tweens.add({
-        targets: spark,
-        x: px,
-        y: py,
-        alpha: 0,
-        scale: 0.2,
-        duration: 400,
-        ease: 'Power2',
-        onComplete: () => spark.destroy(),
-      });
-    }
+    // Bright spark particle burst along the arc
+    this.burst(cx, y, 'particle_spark', 0xf1c40f, 14, { speed: 160, lifespan: 400, scale: { start: 1.2, end: 0 } });
+    this.flash(cx + 12, y - 6, 0xffffff, 10, 150);
   }
 
   private effectWhirlwind(cx: number, cy: number): void {
     const y = cy - 16;
 
-    // Multiple concentric arcs rotating
-    for (let ring = 0; ring < 3; ring++) {
-      const arc = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
-      const radius = 18 + ring * 14;
-      const color = Phaser.Display.Color.Interpolate.ColorWithColor(
-        Phaser.Display.Color.ValueToColor(0xffffff),
-        Phaser.Display.Color.ValueToColor(0xaaaaaa),
-        3, ring
-      );
-      arc.lineStyle(2.5, (color.r << 16) | (color.g << 8) | color.b, 0.7);
+    // Spinning ring particles using emit zone
+    const circleZone = new Phaser.Geom.Circle(0, 0, 32);
+    const spinner = this.scene.add.particles(cx, y, 'particle_slash', {
+      emitZone: { type: 'edge' as const, source: circleZone as any, quantity: 24 },
+      lifespan: 600, scale: { start: 1.0, end: 0.3 }, alpha: { start: 0.9, end: 0 },
+      tint: [0xffffff, 0xccccdd, 0xaabbcc], blendMode: 'ADD',
+      rotate: { min: 0, max: 360 }, speed: { min: 20, max: 60 },
+      frequency: 40, stopAfter: 24,
+    }).setDepth(EFFECT_DEPTH);
+    spinner.on('complete', () => { this.scene.time.delayedCall(700, () => spinner.destroy()); });
 
-      const steps = 16;
-      const arcLen = Math.PI * 1.2;
-      arc.beginPath();
-      for (let s = 0; s <= steps; s++) {
-        const a = (s / steps) * arcLen;
-        const px = Math.cos(a) * radius;
-        const py = Math.sin(a) * radius * 0.5;
-        if (s === 0) arc.moveTo(px, py);
-        else arc.lineTo(px, py);
-      }
-      arc.strokePath();
-      arc.setPosition(cx, y);
+    // Dust cloud
+    const dust = this.scene.add.particles(cx, y, 'particle_smoke', {
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Circle(0, 0, 28) as any },
+      lifespan: 500, scale: { start: 0.8, end: 1.5 }, alpha: { start: 0.5, end: 0 },
+      tint: 0xccbb99, speed: { min: 40, max: 100 }, angle: { min: 0, max: 360 },
+      frequency: 30, stopAfter: 16,
+    }).setDepth(EFFECT_DEPTH - 1);
+    dust.on('complete', () => { this.scene.time.delayedCall(600, () => dust.destroy()); });
 
-      // Animate rotation using angle
-      this.scene.tweens.add({
-        targets: arc,
-        angle: 360 + ring * 120,
-        scaleX: 1.5,
-        scaleY: 1.5,
-        alpha: 0,
-        duration: 600,
-        ease: 'Power1',
-        onComplete: () => arc.destroy(),
-      });
-    }
+    // Central white flash
+    this.flash(cx, y, 0xffffff, 12, 200);
 
-    // Wind/dust particles spiraling outward
-    for (let i = 0; i < 12; i++) {
-      const angle = (i / 12) * Math.PI * 2;
-      const particle = this.scene.add.image(cx, y, 'particle_smoke')
-        .setDepth(EFFECT_DEPTH).setTint(0xccbb99).setScale(0.5).setAlpha(0.6);
-      const dist = 40 + Math.random() * 30;
-      this.scene.tweens.add({
-        targets: particle,
-        x: cx + Math.cos(angle + 1) * dist,
-        y: y + Math.sin(angle + 1) * dist * 0.5,
-        alpha: 0,
-        scale: 0.8,
-        angle: 180,
-        duration: 600,
-        delay: i * 30,
-        ease: 'Power1',
-        onComplete: () => particle.destroy(),
-      });
+    // Expanding blade rings
+    for (let r = 0; r < 3; r++) {
+      this.ring(cx, y, 0xccccff, 10 + r * 4, 4 + r, 500 + r * 100, 2);
     }
   }
 
   private effectShieldWall(cx: number, cy: number): void {
     const y = cy - 16;
 
-    // Hexagonal shield segments materialize
+    // Golden hexagonal shield segments
     for (let i = 0; i < 6; i++) {
       const angle = (i / 6) * Math.PI * 2 - Math.PI / 2;
-      const radius = 28;
+      const radius = 30;
       const hx = cx + Math.cos(angle) * radius;
       const hy = y + Math.sin(angle) * radius * 0.6;
-
-      const hex = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
-      hex.fillStyle(0xf1c40f, 0.3);
-      hex.lineStyle(2, 0xf1c40f, 0.8);
-      // Small hex shape
+      const hex = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      hex.fillStyle(0xf1c40f, 0.4);
+      hex.lineStyle(2.5, 0xf1c40f, 1);
       const hexPts: Phaser.Geom.Point[] = [];
       for (let h = 0; h < 6; h++) {
         const ha = (h / 6) * Math.PI * 2;
-        hexPts.push(new Phaser.Geom.Point(hx + Math.cos(ha) * 10, hy + Math.sin(ha) * 10));
+        hexPts.push(new Phaser.Geom.Point(hx + Math.cos(ha) * 12, hy + Math.sin(ha) * 12));
       }
       hex.fillPoints(hexPts, true);
       hex.strokePoints(hexPts, true);
-
       hex.setAlpha(0).setScale(0.3);
       this.scene.tweens.add({
-        targets: hex,
-        alpha: 1,
-        scaleX: 1,
-        scaleY: 1,
-        duration: 300,
-        delay: i * 50,
-        ease: 'Back.easeOut',
-        onComplete: () => {
-          // Lingering glow
-          this.scene.tweens.add({
-            targets: hex,
-            alpha: 0,
-            duration: 2000,
-            ease: 'Power1',
-            onComplete: () => hex.destroy(),
-          });
-        },
+        targets: hex, alpha: 1, scaleX: 1, scaleY: 1, duration: 250, delay: i * 40, ease: 'Back.easeOut',
+        onComplete: () => { this.scene.tweens.add({ targets: hex, alpha: 0, duration: 2000, ease: 'Power1', onComplete: () => hex.destroy() }); },
       });
     }
 
-    // Golden pulse ring
-    const ring = this.scene.add.circle(cx, y, 10, 0xf1c40f, 0.4).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: ring,
-      scaleX: 5,
-      scaleY: 3,
-      alpha: 0,
-      duration: 500,
-      ease: 'Power2',
-      onComplete: () => ring.destroy(),
+    // Golden particle burst
+    this.burst(cx, y, 'particle_star', 0xf1c40f, 16, { speed: 80, lifespan: 600, scale: { start: 0.8, end: 0 } });
+    // Expanding golden ring
+    for (let r = 0; r < 2; r++) {
+      this.ring(cx, y, 0xf1c40f, 8 + r * 6, 4, 500 + r * 150, 3);
+    }
+    this.flash(cx, y, 0xf1c40f, 14, 250);
+  }
+
+  private effectWarStomp(cx: number, cy: number): void {
+    const y = cy - 16;
+    this.scene.cameras.main.shake(350, 0.015);
+
+    // Multiple expanding shockwave rings
+    for (let r = 0; r < 4; r++) {
+      this.ring(cx, y, r < 2 ? 0xffcc44 : 0xd4a017, 6 + r * 3, 6 + r * 2, 500 + r * 80, 3);
+    }
+
+    // Ground crack lines
+    for (let i = 0; i < 10; i++) {
+      const angle = (i / 10) * Math.PI * 2;
+      const crack = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      crack.lineStyle(3, 0xddaa33, 0.9);
+      crack.beginPath(); crack.moveTo(cx, y);
+      const len = 35 + Math.random() * 25;
+      const mx = cx + Math.cos(angle) * len * 0.5 + (Math.random() - 0.5) * 10;
+      const my = y + Math.sin(angle) * len * 0.3 + (Math.random() - 0.5) * 5;
+      crack.lineTo(mx, my);
+      crack.lineTo(cx + Math.cos(angle) * len, y + Math.sin(angle) * len * 0.4);
+      crack.strokePath();
+      crack.setAlpha(0);
+      this.scene.tweens.add({ targets: crack, alpha: 1, duration: 80, delay: 30 + i * 15, onComplete: () => {
+        this.scene.tweens.add({ targets: crack, alpha: 0, duration: 900, onComplete: () => crack.destroy() });
+      }});
+    }
+
+    // Debris eruption
+    this.burst(cx, y, 'particle_smoke', 0xaa8866, 20, { speed: 140, lifespan: 600, gravityY: 80, scale: { start: 1, end: 0.3 } });
+    // Bright center flash
+    this.flash(cx, y, 0xffffff, 16, 200);
+    this.flash(cx, y, 0xffcc44, 20, 350);
+  }
+
+  private effectTauntRoar(cx: number, cy: number): void {
+    const y = cy - 16;
+
+    // Pulsing red shockwave rings
+    for (let w = 0; w < 5; w++) {
+      this.ring(cx, y, 0xe74c3c, 8, 5 + w * 1.5, 500 + w * 100, 3);
+    }
+
+    // Red energy particle burst outward
+    this.burst(cx, y, 'particle_spark', 0xe74c3c, 18, { speed: 160, lifespan: 500, scale: { start: 1.2, end: 0 } });
+
+    // Red flash
+    this.flash(cx, y, 0xff2200, 16, 250);
+
+    // "!" exclamation marks flying outward
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const dist = 40;
+      const txt = this.scene.add.text(cx, y, '!', { fontSize: '18px', color: '#ff4444', fontStyle: 'bold' })
+        .setOrigin(0.5).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      this.scene.tweens.add({
+        targets: txt, x: cx + Math.cos(a) * dist, y: y + Math.sin(a) * dist * 0.6, alpha: 0, scale: 1.5,
+        duration: 600, delay: i * 40, ease: 'Power2', onComplete: () => txt.destroy(),
+      });
+    }
+  }
+
+  private effectVengefulWrath(cx: number, cy: number): void {
+    const y = cy - 16;
+
+    // Flame pillar — continuous particles rising from caster
+    const flames = this.scene.add.particles(cx, y + 10, 'particle_flame', {
+      tint: [0xff4400, 0xff6600, 0xffaa00, 0xffdd44],
+      speed: { min: 60, max: 140 }, angle: { min: 250, max: 290 },
+      lifespan: 600, scale: { start: 1.2, end: 0.2 }, alpha: { start: 1, end: 0 },
+      blendMode: 'ADD', frequency: 25, stopAfter: 24,
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Rectangle(-14, -6, 28, 12) as any },
+    }).setDepth(EFFECT_DEPTH);
+    flames.on('complete', () => { this.scene.time.delayedCall(700, () => flames.destroy()); });
+
+    // Rising sparks
+    this.burst(cx, y, 'particle_spark', 0xffaa00, 16, {
+      speed: 100, lifespan: 700, gravityY: -120,
+      scale: { start: 1, end: 0 }, angle: { min: 230, max: 310 },
     });
+
+    // Expanding fire ring
+    this.ring(cx, y, 0xff4400, 10, 4, 400, 3);
+    this.flash(cx, y, 0xff6600, 18, 300);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -494,455 +895,227 @@ export class SkillEffectSystem {
   // ══════════════════════════════════════════════════════════
 
   private effectFireball(cx: number, cy: number, tx: number, ty: number): void {
-    const sx = cx;
-    const sy = cy - 16;
-    const ex = tx;
-    const ey = ty - 16;
+    const sx = cx, sy = cy - 16, ex = tx, ey = ty - 16;
     const dist = Phaser.Math.Distance.Between(sx, sy, ex, ey);
-    const flightDuration = Math.max(300, Math.min(500, dist * 1.5));
+    const dur = Math.max(300, Math.min(600, dist * 1.5));
 
-    // Projectile: orange circle
-    const fireball = this.scene.add.circle(sx, sy, 6, 0xff6600, 0.9).setDepth(EFFECT_DEPTH);
-    const glow = this.scene.add.circle(sx, sy, 10, 0xff4400, 0.3).setDepth(EFFECT_DEPTH);
+    // Fireball core
+    const core = this.scene.add.circle(sx, sy, 8, 0xffaa00, 1).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    const glow = this.scene.add.circle(sx, sy, 16, 0xff4400, 0.5).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
 
-    // Flame trail during flight
-    const trailTimer = this.scene.time.addEvent({
-      delay: 30,
-      repeat: Math.floor(flightDuration / 30),
-      callback: () => {
-        const flame = this.scene.add.image(fireball.x, fireball.y, 'particle_flame')
-          .setDepth(EFFECT_DEPTH).setTint(0xff6600).setScale(0.6).setAlpha(0.7)
-          .setAngle(Math.random() * 360);
-        this.scene.tweens.add({
-          targets: flame,
-          alpha: 0,
-          scale: 0.1,
-          duration: 200,
-          onComplete: () => flame.destroy(),
-        });
-      },
-    });
+    // Flame trail particles following projectile
+    const trail = this.scene.add.particles(sx, sy, 'particle_flame', {
+      follow: core, tint: [0xff4400, 0xff6600, 0xffaa00],
+      speed: { min: 20, max: 60 }, lifespan: 350,
+      scale: { start: 1.0, end: 0 }, alpha: { start: 1, end: 0 },
+      blendMode: 'ADD', frequency: 20, quantity: 3,
+      rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
 
-    // Flight tween
     this.scene.tweens.add({
-      targets: [fireball, glow],
-      x: ex,
-      y: ey,
-      duration: flightDuration,
-      ease: 'Power1',
+      targets: [core, glow], x: ex, y: ey, duration: dur, ease: 'Power1',
       onComplete: () => {
-        fireball.destroy();
-        glow.destroy();
-        trailTimer.destroy();
+        core.destroy(); glow.destroy(); trail.stop();
+        this.scene.time.delayedCall(400, () => trail.destroy());
         this.fireballExplosion(ex, ey);
       },
     });
   }
 
   private fireballExplosion(x: number, y: number): void {
-    // Expanding ring
-    const ring = this.scene.add.circle(x, y, 8, 0xff4400, 0.6).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: ring,
-      scaleX: 5,
-      scaleY: 5,
-      alpha: 0,
-      duration: 300,
-      ease: 'Power2',
-      onComplete: () => ring.destroy(),
+    this.scene.cameras.main.shake(150, 0.006);
+    // Multi-ring explosion
+    this.ring(x, y, 0xff4400, 8, 5, 350, 4);
+    this.ring(x, y, 0xffaa00, 6, 4, 300, 3);
+    // Bright white+orange flash
+    this.flash(x, y, 0xffffff, 14, 150);
+    this.flash(x, y, 0xff6600, 20, 300);
+    // Fire particle burst
+    this.burst(x, y, 'particle_flame', 0xff4400, 20, { speed: 180, lifespan: 500, scale: { start: 1.2, end: 0 } });
+    this.burst(x, y, 'particle_spark', 0xffaa00, 12, { speed: 200, lifespan: 400, scale: { start: 0.8, end: 0 } });
+    // Smoke aftermath
+    this.burst(x, y, 'particle_smoke', 0x444444, 8, {
+      speed: 50, lifespan: 800, scale: { start: 0.6, end: 1.5 }, alpha: { start: 0.5, end: 0 }, blend: 'NORMAL',
     });
-
-    // Inner flash
-    const flash = this.scene.add.circle(x, y, 12, 0xffaa00, 0.8).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: flash,
-      scaleX: 3,
-      scaleY: 3,
-      alpha: 0,
-      duration: 200,
-      ease: 'Power3',
-      onComplete: () => flash.destroy(),
-    });
-
-    // Scattered fire particles
-    for (let i = 0; i < 10; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const dist = 15 + Math.random() * 25;
-      const flame = this.scene.add.image(x, y, 'particle_flame')
-        .setDepth(EFFECT_DEPTH).setTint(0xff6600).setScale(0.5 + Math.random() * 0.5).setAlpha(0.9)
-        .setAngle(Math.random() * 360);
-      this.scene.tweens.add({
-        targets: flame,
-        x: x + Math.cos(a) * dist,
-        y: y + Math.sin(a) * dist,
-        alpha: 0,
-        scale: 0.1,
-        duration: 300,
-        ease: 'Power2',
-        onComplete: () => flame.destroy(),
-      });
-    }
   }
 
   private effectBlizzard(cx: number, cy: number): void {
     const y = cy - 16;
 
-    // Ground frost circle expanding
-    const frost = this.scene.add.circle(cx, y, 6, 0x88ccff, 0.3).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: frost,
-      scaleX: 6,
-      scaleY: 4,
-      alpha: 0,
-      duration: 800,
-      ease: 'Power1',
-      onComplete: () => frost.destroy(),
+    // Ground frost ring
+    this.ring(cx, y, 0x88ccff, 10, 5, 900, 3);
+    this.ring(cx, y, 0xaaddff, 8, 4, 700, 2);
+
+    // Ice shards falling from above in a wide zone
+    const ice = this.scene.add.particles(cx, y - 80, 'particle_ice', {
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Rectangle(-50, 0, 100, 20) as any },
+      tint: [0x88ccff, 0xaaddff, 0xcceeFF],
+      speed: { min: 80, max: 160 }, angle: { min: 75, max: 105 },
+      lifespan: 700, scale: { start: 1.0, end: 0.3 }, alpha: { start: 0.9, end: 0 },
+      blendMode: 'ADD', frequency: 30, stopAfter: 28,
+      rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
+    ice.on('complete', () => { this.scene.time.delayedCall(800, () => ice.destroy()); });
+
+    // Snowflake sparkles at ground level
+    this.burst(cx, y, 'particle_star', 0xccddff, 12, {
+      speed: 60, lifespan: 600, scale: { start: 0.6, end: 0 },
     });
 
-    // Ice crystal particles falling from above
-    for (let i = 0; i < 16; i++) {
-      const startX = cx + (Math.random() - 0.5) * 80;
-      const startY = y - 60 - Math.random() * 30;
-      const endX = startX + (Math.random() - 0.5) * 20;
-      const endY = y + (Math.random() - 0.5) * 20;
-      const ice = this.scene.add.image(startX, startY, 'particle_ice')
-        .setDepth(EFFECT_DEPTH).setScale(0.5 + Math.random() * 0.5).setAlpha(0.8)
-        .setAngle(Math.random() * 360);
-      this.scene.tweens.add({
-        targets: ice,
-        x: endX,
-        y: endY,
-        angle: ice.angle + 180,
-        alpha: 0,
-        duration: 600 + Math.random() * 400,
-        delay: Math.random() * 300,
-        ease: 'Power1',
-        onComplete: () => ice.destroy(),
-      });
-    }
+    // Frost ground flash
+    this.flash(cx, y, 0x88ccff, 16, 400);
   }
 
   private effectManaShield(cx: number, cy: number): void {
     const y = cy - 16;
 
-    // Blue translucent sphere
-    const sphere = this.scene.add.circle(cx, y, 4, 0x3498db, 0.2).setDepth(EFFECT_DEPTH);
+    // Blue arcane sphere
+    const sphere = this.scene.add.circle(cx, y, 6, 0x3498db, 0.3).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
     this.scene.tweens.add({
-      targets: sphere,
-      scaleX: 6,
-      scaleY: 5,
-      alpha: 0.35,
-      duration: 400,
-      ease: 'Back.easeOut',
-      onComplete: () => {
-        // Lingering
-        this.scene.tweens.add({
-          targets: sphere,
-          alpha: 0,
-          duration: 2000,
-          ease: 'Power1',
-          onComplete: () => sphere.destroy(),
-        });
-      },
+      targets: sphere, scaleX: 5, scaleY: 4, alpha: 0.4, duration: 350, ease: 'Back.easeOut',
+      onComplete: () => { this.scene.tweens.add({ targets: sphere, alpha: 0, duration: 2500, ease: 'Power1', onComplete: () => sphere.destroy() }); },
     });
 
-    // Sphere outline
-    const outline = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
-    outline.lineStyle(1.5, 0x5dade2, 0.6);
-    outline.strokeCircle(cx, y, 4);
-    this.scene.tweens.add({
-      targets: outline,
-      scaleX: 6,
-      scaleY: 5,
-      alpha: 0.4,
-      duration: 400,
-      ease: 'Back.easeOut',
-      onComplete: () => {
-        this.scene.tweens.add({
-          targets: outline,
-          alpha: 0,
-          duration: 2000,
-          ease: 'Power1',
-          onComplete: () => outline.destroy(),
-        });
-      },
-    });
+    // Blue ring pulse
+    this.ring(cx, y, 0x5dade2, 6, 5, 400, 3);
 
     // Arcane rune particles orbiting
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      const r = 24;
-      const rune = this.scene.add.image(cx, y, 'particle_star')
-        .setDepth(EFFECT_DEPTH).setTint(0x5dade2).setScale(0.5).setAlpha(0);
-      this.scene.tweens.add({
-        targets: rune,
-        x: cx + Math.cos(a) * r,
-        y: y + Math.sin(a) * r * 0.6,
-        alpha: 0.8,
-        angle: 360,
-        duration: 400,
-        delay: i * 40,
-        ease: 'Power2',
-        onComplete: () => {
-          this.scene.tweens.add({
-            targets: rune,
-            alpha: 0,
-            duration: 1000,
-            onComplete: () => rune.destroy(),
-          });
-        },
-      });
-    }
+    const runes = this.scene.add.particles(cx, y, 'particle_star', {
+      emitZone: { type: 'edge' as const, source: new Phaser.Geom.Circle(0, 0, 26) as any, quantity: 12 },
+      tint: [0x5dade2, 0x88bbff, 0xbbddff], lifespan: 1000,
+      scale: { start: 0.8, end: 0 }, alpha: { start: 1, end: 0 },
+      blendMode: 'ADD', speed: { min: 10, max: 30 },
+      frequency: 80, stopAfter: 12,
+    }).setDepth(EFFECT_DEPTH);
+    runes.on('complete', () => { this.scene.time.delayedCall(1100, () => runes.destroy()); });
+
+    this.flash(cx, y, 0x3498db, 12, 300);
   }
 
   private effectMeteor(tx: number, ty: number): void {
     const y = ty - 16;
 
-    // Camera shake
-    this.scene.cameras.main.shake(400, 0.008);
+    // Warning circle on ground
+    const warn = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
+    warn.lineStyle(2, 0xff4400, 0.6);
+    warn.strokeCircle(tx, y, 30);
+    warn.setScale(1, 0.5);
+    this.scene.tweens.add({ targets: warn, alpha: 0, duration: 600, onComplete: () => warn.destroy() });
 
-    // Large fireball drops from screen top
-    const startY = y - 200;
-    const meteor = this.scene.add.circle(tx - 40, startY, 14, 0xff4400, 0.9).setDepth(EFFECT_DEPTH);
-    const meteorGlow = this.scene.add.circle(tx - 40, startY, 22, 0xff6600, 0.3).setDepth(EFFECT_DEPTH);
+    // Meteor fireball dropping from above
+    const startY = y - 220;
+    const meteor = this.scene.add.circle(tx - 50, startY, 16, 0xff4400, 1).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    const meteorGlow = this.scene.add.circle(tx - 50, startY, 28, 0xff6600, 0.4).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
 
-    // Flame trail during fall
-    const fallTimer = this.scene.time.addEvent({
-      delay: 25,
-      repeat: 24,
-      callback: () => {
-        const flame = this.scene.add.image(meteor.x, meteor.y, 'particle_flame')
-          .setDepth(EFFECT_DEPTH).setTint(0xff4400).setScale(0.8 + Math.random() * 0.5).setAlpha(0.7)
-          .setAngle(Math.random() * 360);
-        this.scene.tweens.add({
-          targets: flame,
-          alpha: 0,
-          scale: 0.1,
-          y: flame.y - 10,
-          duration: 300,
-          onComplete: () => flame.destroy(),
-        });
-      },
-    });
+    // Fire trail particles following the meteor
+    const trail = this.scene.add.particles(meteor.x, meteor.y, 'particle_flame', {
+      follow: meteor, tint: [0xff4400, 0xff6600, 0xffaa00],
+      speed: { min: 30, max: 80 }, lifespan: 400,
+      scale: { start: 1.4, end: 0 }, alpha: { start: 1, end: 0 },
+      blendMode: 'ADD', frequency: 18, quantity: 3,
+      rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
 
     this.scene.tweens.add({
-      targets: [meteor, meteorGlow],
-      x: tx,
-      y: y,
-      duration: 600,
-      ease: 'Power2.easeIn',
+      targets: [meteor, meteorGlow], x: tx, y: y, duration: 550, ease: 'Power2.easeIn',
       onComplete: () => {
-        meteor.destroy();
-        meteorGlow.destroy();
-        fallTimer.destroy();
+        meteor.destroy(); meteorGlow.destroy(); trail.stop();
+        this.scene.time.delayedCall(500, () => trail.destroy());
         this.meteorExplosion(tx, y);
       },
     });
   }
 
   private meteorExplosion(x: number, y: number): void {
-    // Stronger camera shake on impact
-    this.scene.cameras.main.shake(300, 0.015);
+    this.scene.cameras.main.shake(400, 0.02);
 
-    // Massive explosion ring
-    const ring = this.scene.add.circle(x, y, 10, 0xff4400, 0.7).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: ring,
-      scaleX: 8,
-      scaleY: 6,
-      alpha: 0,
-      duration: 500,
-      ease: 'Power2',
-      onComplete: () => ring.destroy(),
-    });
-
-    // Inner white flash
-    const flash = this.scene.add.circle(x, y, 16, 0xffffff, 0.9).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: flash,
-      scaleX: 4,
-      scaleY: 4,
-      alpha: 0,
-      duration: 250,
-      ease: 'Power3',
-      onComplete: () => flash.destroy(),
-    });
-
-    // Ground scorchmark (lingering)
-    const scorch = this.scene.add.circle(x, y, 24, 0x333333, 0.3).setDepth(EFFECT_DEPTH - 1);
-    scorch.setScale(1, 0.6);
-    this.scene.tweens.add({
-      targets: scorch,
-      alpha: 0,
-      duration: 3000,
-      delay: 500,
-      ease: 'Power1',
-      onComplete: () => scorch.destroy(),
-    });
-
-    // Debris particles
-    for (let i = 0; i < 14; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const dist = 20 + Math.random() * 40;
-      const tex = Math.random() > 0.5 ? 'particle_flame' : 'particle_spark';
-      const debris = this.scene.add.image(x, y, tex)
-        .setDepth(EFFECT_DEPTH).setTint(Math.random() > 0.5 ? 0xff4400 : 0xff8800)
-        .setScale(0.5 + Math.random() * 0.6).setAlpha(0.9);
-      this.scene.tweens.add({
-        targets: debris,
-        x: x + Math.cos(a) * dist,
-        y: y + Math.sin(a) * dist - Math.random() * 20,
-        alpha: 0,
-        scale: 0.1,
-        duration: 400 + Math.random() * 200,
-        ease: 'Power2',
-        onComplete: () => debris.destroy(),
-      });
+    // Massive multi-ring explosion
+    for (let r = 0; r < 4; r++) {
+      this.ring(x, y, r < 2 ? 0xffaa00 : 0xff4400, 8 + r * 4, 6 + r * 2, 500 + r * 80, 4);
     }
+
+    // Bright white core flash
+    this.flash(x, y, 0xffffff, 22, 200);
+    this.flash(x, y, 0xff6600, 30, 400);
+
+    // Fire + debris burst
+    this.burst(x, y, 'particle_flame', 0xff4400, 28, { speed: 220, lifespan: 600, scale: { start: 1.5, end: 0 } });
+    this.burst(x, y, 'particle_spark', 0xffaa00, 16, { speed: 250, lifespan: 500, scale: { start: 1, end: 0 }, gravityY: 100 });
+
+    // Ground scorchmark
+    const scorch = this.scene.add.circle(x, y, 28, 0x222200, 0.35).setDepth(EFFECT_DEPTH - 1).setScale(1, 0.5);
+    this.scene.tweens.add({ targets: scorch, alpha: 0, duration: 3000, delay: 500, onComplete: () => scorch.destroy() });
+
+    // Smoke plume
+    this.burst(x, y, 'particle_smoke', 0x555555, 12, {
+      speed: 40, lifespan: 1000, scale: { start: 0.8, end: 2 }, alpha: { start: 0.6, end: 0 }, blend: 'NORMAL', gravityY: -30,
+    });
   }
 
   private effectIceArmor(cx: number, cy: number): void {
     const y = cy - 16;
 
-    // Ice crystals orbiting around caster
-    for (let i = 0; i < 8; i++) {
-      const startAngle = (i / 8) * Math.PI * 2;
-      const crystal = this.scene.add.image(cx, y, 'particle_ice')
-        .setDepth(EFFECT_DEPTH).setScale(0.6).setAlpha(0);
+    // Ice crystal orbit using edge-emitted particles
+    const crystals = this.scene.add.particles(cx, y, 'particle_ice', {
+      emitZone: { type: 'edge' as const, source: new Phaser.Geom.Circle(0, 0, 24) as any, quantity: 16 },
+      tint: [0x88ccff, 0xaaddff], lifespan: 800,
+      scale: { start: 1, end: 0.4 }, alpha: { start: 1, end: 0 },
+      blendMode: 'ADD', speed: { min: 10, max: 40 },
+      frequency: 50, stopAfter: 16, rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
+    crystals.on('complete', () => { this.scene.time.delayedCall(900, () => crystals.destroy()); });
 
-      // Orbit animation - position update via multiple stages
-      const r = 22;
-      const endAngle = startAngle + Math.PI * 2;
-      const steps = 10;
-      let step = 0;
-
-      const moveNext = () => {
-        step++;
-        if (step > steps) {
-          this.scene.tweens.add({
-            targets: crystal,
-            alpha: 0,
-            duration: 300,
-            onComplete: () => crystal.destroy(),
-          });
-          return;
-        }
-        const a = startAngle + (endAngle - startAngle) * (step / steps);
-        this.scene.tweens.add({
-          targets: crystal,
-          x: cx + Math.cos(a) * r,
-          y: y + Math.sin(a) * r * 0.5,
-          alpha: step < steps * 0.7 ? 0.9 : 0.5,
-          duration: 500 / steps,
-          onComplete: moveNext,
-        });
-      };
-
-      // Start with fade-in
-      this.scene.tweens.add({
-        targets: crystal,
-        x: cx + Math.cos(startAngle) * r,
-        y: y + Math.sin(startAngle) * r * 0.5,
-        alpha: 0.9,
-        duration: 100,
-        delay: i * 30,
-        onComplete: moveNext,
-      });
-    }
-
-    // Frost particles
-    for (let i = 0; i < 6; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const frost = this.scene.add.image(cx, y, 'particle_circle')
-        .setDepth(EFFECT_DEPTH).setTint(0x88ccff).setScale(0.4).setAlpha(0.6);
-      this.scene.tweens.add({
-        targets: frost,
-        x: cx + Math.cos(a) * 18,
-        y: y + Math.sin(a) * 12,
-        alpha: 0,
-        duration: 500,
-        delay: Math.random() * 200,
-        ease: 'Power1',
-        onComplete: () => frost.destroy(),
-      });
-    }
+    // Frost aura ring
+    this.ring(cx, y, 0x88ccff, 8, 4, 500, 3);
+    // Frost sparkle burst
+    this.burst(cx, y, 'particle_star', 0xccddff, 10, { speed: 60, lifespan: 500, scale: { start: 0.7, end: 0 } });
+    this.flash(cx, y, 0x88ccff, 14, 300);
   }
 
   private effectChainLightning(cx: number, cy: number, targets: { x: number; y: number }[]): void {
     const sy = cy - 16;
 
     if (targets.length === 0) {
-      // Single target fallback: lightning at caster
-      this.drawLightningBolt(cx, sy - 30, cx, sy, 0x5dade2);
+      this.drawLightningBolt(cx, sy - 40, cx, sy, 0x5dade2);
+      this.burst(cx, sy, 'particle_spark', 0x88bbff, 10, { speed: 100, lifespan: 300, scale: { start: 1, end: 0 } });
+      this.flash(cx, sy, 0x5dade2, 12, 200);
       return;
     }
 
-    // Draw jagged lightning from caster to each target
-    let prevX = cx;
-    let prevY = sy;
-    for (const t of targets) {
-      const tx = t.x;
-      const ty = t.y - 16;
-      this.drawLightningBolt(prevX, prevY, tx, ty, 0x5dade2);
-      // Electric spark particles at endpoint
-      for (let i = 0; i < 4; i++) {
-        const spark = this.scene.add.image(tx, ty, 'particle_spark')
-          .setDepth(EFFECT_DEPTH).setTint(0x5dade2).setScale(0.6).setAlpha(0.9);
-        const a = Math.random() * Math.PI * 2;
-        this.scene.tweens.add({
-          targets: spark,
-          x: tx + Math.cos(a) * 12,
-          y: ty + Math.sin(a) * 12,
-          alpha: 0,
-          scale: 0.1,
-          duration: 300,
-          onComplete: () => spark.destroy(),
-        });
-      }
-      prevX = tx;
-      prevY = ty;
+    let prevX = cx, prevY = sy;
+    for (let idx = 0; idx < targets.length; idx++) {
+      const t = targets[idx];
+      const tty = t.y - 16;
+      // Draw bolt with slight delay per chain
+      this.scene.time.delayedCall(idx * 60, () => {
+        this.drawLightningBolt(prevX, prevY, t.x, tty, 0x5dade2);
+        this.burst(t.x, tty, 'particle_spark', 0x88bbff, 8, { speed: 100, lifespan: 300, scale: { start: 0.8, end: 0 } });
+        this.flash(t.x, tty, 0x5dade2, 10, 200);
+      });
+      prevX = t.x; prevY = tty;
     }
   }
 
   private drawLightningBolt(x1: number, y1: number, x2: number, y2: number, color: number): void {
-    const bolt = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const segments = 8;
+    const dx = x2 - x1, dy = y2 - y1;
+    const segments = 10;
 
-    // Main bolt
-    bolt.lineStyle(2.5, color, 0.9);
-    bolt.beginPath();
-    bolt.moveTo(x1, y1);
-    for (let s = 1; s < segments; s++) {
-      const t = s / segments;
-      const mx = x1 + dx * t + (Math.random() - 0.5) * 16;
-      const my = y1 + dy * t + (Math.random() - 0.5) * 16;
-      bolt.lineTo(mx, my);
+    // Draw 3 overlapping bolts for thickness and glow
+    for (let pass = 0; pass < 3; pass++) {
+      const bolt = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      const w = pass === 0 ? 6 : pass === 1 ? 3 : 1.5;
+      const a = pass === 0 ? 0.3 : pass === 1 ? 0.7 : 1;
+      const c = pass === 2 ? 0xffffff : color;
+      bolt.lineStyle(w, c, a);
+      bolt.beginPath(); bolt.moveTo(x1, y1);
+      for (let s = 1; s < segments; s++) {
+        const t = s / segments;
+        const jitter = pass === 0 ? 12 : 8;
+        bolt.lineTo(x1 + dx * t + (Math.random() - 0.5) * jitter, y1 + dy * t + (Math.random() - 0.5) * jitter);
+      }
+      bolt.lineTo(x2, y2); bolt.strokePath();
+      this.scene.tweens.add({ targets: bolt, alpha: 0, duration: 350, ease: 'Power2', onComplete: () => bolt.destroy() });
     }
-    bolt.lineTo(x2, y2);
-    bolt.strokePath();
-
-    // Glow bolt (thicker, transparent)
-    bolt.lineStyle(5, color, 0.25);
-    bolt.beginPath();
-    bolt.moveTo(x1, y1);
-    for (let s = 1; s < segments; s++) {
-      const t = s / segments;
-      const mx = x1 + dx * t + (Math.random() - 0.5) * 12;
-      const my = y1 + dy * t + (Math.random() - 0.5) * 12;
-      bolt.lineTo(mx, my);
-    }
-    bolt.lineTo(x2, y2);
-    bolt.strokePath();
-
-    this.scene.tweens.add({
-      targets: bolt,
-      alpha: 0,
-      duration: 300,
-      ease: 'Power2',
-      onComplete: () => bolt.destroy(),
-    });
   }
 
   // ══════════════════════════════════════════════════════════
@@ -952,265 +1125,162 @@ export class SkillEffectSystem {
   private effectBackstab(tx: number, ty: number): void {
     const y = ty - 16;
 
-    // Quick flash
-    const flash = this.scene.add.circle(tx, y, 20, 0xffffff, 0.6).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: flash,
-      alpha: 0,
-      scaleX: 1.5,
-      scaleY: 1.5,
-      duration: 120,
-      ease: 'Power3',
-      onComplete: () => flash.destroy(),
-    });
+    // Bright X-slash marks with additive blend
+    const slashes = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    slashes.lineStyle(4, 0xffffff, 1);
+    slashes.beginPath(); slashes.moveTo(tx - 18, y - 18); slashes.lineTo(tx + 18, y + 18); slashes.strokePath();
+    slashes.beginPath(); slashes.moveTo(tx + 18, y - 18); slashes.lineTo(tx - 18, y + 18); slashes.strokePath();
+    this.scene.tweens.add({ targets: slashes, alpha: 0, scaleX: 1.5, scaleY: 1.5, duration: 300, ease: 'Power2', onComplete: () => slashes.destroy() });
 
-    // Crossed blade slash marks
-    const slashes = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
-    slashes.lineStyle(2.5, 0xffffff, 0.9);
-    // X slash
-    slashes.beginPath();
-    slashes.moveTo(tx - 14, y - 14);
-    slashes.lineTo(tx + 14, y + 14);
-    slashes.strokePath();
-    slashes.beginPath();
-    slashes.moveTo(tx + 14, y - 14);
-    slashes.lineTo(tx - 14, y + 14);
-    slashes.strokePath();
-
-    this.scene.tweens.add({
-      targets: slashes,
-      alpha: 0,
-      scaleX: 1.3,
-      scaleY: 1.3,
-      duration: 250,
-      ease: 'Power2',
-      onComplete: () => slashes.destroy(),
+    // Red blood splatter
+    this.burst(tx, y, 'particle_circle', 0xcc2222, 12, {
+      speed: 130, lifespan: 400, scale: { start: 0.8, end: 0 }, blend: 'NORMAL',
     });
-
-    // Afterimage effect (brief duplicate shadow)
-    const afterimage = this.scene.add.circle(tx - 8, y, 12, 0x444444, 0.4).setDepth(EFFECT_DEPTH - 1);
-    this.scene.tweens.add({
-      targets: afterimage,
-      alpha: 0,
-      x: tx - 16,
-      duration: 250,
-      ease: 'Power2',
-      onComplete: () => afterimage.destroy(),
-    });
+    // White spark burst
+    this.burst(tx, y, 'particle_spark', 0xffffff, 10, { speed: 150, lifespan: 300, scale: { start: 1, end: 0 } });
+    this.flash(tx, y, 0xffffff, 14, 120);
   }
 
   private effectPoisonBlade(cx: number, cy: number): void {
     const y = cy - 16;
 
-    // Green mist particles rising
-    for (let i = 0; i < 10; i++) {
-      const px = cx + (Math.random() - 0.5) * 24;
-      const py = y + (Math.random() - 0.5) * 10;
-      const poison = this.scene.add.image(px, py, 'particle_poison')
-        .setDepth(EFFECT_DEPTH).setScale(0.5 + Math.random() * 0.5).setAlpha(0.7)
-        .setAngle(Math.random() * 360);
-      this.scene.tweens.add({
-        targets: poison,
-        y: py - 20 - Math.random() * 20,
-        x: px + (Math.random() - 0.5) * 16,
-        alpha: 0,
-        scale: 0.8,
-        angle: poison.angle + 90,
-        duration: 400 + Math.random() * 200,
-        delay: Math.random() * 100,
-        ease: 'Power1',
-        onComplete: () => poison.destroy(),
-      });
-    }
+    // Poison mist cloud rising
+    const mist = this.scene.add.particles(cx, y, 'particle_poison', {
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Rectangle(-16, -8, 32, 16) as any },
+      tint: [0x33cc33, 0x44dd44, 0x66ff66],
+      speed: { min: 30, max: 80 }, angle: { min: 240, max: 300 },
+      lifespan: 600, scale: { start: 1, end: 0.4 }, alpha: { start: 0.9, end: 0 },
+      blendMode: 'ADD', frequency: 30, stopAfter: 18,
+      rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
+    mist.on('complete', () => { this.scene.time.delayedCall(700, () => mist.destroy()); });
 
-    // Green glow around blade area
-    const glow = this.scene.add.circle(cx, y, 8, 0x27ae60, 0.3).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: glow,
-      scaleX: 3,
-      scaleY: 2,
-      alpha: 0,
-      duration: 400,
-      ease: 'Power2',
-      onComplete: () => glow.destroy(),
-    });
+    // Green glow
+    this.flash(cx, y, 0x27ae60, 14, 350);
+    this.ring(cx, y, 0x33cc33, 6, 3, 400, 2);
+    // Green sparkles
+    this.burst(cx, y, 'particle_circle', 0x66ff66, 10, { speed: 60, lifespan: 500, scale: { start: 0.6, end: 0 } });
   }
 
   private effectMultishot(cx: number, cy: number): void {
     const y = cy - 16;
-
-    // Fan of arrow projectiles in 60° arc
-    const arrowCount = 5;
-    const spreadAngle = Math.PI / 3; // 60°
-    const startAngle = -Math.PI / 2 - spreadAngle / 2;
+    const arrowCount = 7;
+    const spread = Math.PI / 2.5; // ~72°
+    const start = -Math.PI / 2 - spread / 2;
 
     for (let i = 0; i < arrowCount; i++) {
-      const a = startAngle + (i / (arrowCount - 1)) * spreadAngle;
+      const a = start + (i / (arrowCount - 1)) * spread;
       const arrow = this.scene.add.image(cx, y, 'particle_arrow')
-        .setDepth(EFFECT_DEPTH).setTint(0xcccccc).setScale(0.8).setAlpha(0.9)
-        .setAngle(Phaser.Math.RadToDeg(a) + 90);
-      const dist = 60;
+        .setDepth(EFFECT_DEPTH).setTint(0xeeeeee).setScale(1).setAlpha(1)
+        .setAngle(Phaser.Math.RadToDeg(a) + 90)
+        .setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      const dist = 80;
       this.scene.tweens.add({
-        targets: arrow,
-        x: cx + Math.cos(a) * dist,
-        y: y + Math.sin(a) * dist,
-        alpha: 0,
-        duration: 400,
-        ease: 'Power1',
+        targets: arrow, x: cx + Math.cos(a) * dist, y: y + Math.sin(a) * dist,
+        alpha: 0, duration: 400, ease: 'Power1',
         onComplete: () => arrow.destroy(),
       });
+      // Trail per arrow
+      this.scene.time.delayedCall(50 * i, () => {
+        const trail = this.scene.add.particles(cx, y, 'particle_circle', {
+          follow: arrow, tint: 0xcccccc, speed: { min: 5, max: 20 }, lifespan: 200,
+          scale: { start: 0.5, end: 0 }, alpha: { start: 0.6, end: 0 }, blendMode: 'ADD',
+          frequency: 30, quantity: 1,
+        }).setDepth(EFFECT_DEPTH);
+        this.scene.time.delayedCall(500, () => trail.destroy());
+      });
     }
+
+    this.flash(cx, y, 0xffffff, 10, 150);
   }
 
   private effectVanish(cx: number, cy: number): void {
     const y = cy - 16;
 
-    // Smoke bomb burst - expanding gray particles
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      const smoke = this.scene.add.image(cx, y, 'particle_smoke')
-        .setDepth(EFFECT_DEPTH).setScale(0.4).setAlpha(0.7)
-        .setTint(0x666666);
-      const dist = 15 + Math.random() * 20;
-      this.scene.tweens.add({
-        targets: smoke,
-        x: cx + Math.cos(a) * dist,
-        y: y + Math.sin(a) * dist,
-        alpha: 0,
-        scale: 1.2,
-        duration: 350,
-        ease: 'Power1',
-        onComplete: () => smoke.destroy(),
-      });
-    }
+    // Dense smoke bomb burst
+    const smoke = this.scene.add.particles(cx, y, 'particle_smoke', {
+      tint: [0x666677, 0x555566, 0x444455],
+      speed: { min: 60, max: 140 }, lifespan: 600,
+      scale: { start: 0.8, end: 2 }, alpha: { start: 0.7, end: 0 },
+      blendMode: 'NORMAL' as unknown as Phaser.BlendModes,
+      angle: { min: 0, max: 360 },
+      emitting: false,
+    }).setDepth(EFFECT_DEPTH);
+    smoke.explode(20);
+    this.scene.time.delayedCall(800, () => smoke.destroy());
 
-    // Central smoke puff
-    const puff = this.scene.add.circle(cx, y, 12, 0x555555, 0.5).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: puff,
-      scaleX: 3,
-      scaleY: 3,
-      alpha: 0,
-      duration: 350,
-      ease: 'Power2',
-      onComplete: () => puff.destroy(),
-    });
+    // Purple-ish shadow sparks
+    this.burst(cx, y, 'particle_spark', 0x9966cc, 12, { speed: 100, lifespan: 400, scale: { start: 0.8, end: 0 } });
+
+    // Dark implosion ring (shrinks instead of expands)
+    const imp = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
+    imp.lineStyle(3, 0x8855aa, 0.7);
+    imp.strokeCircle(cx, y, 40);
+    this.scene.tweens.add({ targets: imp, scaleX: 0, scaleY: 0, alpha: 0, duration: 300, ease: 'Power2', onComplete: () => imp.destroy() });
+
+    this.flash(cx, y, 0x555555, 16, 200);
   }
 
   private effectExplosiveTrap(tx: number, ty: number): void {
     const y = ty - 16;
 
-    // Place glowing circle on ground
-    const trap = this.scene.add.circle(tx, y, 10, 0xff4400, 0.4).setDepth(EFFECT_DEPTH);
-    const trapRing = this.scene.add.graphics().setDepth(EFFECT_DEPTH);
-    trapRing.lineStyle(1.5, 0xff6600, 0.7);
-    trapRing.strokeCircle(tx, y, 10);
-
-    // Pulsing glow
+    // Warning pulse
+    const warn = this.scene.add.circle(tx, y, 12, 0xff4400, 0.5).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
     this.scene.tweens.add({
-      targets: trap,
-      alpha: 0.7,
-      scaleX: 1.2,
-      scaleY: 1.2,
-      yoyo: true,
-      duration: 100,
-      repeat: 1,
-      onComplete: () => {
-        trap.destroy();
-        trapRing.destroy();
-        // Explosion after delay
-        this.trapExplosion(tx, y);
-      },
+      targets: warn, alpha: 0.9, scaleX: 1.3, scaleY: 1.3, yoyo: true, duration: 100, repeat: 1,
+      onComplete: () => { warn.destroy(); this.trapExplosion(tx, y); },
     });
   }
 
   private trapExplosion(x: number, y: number): void {
-    // Explosion ring
-    const ring = this.scene.add.circle(x, y, 8, 0xff4400, 0.6).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: ring,
-      scaleX: 5,
-      scaleY: 4,
-      alpha: 0,
-      duration: 400,
-      ease: 'Power2',
-      onComplete: () => ring.destroy(),
+    this.scene.cameras.main.shake(200, 0.01);
+
+    // Multi-ring explosion
+    for (let r = 0; r < 3; r++) {
+      this.ring(x, y, r === 0 ? 0xffaa00 : 0xff4400, 6 + r * 3, 5 + r, 400 + r * 80, 3);
+    }
+
+    // Fire burst
+    this.burst(x, y, 'particle_flame', 0xff6600, 18, { speed: 160, lifespan: 500, scale: { start: 1.2, end: 0 } });
+    this.burst(x, y, 'particle_spark', 0xffcc00, 10, { speed: 200, lifespan: 400, scale: { start: 0.8, end: 0 }, gravityY: 80 });
+    // Smoke
+    this.burst(x, y, 'particle_smoke', 0x444444, 8, {
+      speed: 40, lifespan: 800, scale: { start: 0.6, end: 1.5 }, alpha: { start: 0.5, end: 0 }, blend: 'NORMAL',
     });
-
-    // Fire particles
-    for (let i = 0; i < 10; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const dist = 10 + Math.random() * 25;
-      const flame = this.scene.add.image(x, y, 'particle_flame')
-        .setDepth(EFFECT_DEPTH).setTint(0xff6600).setScale(0.5).setAlpha(0.8)
-        .setAngle(Math.random() * 360);
-      this.scene.tweens.add({
-        targets: flame,
-        x: x + Math.cos(a) * dist,
-        y: y + Math.sin(a) * dist,
-        alpha: 0,
-        scale: 0.1,
-        duration: 400 + Math.random() * 200,
-        ease: 'Power2',
-        onComplete: () => flame.destroy(),
-      });
-    }
-
-    // Smoke aftermath
-    for (let i = 0; i < 4; i++) {
-      const smoke = this.scene.add.image(
-        x + (Math.random() - 0.5) * 20,
-        y + (Math.random() - 0.5) * 10,
-        'particle_smoke',
-      ).setDepth(EFFECT_DEPTH).setScale(0.5).setAlpha(0.4).setTint(0x444444);
-      this.scene.tweens.add({
-        targets: smoke,
-        y: smoke.y - 20,
-        alpha: 0,
-        scale: 1,
-        duration: 600,
-        delay: 100 + Math.random() * 100,
-        ease: 'Power1',
-        onComplete: () => smoke.destroy(),
-      });
-    }
+    this.flash(x, y, 0xffffff, 12, 150);
+    this.flash(x, y, 0xff4400, 18, 300);
   }
 
   private effectArrowRain(tx: number, ty: number): void {
     const y = ty - 16;
 
-    // Many arrow particles falling from above across a large area
-    for (let i = 0; i < 14; i++) {
-      const startX = tx + (Math.random() - 0.5) * 90;
-      const startY = y - 70 - Math.random() * 30;
-      const endX = startX + (Math.random() - 0.5) * 10;
-      const endY = y + (Math.random() - 0.5) * 30;
-      const arrow = this.scene.add.image(startX, startY, 'particle_arrow')
-        .setDepth(EFFECT_DEPTH).setScale(0.7).setAlpha(0.8)
-        .setAngle(170 + Math.random() * 20); // Pointing roughly downward
-      this.scene.tweens.add({
-        targets: arrow,
-        x: endX,
-        y: endY,
-        alpha: 0.3,
-        duration: 400 + Math.random() * 200,
-        delay: Math.random() * 300,
-        ease: 'Power2.easeIn',
-        onComplete: () => {
-          // Small impact spark
-          const spark = this.scene.add.image(endX, endY, 'particle_spark')
-            .setDepth(EFFECT_DEPTH).setTint(0xcccccc).setScale(0.4).setAlpha(0.6);
-          this.scene.tweens.add({
-            targets: spark,
-            alpha: 0,
-            scale: 0.1,
-            duration: 200,
-            onComplete: () => spark.destroy(),
-          });
-          arrow.destroy();
-        },
+    // Warning zone on ground
+    this.ring(tx, y, 0xcccccc, 20, 2, 600, 2);
+
+    // Arrows raining down from above
+    const arrows = this.scene.add.particles(tx, y - 100, 'particle_arrow', {
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Rectangle(-55, 0, 110, 10) as any },
+      tint: 0xddddee,
+      speed: { min: 120, max: 200 }, angle: { min: 80, max: 100 },
+      lifespan: 500, scale: { start: 1, end: 0.6 }, alpha: { start: 0.9, end: 0.3 },
+      blendMode: 'ADD', frequency: 35, stopAfter: 22,
+      rotate: { min: 170, max: 190 },
+    }).setDepth(EFFECT_DEPTH);
+    arrows.on('complete', () => { this.scene.time.delayedCall(600, () => arrows.destroy()); });
+
+    // Impact sparkles at ground level (delayed)
+    this.scene.time.delayedCall(200, () => {
+      this.burst(tx, y, 'particle_spark', 0xcccccc, 14, {
+        speed: 60, lifespan: 400, scale: { start: 0.6, end: 0 },
       });
-    }
+    });
+
+    // Dust cloud at impact
+    this.scene.time.delayedCall(300, () => {
+      this.burst(tx, y, 'particle_smoke', 0x887766, 8, {
+        speed: 30, lifespan: 500, scale: { start: 0.5, end: 1 }, alpha: { start: 0.4, end: 0 }, blend: 'NORMAL',
+      });
+    });
   }
 
   // ══════════════════════════════════════════════════════════
@@ -1219,15 +1289,7 @@ export class SkillEffectSystem {
 
   private effectGeneric(x: number, y: number, color: number): void {
     const cy = y - 16;
-    const c = this.scene.add.circle(x, cy, 8, color, 0.7).setDepth(EFFECT_DEPTH);
-    this.scene.tweens.add({
-      targets: c,
-      scaleX: 5,
-      scaleY: 5,
-      alpha: 0,
-      duration: 500,
-      ease: 'Power2',
-      onComplete: () => c.destroy(),
-    });
+    this.burst(x, cy, 'particle_circle', color, 14, { speed: 120, lifespan: 500, scale: { start: 1, end: 0 } });
+    this.flash(x, cy, color, 12, 300);
   }
 }

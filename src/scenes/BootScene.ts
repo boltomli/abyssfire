@@ -99,6 +99,8 @@ export class BootScene extends Phaser.Scene {
 
     // Skill effect particle textures
     SkillEffectSystem.generateTextures(this);
+    // Skill icon textures (64×64 per skill)
+    SkillEffectSystem.generateSkillIcons(this);
 
     this.scene.start('MenuScene');
   }

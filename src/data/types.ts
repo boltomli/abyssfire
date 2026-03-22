@@ -7,6 +7,27 @@ export interface Stats {
   lck: number;
 }
 
+/**
+ * Per-level scaling config inspired by Diablo II.
+ * Values are per skill level (applied on top of base).
+ * D2-style: early levels give more value; diminishing returns at higher levels.
+ * Tier brackets: 1-8 (full), 9-16 (75%), 17-20 (50%).
+ */
+export interface SkillScaling {
+  damagePerLevel: number;
+  manaCostPerLevel: number;
+  cooldownReductionPerLevel?: number;
+  aoeRadiusPerLevel?: number;
+  buffValuePerLevel?: number;
+  buffDurationPerLevel?: number;
+}
+
+/** Synergy: another skill that boosts this skill's damage. */
+export interface SkillSynergy {
+  skillId: string;
+  damagePerLevel: number;
+}
+
 export interface SkillDefinition {
   id: string;
   name: string;
@@ -28,6 +49,12 @@ export interface SkillDefinition {
     duration: number;
   };
   icon: string;
+  scaling?: SkillScaling;
+  synergies?: SkillSynergy[];
+  /** Extra crit chance bonus (e.g. backstab +20%) */
+  critBonus?: number;
+  /** Stun duration in ms (e.g. war_stomp) */
+  stunDuration?: number;
 }
 
 export interface ClassDefinition {

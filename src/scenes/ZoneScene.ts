@@ -7,7 +7,7 @@ import { Player } from '../entities/Player';
 import { Monster } from '../entities/Monster';
 import { NPC } from '../entities/NPC';
 import { PathfindingSystem } from '../systems/PathfindingSystem';
-import { CombatSystem } from '../systems/CombatSystem';
+import { CombatSystem, getSkillManaCost, getSkillAoeRadius, getSkillBuffValue, getSkillBuffDuration, getSkillCooldown } from '../systems/CombatSystem';
 import { LootSystem } from '../systems/LootSystem';
 import { InventorySystem } from '../systems/InventorySystem';
 import { QuestSystem } from '../systems/QuestSystem';
@@ -987,7 +987,9 @@ export class ZoneScene extends Phaser.Scene {
     const skill = this.player.getSkill(skillId);
     if (!skill) return;
     if (!this.player.isSkillReady(skillId, time)) return;
-    if (this.player.mana < skill.manaCost) {
+    const level = this.player.getSkillLevel(skillId);
+    const scaledManaCost = getSkillManaCost(skill, level);
+    if (this.player.mana < scaledManaCost) {
       EventBus.emit(GameEvents.LOG_MESSAGE, { text: `法力不足!`, type: 'combat' });
       return;
     }
@@ -1000,7 +1002,7 @@ export class ZoneScene extends Phaser.Scene {
       if (dist > skill.range + 1) return;
     }
 
-    this.player.useSkill(skillId, time);
+    this.player.useSkill(skillId, time, level);
     if (skill.buff || skill.aoe || skill.range > 2) {
       this.player.playCast();
     } else {
@@ -1011,14 +1013,14 @@ export class ZoneScene extends Phaser.Scene {
         this.player.playCast();
       }
     }
-    const level = this.player.getSkillLevel(skillId);
 
 
     if (skill.buff) {
-      this.player.buffs.push({ stat: skill.buff.stat, value: skill.buff.value + level * 0.02, duration: skill.buff.duration, startTime: time });
+      const buffValue = getSkillBuffValue(skill, level);
+      const buffDuration = getSkillBuffDuration(skill, level);
+      this.player.buffs.push({ stat: skill.buff.stat, value: buffValue, duration: buffDuration, startTime: time });
       EventBus.emit(GameEvents.LOG_MESSAGE, { text: `${skill.name} 激活!`, type: 'combat' });
       this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y);
-      // Heal burst for healing buffs, otherwise generic buff flash
       if (this.vfx) {
         if (skill.buff.stat === 'hp' || skillId.includes('heal')) {
           this.vfx.healBurst(this.player.sprite.x, this.player.sprite.y - 16, 10);
@@ -1027,16 +1029,16 @@ export class ZoneScene extends Phaser.Scene {
       return;
     }
 
-    if (skill.aoe && skill.aoeRadius) {
+    const scaledAoeRadius = getSkillAoeRadius(skill, level);
+    if (skill.aoe && scaledAoeRadius > 0) {
       const aoeTargets = this.monsters.filter(m =>
-        m.isAlive() && euclideanDistance(this.player.tileCol, this.player.tileRow, m.tileCol, m.tileRow) <= skill.aoeRadius!
+        m.isAlive() && euclideanDistance(this.player.tileCol, this.player.tileRow, m.tileCol, m.tileRow) <= scaledAoeRadius
       );
       for (const t of aoeTargets) {
-        const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(), t.toCombatEntity(), skill, level);
+        const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(), t.toCombatEntity(), skill, level, this.player.skillLevels);
         t.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
         this.showDamageText(t.sprite.x, t.sprite.y, result.damage, result.isCrit, false, false, skill.damageType);
         if (!t.isAlive()) this.onMonsterKilled(t);
-        // Bloom impact on AoE skill hit
         if (this.vfx && skill.damageType !== 'physical') {
           const impactColor = skillId.includes('fire') || skillId === 'meteor' ? 0xff6600
             : skillId.includes('ice') || skillId === 'blizzard' ? 0x4488ff
@@ -1045,7 +1047,6 @@ export class ZoneScene extends Phaser.Scene {
           this.vfx.skillImpactBloom(t.sprite.x, t.sprite.y - 16, impactColor);
         }
       }
-      // Screen shake on AoE impact
       if (this.vfx && aoeTargets.length > 0) {
         this.vfx.cameraShake(100, 0.004 + aoeTargets.length * 0.001);
       }
@@ -1058,13 +1059,12 @@ export class ZoneScene extends Phaser.Scene {
           this.player.sprite.x, this.player.sprite.y);
       }
     } else if (target) {
-      const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(), target.toCombatEntity(), skill, level);
+      const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(), target.toCombatEntity(), skill, level, this.player.skillLevels);
       target.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
       this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit, false, false, skill.damageType);
       if (!target.isAlive()) this.onMonsterKilled(target);
       this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
         target.sprite.x, target.sprite.y);
-      // Bloom + ground scorch on skill hit
       if (this.vfx) {
         const impactColor = skill.damageType !== 'physical' ? 0xff6600 : 0xf1c40f;
         this.vfx.skillImpactBloom(target.sprite.x, target.sprite.y - 16, impactColor);
@@ -1178,7 +1178,8 @@ export class ZoneScene extends Phaser.Scene {
     for (const skillId of this.player.autoSkillPriority) {
       const skill = this.player.getSkill(skillId);
       if (!skill) continue;
-      if (this.player.isSkillReady(skillId, time) && this.player.mana >= skill.manaCost) {
+      const sLevel = this.player.getSkillLevel(skillId);
+      if (this.player.isSkillReady(skillId, time) && this.player.mana >= getSkillManaCost(skill, sLevel)) {
         this.tryUseSkill(skillId, time);
         break;
       }
