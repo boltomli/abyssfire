@@ -394,6 +394,17 @@ export class MusicEngine {
     this._transition(ctx, destination, 1.0);
   }
 
+  /** Play a specific zone+state combination in one transition (for jukebox). */
+  playZoneState(ctx: AudioContext, destination: AudioNode, zoneId: string, state: MusicState): void {
+    if (this.victoryTimer !== null) {
+      clearTimeout(this.victoryTimer);
+      this.victoryTimer = null;
+    }
+    this.currentZone = zoneId;
+    this.currentState = state;
+    this._transition(ctx, destination, 1.5);
+  }
+
   // ---------------------------------------------------------------------------
   // Transition core
   // ---------------------------------------------------------------------------

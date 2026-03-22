@@ -16,7 +16,7 @@ import { EventBus, GameEvents } from '../../utils/EventBus';
 import { AudioLoader } from './AudioLoader';
 import { MusicEngine } from './MusicEngine';
 import { SFXEngine } from './SFXEngine';
-import type { AudioSettings, SFXType } from './types';
+import type { AudioSettings, MusicState, SFXType } from './types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -120,6 +120,21 @@ export class AudioManager {
   /** Return the AudioLoader instance (for BootScene to decode audio into). */
   getLoader(): AudioLoader {
     return this.loader;
+  }
+
+  /** Play a specific zone+state track combination (for jukebox). */
+  playTrack(zoneId: string, state: MusicState): void {
+    const ctx = this.getCtx();
+    if (!this.musicGain) return;
+    this.musicEngine.playZoneState(ctx, this.musicGain, zoneId, state);
+    void this.loadZoneMusicBuffers(zoneId, ctx);
+  }
+
+  /** Temporarily mute/unmute music without persisting (for jukebox pause). */
+  setMusicTempMute(muted: boolean): void {
+    if (this.musicGain) {
+      this.musicGain.gain.value = muted ? 0 : (this.settings.bgmMuted ? 0 : this.settings.bgmVolume);
+    }
   }
 
   // ---------------------------------------------------------------------------
