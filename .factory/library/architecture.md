@@ -65,7 +65,7 @@ Architectural decisions, patterns, and conventions discovered during the mission
 
 - Exits sit on map borders (col=0/119 or row=0/119)
 - Target coordinates (`targetCol`/`targetRow`) should point to walkable interior tiles in the destination map — **not** border walls (row/col 0 or 119)
-- Currently `changeZone()` ignores target coordinates (player spawns at `playerStart`), but this may change
+- `ZoneScene.create()` now honors `targetCol`/`targetRow` passed through zone transitions and scene restarts, including sub-dungeon return flow; when omitted, spawn still falls back to `playerStart`
 
 ## Companion Systems
 
@@ -78,6 +78,12 @@ Architectural decisions, patterns, and conventions discovered during the mission
 **Cross-scene methods for companions:**
 - `ZoneScene.spawnMercenarySprite()` / `destroyMercenarySprite()` — called from UIScene via `(this.zone as any)` cast
 - `ZoneScene.spawnPetSprite()` / `destroyPetSprite()` — same pattern
+
+## Dialogue And Quest Runtime Patterns
+
+- Dialogue state persistence uses ZoneScene proxy methods that delegate to UIScene (`getDialogueState()` / `setDialogueState()`), mirroring the existing cross-scene companion pattern
+- Dialogue choice rewards are granted directly in UIScene choice handling, not in QuestSystem
+- Story quest runtime actors such as escort NPCs, defend targets, and wave state are owned by `ZoneScene` while progress/state persistence still lives in `QuestSystem`
 
 ## Performance Patterns
 

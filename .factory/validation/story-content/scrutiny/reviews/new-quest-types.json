@@ -1,51 +1,26 @@
 {
   "featureId": "new-quest-types",
-  "reviewedAt": "2026-03-24T15:11:37Z",
+  "reviewedAt": "2026-03-24T16:04:39Z",
   "commitId": "4fef750b2c15be0c8de7a44495a1ddfb55424f2b",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
-  "status": "fail",
+  "status": "pass",
   "codeReview": {
-    "summary": "The feature adds quest definitions, QuestSystem support, quest-log labels, and minimap markers for the four new quest types, but the runtime implementation does not actually realize the required escort, defend, or craft interactions end-to-end. The added scene wiring only auto-completes escort/investigate objectives from player proximity and shows static defend markers/counters; there is no spawned escort NPC, no defend target or wave lifecycle, no quest failure trigger path, and no craft-at-NPC / delivery runtime integration.",
-    "issues": [
-      {
-        "file": "src/scenes/ZoneScene.ts",
-        "line": 2069,
-        "severity": "blocking",
-        "description": "Escort quests are completed purely by the player's proximity to the destination via `updateProgress('escort', obj.targetId)`, but there is no runtime use of `quest.escortNpc`, no escort NPC spawn/follow behavior, and no NPC death failure path. This does not satisfy the required escort quest behavior."
-      },
-      {
-        "file": "src/scenes/ZoneScene.ts",
-        "line": 2019,
-        "severity": "blocking",
-        "description": "Defend quests have no gameplay implementation beyond UI/minimap display. The code never spawns or tracks a defend target, never starts enemy waves, and never calls `failQuest()` for target destruction; the only defend-specific runtime references are UI counters and static minimap markers."
-      },
-      {
-        "file": "src/systems/QuestSystem.ts",
-        "line": 119,
-        "severity": "blocking",
-        "description": "`failQuest()` exists only in QuestSystem and tests; there are no production call sites that invoke it for escort NPC death or defend target destruction. Failed escort/defend quests therefore cannot occur through gameplay, so the re-acceptance feature is not actually wired end-to-end."
-      },
-      {
-        "file": "src/data/types.ts",
-        "line": 337,
-        "severity": "blocking",
-        "description": "Craft quests add `craftPhases` metadata and QuestSystem phase ordering, but there is no runtime integration that updates `craft_craft` or `craft_deliver` from NPC interactions. The only scene-side quest progress updates for new quest types are `investigate_clue` and `escort`, so craft-and-deliver quests cannot be completed in gameplay."
-      }
-    ]
+    "summary": "The original `new-quest-types` commit was rightly blocked for missing escort/defend/craft runtime behavior, but the later fix feature `story-scrutiny-fix-quest-dialogue` now supplies the missing ZoneScene and UIScene wiring. Escort quests now spawn a tracked escort NPC that follows the player, can die, and fails the quest on death; defend quests now spawn a defend target, run enemy waves, and fail on target destruction; craft quests now advance from NPC interactions; and dialogue trees now include reachable reward payloads processed by UIScene. The prior blocking runtime gaps called out in synthesis are resolved in the current codebase.",
+    "issues": []
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The feature was implemented under the `content-worker` skill even though the accepted changes heavily modified runtime systems and scenes (`QuestSystem`, `ZoneScene`, `UIScene`). This suggests the skill boundaries are blurry for story-content features that span both data and runtime wiring.",
-      "evidence": "Feature metadata uses `skillName: content-worker`; commit changes include `src/systems/QuestSystem.ts`, `src/scenes/UIScene.ts`, and `src/scenes/ZoneScene.ts`."
+      "observation": "The original `new-quest-types` implementation was delivered under `content-worker`, but the required behavior depended on substantial runtime scene wiring in `ZoneScene`/`UIScene`. Story-content features that mix authored data with gameplay hooks still blur the boundary between `content-worker` and `systems-worker`.",
+      "evidence": "`features.json` defines `new-quest-types` with `skillName: content-worker`, while the fix had to add runtime methods such as `spawnEscortNpc`, `updateDefendQuest`, and `advanceCraftQuestFromNpc` in `src/scenes/ZoneScene.ts:4748-5150` and reward handling in `src/scenes/UIScene.ts:1788-1807`."
     },
     {
-      "area": "conventions",
-      "observation": "AGENTS.md says runtime wiring features must verify new methods are actually called from ZoneScene at runtime, but this feature adds dead-end quest runtime APIs/metadata (`failQuest`, `escortNpc`, `defendTarget`, `craftPhases`) without corresponding gameplay call sites. The convention exists, but this review shows it was not followed for story quest features.",
-      "evidence": "AGENTS.md: 'Runtime wiring: ... MUST verify that new methods are actually called from ZoneScene at runtime'; grep shows `failQuest()` has no production caller and `escortNpc`/`craftPhases` are only data/UI references."
+      "area": "knowledge",
+      "observation": "The shared architecture notes still do not capture the newer quest-runtime pattern that active quest content can own temporary world actors/objects inside `ZoneScene` (escort NPCs, defend targets, wave state) and that dialogue rewards are granted directly in `UIScene` choice handling.",
+      "evidence": "`.factory/library/architecture.md` documents companion cross-scene methods and persistent systems but does not mention quest runtime actors or dialogue reward flow, while current implementations live in `src/scenes/ZoneScene.ts:4748-5150` and `src/scenes/UIScene.ts:1788-1807`."
     }
   ],
-  "addressesFailureFrom": null,
-  "summary": "Verdict: fail. The commit covers quest data, labels, and partial UI/progress plumbing, but it does not implement the required runtime gameplay for escort, defend, and craft quests, and quest failure is not actually triggered anywhere in production code. Review report written to `.factory/validation/story-content/scrutiny/reviews/new-quest-types.json`."
+  "addressesFailureFrom": "/Users/feuvan/src/abyssfire/.factory/validation/story-content/scrutiny/synthesis.json",
+  "summary": "Pass on fix review: the later `story-scrutiny-fix-quest-dialogue` work resolves the original `new-quest-types` blocking issues by wiring escort NPC follow/death, defend target waves/failure, craft NPC progression, and dialogue rewards into runtime code. No remaining blocking issues were found for this feature in the current codebase."
 }

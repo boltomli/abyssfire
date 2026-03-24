@@ -1,51 +1,26 @@
 {
   "featureId": "zone-content-expansion",
-  "reviewedAt": "2026-03-24T15:11:59Z",
+  "reviewedAt": "2026-03-24T16:05:26.115901+00:00",
   "commitId": "bca1b5b680f139fa0d49e306a81ca6ecb4182033",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
-  "status": "fail",
+  "status": "pass",
   "codeReview": {
-    "summary": "The data-layer expansion is comprehensive and the later runtime-wiring commit shows the intended gameplay hooks, but the reviewed feature commit itself does not satisfy key runtime requirements from the feature spec. In commit bca1b5b only map/NPC/sub-dungeon data and validation tests were added; there was no ZoneScene integration for field NPC spawning, hidden-area discovery, sub-dungeon entrance interaction, or companion transfer, so the feature was incomplete at the reviewed commit.",
-    "issues": [
-      {
-        "file": "src/scenes/ZoneScene.ts",
-        "line": 268,
-        "severity": "blocking",
-        "description": "The reviewed commit does not wire `mapData.fieldNpcs` into runtime NPC spawning. The feature requires ≥2 new NPCs per zone placed in the world, but at commit `bca1b5b680f139fa0d49e306a81ca6ecb4182033` the handoff explicitly states runtime wiring was left undone, so players could not encounter the new field NPCs in-game. This was only added later in commit `9d91065` via `spawnFieldNPCs()`."
-      },
-      {
-        "file": "src/scenes/ZoneScene.ts",
-        "line": 655,
-        "severity": "blocking",
-        "description": "Hidden areas were only defined in map data in the reviewed feature commit and were not discoverable or reward-bearing at runtime. The spec requires hidden areas to stay off the minimap until discovered and contain rewards, but discovery logic (`checkHiddenAreaDiscovery` / `discoverHiddenArea`) did not exist until later commit `9d91065`."
-      },
-      {
-        "file": "src/scenes/ZoneScene.ts",
-        "line": 419,
-        "severity": "blocking",
-        "description": "Sub-dungeon entrances were not interactable in the reviewed commit. The feature requires entrances to be interactable objects leading to separate map areas with exits back to the parent zone, but click handling (`findSubDungeonEntranceAt` / `enterSubDungeon`) was only introduced later in commit `9d91065`, so the required dungeon flow was absent at the reviewed commit."
-      },
-      {
-        "file": "src/scenes/ZoneScene.ts",
-        "line": 3270,
-        "severity": "blocking",
-        "description": "Companion transfer into sub-dungeons was not implemented in the reviewed commit. The handoff for `bca1b5b` explicitly lists this as undone, which means a named requirement in the feature description was unmet until the later runtime-wiring commit."
-      }
-    ]
+    "summary": "The original zone-content-expansion commit was correctly failed in the prior scrutiny round because it shipped only data/types/tests and did not satisfy required runtime behavior. Reviewing the later follow-up commits shows those blocking gaps are now resolved: field NPCs spawn and are interactable in ZoneScene, hidden areas are discovered via fog-clearing and grant rewards, sub-dungeon entrances are interactable and exit back to the parent entrance position, and mini-boss loot quality floors now satisfy the hidden-area/sub-dungeon expectations tied to the original feature.",
+    "issues": []
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The content-worker skill says to ensure content integrates correctly, but for this feature the worker stopped at data definitions and tests even though the spec included runtime behavior (field NPC presence, hidden-area discovery, interactable sub-dungeons, companion transfer). The procedure should more explicitly call out that when feature requirements include in-game interaction, the worker must either implement the ZoneScene/UI wiring or return to orchestrator for a systems-worker follow-up before marking the feature complete.",
-      "evidence": "`src/abyssfire/.factory/skills/content-worker/SKILL.md` says 'Ensure content integrates correctly', while the `zone-content-expansion` handoff for commit `bca1b5b680f139fa0d49e306a81ca6ecb4182033` states: 'Runtime wiring in ZoneScene ... is not done ... Companion transfer into sub-dungeons requires ZoneScene changeZone logic updates.'"
+      "observation": "The content-worker skill still frames map/NPC work primarily as data creation and only says to ensure content is loadable, which did not match this feature's required in-game interaction scope. The original worker handoff explicitly marked runtime wiring undone despite the feature description requiring interactable entrances, discoverable hidden areas, and companion transfer.",
+      "evidence": ".factory/skills/content-worker/SKILL.md step 5 says only 'Ensure content integrates correctly'; feature description in features.json:1188 requires hidden areas not on minimap until discovered, interactable sub-dungeon entrances, and companion transfer; handoff 2026-03-24T14-45-23-947Z__zone-content-expansion__8052722f-883c-4b4d-9650-8afc2b36808c.json says runtime wiring in ZoneScene was left undone."
     },
     {
       "area": "knowledge",
-      "observation": "Mission shared state does not capture that map-data-only additions are insufficient for features whose expected behavior depends on ZoneScene runtime hooks. This gap allowed a feature to be marked complete even though gameplay behavior was deferred to a later commit.",
-      "evidence": "`AGENTS.md` documents runtime-wiring expectations for combat features, but there is no equivalent note for map/content features. The reviewed feature's later follow-up commit `9d91065` added all missing runtime hooks in `src/scenes/ZoneScene.ts`, confirming the missing pattern was real rather than optional."
+      "observation": "The project library still documents stale exit behavior ('changeZone() ignores target coordinates') even though the scrutiny fix now relies on targetCol/targetRow-driven spawning for both normal exits and sub-dungeon returns. This is actionable shared knowledge that should be updated so future workers do not design around outdated semantics.",
+      "evidence": ".factory/library/architecture.md 'Map Exit Coordinate Convention' says changeZone() ignores target coordinates; current implementation in src/scenes/ZoneScene.ts:2629-2643 passes targetCol/targetRow through restart and src/scenes/ZoneScene.ts:264-268 spawns the player from those values."
     }
   ],
-  "addressesFailureFrom": null,
-  "summary": "Verdict: fail. The reviewed commit `bca1b5b680f139fa0d49e306a81ca6ecb4182033` added substantial zone-content data and strong validation tests, but it did not implement the runtime behavior required by the feature spec: field NPC spawning, hidden-area discovery/rewards, interactable sub-dungeon entrances/exits, and companion transfer. Those missing pieces were only delivered in the later follow-up commit `9d91065`, so this feature was not complete at the reviewed commit."
+  "addressesFailureFrom": "/Users/feuvan/src/abyssfire/.factory/validation/story-content/scrutiny/synthesis.json",
+  "summary": "Reviewed the original failing feature plus the later runtime and scrutiny-fix commits. The original commit alone was incomplete, but the current codebase now satisfies the previously blocking zone-content-expansion expectations for field NPC runtime presence, fog-based hidden-area discovery with rewards, interactable sub-dungeons with return-to-entrance flow, companion transfer continuity, and guaranteed enhanced mini-boss loot; no remaining blocking issues were found for this feature."
 }
