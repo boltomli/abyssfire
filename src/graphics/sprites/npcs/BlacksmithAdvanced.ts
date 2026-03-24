@@ -104,7 +104,7 @@ export const BlacksmithAdvancedDrawer: EntityDrawer = {
     utils.drawPart(ctx, cx + 3 * s, by - 26 * s, 10 * s, 21 * s, legColor, 3 * s);
 
     // Soft outline glow (warm — NPC)
-    utils.softOutline(ctx, 'rgba(180,150,100,0.15)', 5);
+    utils.zoneNpcOutline(ctx, w, h);
 
     // ── Apron (heavier, with trim) ──
     utils.drawLeatherTexture(ctx, cx - 15 * s + bodyLean, by - 54 * s, 30 * s, 36 * s, APRON);

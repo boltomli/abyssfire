@@ -28,8 +28,6 @@ export const TreeDrawer: EntityDrawer = {
       ctx.stroke();
     }
 
-    // Soft outline glow (green — vegetation)
-    utils.softOutline(ctx, 'rgba(60,100,40,0.15)', 4);
 
     // Trunk — gnarled via drawPart with bark detail (darkened 25%)
     utils.drawPart(ctx, w / 2 - 2.5 * s, h * 0.42, 5 * s, h * 0.30, 0x1f1208, 1 * s);
@@ -73,8 +71,6 @@ export const TreeDrawer: EntityDrawer = {
       utils.fillEllipse(ctx, w / 2 + dxF * w, h * cyF, w * rxF, h * ryF);
     }
 
-    // End soft outline
-    utils.softOutlineEnd(ctx);
 
     // Canopy highlight specular (reduced)
     ctx.fillStyle = 'rgba(50,110,35,0.08)';

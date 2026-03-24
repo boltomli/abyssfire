@@ -72,7 +72,7 @@ export const FireElementalDrawer: EntityDrawer = {
     utils.fillEllipse(ctx, cx, baseY + 1 * s, flameW * 0.9, 3.5 * s);
 
     // Soft outline glow (orange — fire)
-    utils.softOutline(ctx, 'rgba(255,140,0,0.3)', 6);
+    utils.zoneEntityOutline(ctx, w, h);
 
     // ── Three layered flame silhouettes ─────────────────────────────────────
     // Outer: dark orange
@@ -95,7 +95,7 @@ export const FireElementalDrawer: EntityDrawer = {
     utils.softOutlineEnd(ctx);
 
     // Rim light on core
-    utils.rimLight(ctx, cx, coreY, flameW * 0.35, flameH * 0.25, 'rgba(255,120,0,0.15)');
+    utils.zoneEntityRimLight(ctx, cx, coreY, flameW * 0.35, flameH * 0.25);
 
     // ── Face: glowing eyes ───────────────────────────────────────────────────
     const eyeY = baseY - flameH * 0.42;

@@ -181,7 +181,7 @@ export const SuccubusDrawer: EntityDrawer = {
     const torsoY = baseY - 32 * s + bodyOffsetY;
 
     // Soft outline glow (red/orange — demonic)
-    utils.softOutline(ctx, 'rgba(200,50,30,0.25)', 5);
+    utils.zoneEntityOutline(ctx, w, h);
 
     // Hips
     const hipGrad = ctx.createRadialGradient(torsoX - 2 * s, torsoY + 4 * s, 0, torsoX, torsoY + 6 * s, 9 * s);
@@ -218,7 +218,7 @@ export const SuccubusDrawer: EntityDrawer = {
     utils.softOutlineEnd(ctx);
 
     // Rim light on chest
-    utils.rimLight(ctx, torsoX, torsoY - 8 * s, 7.5 * s, 9 * s, 'rgba(180,40,20,0.12)');
+    utils.zoneEntityRimLight(ctx, torsoX, torsoY - 8 * s, 7.5 * s, 9 * s);
 
     // ── Slender arms ──────────────────────────────────────────────────────────
     for (const side of [-1, 1]) {

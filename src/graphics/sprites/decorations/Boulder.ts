@@ -14,8 +14,6 @@ export const BoulderDrawer: EntityDrawer = {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     utils.fillEllipse(ctx, w / 2, h - s, 9 * s, 2.2 * s);
 
-    // Soft outline glow (gray — stone)
-    utils.softOutline(ctx, 'rgba(100,100,110,0.15)', 4);
 
     // Massive angular polygon boulder via clip
     ctx.save();
@@ -44,8 +42,6 @@ export const BoulderDrawer: EntityDrawer = {
 
     ctx.restore();
 
-    // End soft outline
-    utils.softOutlineEnd(ctx);
 
     // Moss on top — green ellipse overlay
     ctx.fillStyle = 'rgba(55,90,40,0.38)';

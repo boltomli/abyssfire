@@ -30,6 +30,7 @@ import type { ActiveEvent, RandomEventType } from '../systems/RandomEventSystem'
 import { audioManager } from '../systems/audio/AudioManager';
 import { applyColorGrading } from '../graphics/ColorGradePipeline';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
+import { setCurrentZonePalette } from '../graphics/ZonePalette';
 import { AllClasses } from '../data/classes/index';
 import { AllMaps } from '../data/maps/index';
 import { MonstersByZone, getMonsterDef } from '../data/monsters/index';
@@ -233,6 +234,8 @@ export class ZoneScene extends Phaser.Scene {
       this.mapData = AllMaps[this.currentMapId];
     }
     this.campPositions = this.mapData.camps.map(c => ({ col: c.col, row: c.row }));
+    // Set the active zone color palette for sprite generation
+    setCurrentZonePalette(this.mapData.theme ?? 'plains');
     this._pendingSaveData = data.saveData ?? null;
     if (data.discoveredHiddenAreas) {
       this.discoveredHiddenAreas = new Set(data.discoveredHiddenAreas);

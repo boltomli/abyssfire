@@ -283,7 +283,7 @@ export const PlayerWarriorDrawer: EntityDrawer = {
         }
 
         // Soft metallic glow on sword
-        utils.softOutline(ctx, 'rgba(200, 200, 220, 0.2)', 3);
+        utils.zonePlayerOutline(ctx, w, h);
 
         // Blade
         ctx.strokeStyle = utils.rgb(BLADE_COLOR);
@@ -337,7 +337,7 @@ export const PlayerWarriorDrawer: EntityDrawer = {
     utils.fillEllipse(ctx, headX, headY - 2 * s, 10 * s, 10 * s);
 
     // Rim light on helm
-    utils.rimLight(ctx, headX, headY - 2 * s, 10 * s, 10 * s, 'rgba(180,190,200,0.1)');
+    utils.zonePlayerRimLight(ctx, headX, headY - 2 * s, 10 * s, 10 * s);
 
     // Visor / face opening — skin visible
     const faceGrad = ctx.createLinearGradient(headX - 5 * s, headY + 1 * s, headX + 5 * s, headY + 6 * s);

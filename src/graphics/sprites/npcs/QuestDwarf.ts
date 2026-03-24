@@ -114,7 +114,7 @@ export const QuestDwarfDrawer: EntityDrawer = {
     utils.drawPart(ctx, cx + 3 * s, legBase - 15 * s, 10 * s, 17 * s, legColor, 3 * s);
 
     // Soft outline glow (warm — NPC)
-    utils.softOutline(ctx, 'rgba(180,150,100,0.15)', 5);
+    utils.zoneNpcOutline(ctx, w, h);
 
     // ── Wide torso ──
     const torsoW = 26 * bodyW;

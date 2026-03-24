@@ -98,7 +98,7 @@ export const ForestHermitDrawer: EntityDrawer = {
     }
 
     // Soft outline glow (green — forest NPC)
-    utils.softOutline(ctx, 'rgba(80,140,60,0.15)', 5);
+    utils.zoneNpcOutline(ctx, w, h);
 
     // ── Mossy patched cloak (full body) ──
     ctx.fillStyle = utils.rgb(CLOAK);

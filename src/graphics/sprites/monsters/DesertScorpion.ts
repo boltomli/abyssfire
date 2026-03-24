@@ -68,7 +68,7 @@ export const DesertScorpionDrawer: EntityDrawer = {
     utils.fillEllipse(ctx, cx, baseY + 1.5 * s, 18 * s * contractScale, 3 * s);
 
     // Soft outline glow (sandy — desert)
-    utils.softOutline(ctx, 'rgba(160,120,60,0.2)', 5);
+    utils.zoneEntityOutline(ctx, w, h);
 
     // ── Carapace (body) — segmented overlapping ellipses ────────────────────
     ctx.save();

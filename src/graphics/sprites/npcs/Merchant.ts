@@ -104,7 +104,7 @@ export const MerchantDrawer: EntityDrawer = {
     utils.drawPart(ctx, cx + 3 * s, by - 24 * s, 8 * s, 20 * s, legColor, 3 * s);
 
     // Soft outline glow (warm — NPC)
-    utils.softOutline(ctx, 'rgba(180,150,100,0.15)', 5);
+    utils.zoneNpcOutline(ctx, w, h);
 
     // ── Shirt (back layer) ──
     utils.drawPart(ctx, cx - 13 * s + bodyLean, by - 50 * s, 26 * s, 30 * s, SHIRT, 5 * s);

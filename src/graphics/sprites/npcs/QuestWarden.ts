@@ -121,7 +121,7 @@ export const QuestWardenDrawer: EntityDrawer = {
     ctx.fillRect(cx - 2 * s + bodyLean, by - 48 * s, 4 * s, 44 * s);
 
     // Soft outline glow (warm — NPC)
-    utils.softOutline(ctx, 'rgba(180,150,100,0.15)', 5);
+    utils.zoneNpcOutline(ctx, w, h);
 
     // ── Dark armor chest ──
     utils.drawPart(ctx, cx - 12 * s + bodyLean, by - 50 * s, 24 * s, 30 * s, ARMOR, 4 * s);

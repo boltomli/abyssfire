@@ -159,7 +159,7 @@ export const PhoenixDrawer: EntityDrawer = {
     }
 
     // Soft outline glow (orange — fire)
-    utils.softOutline(ctx, 'rgba(255,140,0,0.3)', 6);
+    utils.zoneEntityOutline(ctx, w, h);
 
     // ── Body (ellipse torso) ──────────────────────────────────────────────────
     const bodyGrad = ctx.createRadialGradient(cx - 3 * s, baseY - 22 * s, 0, cx, baseY - 18 * s, 12 * s);
@@ -173,7 +173,7 @@ export const PhoenixDrawer: EntityDrawer = {
     utils.softOutlineEnd(ctx);
 
     // Rim light on body
-    utils.rimLight(ctx, cx, baseY - 18 * s, 9 * s, 13 * s, 'rgba(255,120,0,0.15)');
+    utils.zoneEntityRimLight(ctx, cx, baseY - 18 * s, 9 * s, 13 * s);
 
     // Feather texture lines on body
     ctx.strokeStyle = utils.rgb(WING_MID, 0.35);

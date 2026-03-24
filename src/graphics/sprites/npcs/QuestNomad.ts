@@ -105,7 +105,7 @@ export const QuestNomadDrawer: EntityDrawer = {
     }
 
     // Soft outline glow (sandy — desert NPC)
-    utils.softOutline(ctx, 'rgba(160,120,60,0.15)', 5);
+    utils.zoneNpcOutline(ctx, w, h);
 
     // ── Sandy cloak (full body) ──
     ctx.fillStyle = utils.rgb(CLOAK);

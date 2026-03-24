@@ -116,7 +116,7 @@ export const StoneGolemDrawer: EntityDrawer = {
     ctx.fillRect(torsoX - 9 * s, lowerTorsoY - 9 * s, 18 * s, segGap * 2);
 
     // Soft outline glow (gray — stone)
-    utils.softOutline(ctx, 'rgba(120,120,130,0.2)', 5);
+    utils.zoneEntityOutline(ctx, w, h);
 
     // Upper torso polygon
     ctx.beginPath();

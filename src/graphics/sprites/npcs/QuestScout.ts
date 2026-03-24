@@ -106,7 +106,7 @@ export const QuestScoutDrawer: EntityDrawer = {
     utils.drawPart(ctx, cx + 3 * s, by - 26 * s, 8 * s, 21 * s, legColor, 3 * s);
 
     // Soft outline glow (warm — NPC)
-    utils.softOutline(ctx, 'rgba(180,150,100,0.15)', 5);
+    utils.zoneNpcOutline(ctx, w, h);
 
     // ── Cloak (behind body) ──
     ctx.fillStyle = utils.rgb(CLOAK);
