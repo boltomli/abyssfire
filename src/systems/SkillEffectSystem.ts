@@ -646,6 +646,187 @@ export class SkillEffectSystem {
     g.fillCircle(C + 6, C + 14, 2);
     g.generateTexture('skill_icon_mana_shield', S, S);
 
+    // fire_wall — horizontal flame wall
+    fillBg(0x441100);
+    // Ground line
+    g.fillStyle(0x664422, 0.6);
+    g.fillRect(4, C + 10, 56, 6);
+    // Flame pillars rising from ground
+    const wallFlames = [10, 22, 32, 42, 52];
+    for (const fx of wallFlames) {
+      g.fillStyle(0xff4400, 0.8);
+      g.fillTriangle(fx, C + 10, fx - 5, C - 8 - Math.random() * 6, fx + 5, C + 10);
+      g.fillStyle(0xff6600, 0.6);
+      g.fillTriangle(fx, C + 8, fx - 3, C - 4 - Math.random() * 4, fx + 3, C + 8);
+      g.fillStyle(0xffaa00, 0.4);
+      g.fillTriangle(fx, C + 6, fx - 2, C - 2, fx + 2, C + 6);
+    }
+    // Heat shimmer lines
+    g.lineStyle(1, 0xffdd44, 0.3);
+    g.beginPath(); g.moveTo(8, C - 12); g.lineTo(56, C - 14); g.strokePath();
+    g.beginPath(); g.moveTo(10, C - 18); g.lineTo(54, C - 20); g.strokePath();
+    // Orange glow at base
+    g.fillStyle(0xff6600, 0.2);
+    g.fillRect(4, C + 4, 56, 12);
+    g.generateTexture('skill_icon_fire_wall', S, S);
+
+    // combustion — internal explosion burst
+    fillBg(0x441100);
+    // Target silhouette (dark circle)
+    g.fillStyle(0x663322, 0.5);
+    g.fillCircle(C, C, 16);
+    // Explosion lines radiating outward
+    for (let a = 0; a < 360; a += 30) {
+      const rad = Phaser.Math.DegToRad(a);
+      g.lineStyle(3, 0xff4400, 0.8);
+      g.beginPath();
+      g.moveTo(C + Math.cos(rad) * 10, C + Math.sin(rad) * 10);
+      g.lineTo(C + Math.cos(rad) * 26, C + Math.sin(rad) * 26);
+      g.strokePath();
+    }
+    // Inner core — white hot
+    g.fillStyle(0xffdd44, 0.9);
+    g.fillCircle(C, C, 8);
+    g.fillStyle(0xffffff, 0.6);
+    g.fillCircle(C, C, 4);
+    // Outer fire ring
+    g.lineStyle(2, 0xff6600, 0.6);
+    g.strokeCircle(C, C, 20);
+    g.lineStyle(1, 0xffaa00, 0.4);
+    g.strokeCircle(C, C, 24);
+    // Fire particles
+    g.fillStyle(0xff4400, 0.7);
+    g.fillCircle(C - 16, C - 14, 3);
+    g.fillCircle(C + 18, C - 10, 2.5);
+    g.fillCircle(C + 14, C + 16, 3);
+    g.fillCircle(C - 12, C + 18, 2.5);
+    g.generateTexture('skill_icon_combustion', S, S);
+
+    // ice_arrow — frost projectile arrow
+    fillBg(0x112244);
+    // Arrow shaft (angled, pointing right)
+    g.fillStyle(0xaaddff, 0.9);
+    g.fillPoints([new P(12, C + 6), new P(14, C - 2), new P(50, C - 8), new P(50, C - 2)], true);
+    // Arrow head (ice crystal)
+    g.fillStyle(0x88ccff, 0.9);
+    g.fillPoints([new P(50, C - 10), new P(58, C - 5), new P(50, C), new P(48, C - 5)], true);
+    g.fillStyle(0xcceeFF, 0.5);
+    g.fillPoints([new P(51, C - 8), new P(56, C - 5), new P(51, C - 2)], true);
+    // Fletching (ice crystal)
+    g.fillStyle(0x88ccff, 0.6);
+    g.fillTriangle(12, C - 6, 6, C - 14, 16, C - 2);
+    g.fillTriangle(12, C + 8, 6, C + 16, 16, C + 4);
+    // Frost trail particles behind arrow
+    g.fillStyle(0xaaddff, 0.4);
+    g.fillCircle(8, C + 2, 3);
+    g.fillCircle(14, C - 8, 2);
+    g.fillCircle(10, C + 10, 2.5);
+    // Icy glow around arrowhead
+    g.fillStyle(0x88ccff, 0.2);
+    g.fillCircle(52, C - 5, 10);
+    g.generateTexture('skill_icon_ice_arrow', S, S);
+
+    // freeze — ice crystal cage
+    fillBg(0x112244);
+    // Central frozen target (dark circle)
+    g.fillStyle(0x4488aa, 0.4);
+    g.fillCircle(C, C, 12);
+    // Ice crystals around the target (6 crystals in a ring)
+    for (let i = 0; i < 6; i++) {
+      const ia = (i / 6) * Math.PI * 2 - Math.PI / 2;
+      const icx = C + Math.cos(ia) * 18;
+      const icy = C + Math.sin(ia) * 18;
+      g.fillStyle(0x88ccff, 0.8);
+      g.fillPoints([
+        new P(icx, icy - 8),
+        new P(icx + 4, icy),
+        new P(icx, icy + 4),
+        new P(icx - 4, icy),
+      ], true);
+      g.fillStyle(0xaaddff, 0.5);
+      g.fillPoints([
+        new P(icx, icy - 6),
+        new P(icx + 2, icy),
+        new P(icx, icy + 2),
+        new P(icx - 2, icy),
+      ], true);
+    }
+    // Connecting lines between crystals (ice cage bars)
+    g.lineStyle(1.5, 0x88ccff, 0.4);
+    for (let i = 0; i < 6; i++) {
+      const ia1 = (i / 6) * Math.PI * 2 - Math.PI / 2;
+      const ia2 = ((i + 1) / 6) * Math.PI * 2 - Math.PI / 2;
+      g.beginPath();
+      g.moveTo(C + Math.cos(ia1) * 18, C + Math.sin(ia1) * 18);
+      g.lineTo(C + Math.cos(ia2) * 18, C + Math.sin(ia2) * 18);
+      g.strokePath();
+    }
+    // Frost glow
+    g.fillStyle(0x88ccff, 0.15);
+    g.fillCircle(C, C, 22);
+    // White shine
+    g.fillStyle(0xffffff, 0.3);
+    g.fillCircle(C - 4, C - 6, 3);
+    g.generateTexture('skill_icon_freeze', S, S);
+
+    // teleport — arcane portal swirl
+    fillBg(0x220044);
+    // Outer arcane ring
+    g.lineStyle(3, 0x8855cc, 0.7);
+    g.strokeCircle(C, C, 22);
+    g.lineStyle(2, 0x9966ff, 0.5);
+    g.strokeCircle(C, C, 18);
+    // Swirl inside the ring
+    g.lineStyle(2, 0xbb88ff, 0.6);
+    g.beginPath();
+    for (let t = 0; t < Math.PI * 3; t += 0.15) {
+      const sr = 14 * (1 - t / (Math.PI * 3));
+      const sx = C + Math.cos(t) * sr;
+      const sy = C + Math.sin(t) * sr;
+      if (t === 0) g.moveTo(sx, sy); else g.lineTo(sx, sy);
+    }
+    g.strokePath();
+    // Central bright point
+    g.fillStyle(0xddbbff, 0.9);
+    g.fillCircle(C, C, 4);
+    g.fillStyle(0xffffff, 0.6);
+    g.fillCircle(C, C, 2);
+    // Departure/arrival arrows (up arrow suggesting movement)
+    g.fillStyle(0x9966ff, 0.6);
+    g.fillTriangle(C, 4, C - 6, 14, C + 6, 14);
+    g.fillStyle(0xbb88ff, 0.5);
+    g.fillTriangle(C, 58, C - 6, 48, C + 6, 48);
+    // Sparkles
+    g.fillStyle(0xddbbff, 0.5);
+    g.fillCircle(C - 14, C - 10, 2);
+    g.fillCircle(C + 16, C - 8, 1.5);
+    g.fillCircle(C + 12, C + 14, 2);
+    g.fillCircle(C - 10, C + 16, 1.5);
+    g.generateTexture('skill_icon_teleport', S, S);
+
+    // arcane_torrent — arcane energy barrage
+    fillBg(0x220044);
+    // Multiple arcane bolts raining down
+    const torrentPositions = [[18, 14], [32, 10], [46, 16], [24, 28], [40, 24], [14, 40], [34, 38], [50, 36]];
+    for (const [bx, by] of torrentPositions) {
+      g.fillStyle(0x9966ff, 0.8);
+      g.fillCircle(bx, by, 3);
+      g.fillStyle(0xbb88ff, 0.4);
+      g.fillCircle(bx, by, 5);
+      // Trail upward
+      g.lineStyle(1, 0x8844cc, 0.5);
+      g.beginPath(); g.moveTo(bx, by); g.lineTo(bx - 1, by - 8); g.strokePath();
+    }
+    // Ground impact zone
+    g.fillStyle(0x8855cc, 0.3);
+    g.fillCircle(C, C + 8, 18);
+    g.lineStyle(2, 0x9966ff, 0.5);
+    g.strokeCircle(C, C + 8, 18);
+    // Bright center glow
+    g.fillStyle(0xbb88ff, 0.25);
+    g.fillCircle(C, C, 12);
+    g.generateTexture('skill_icon_arcane_torrent', S, S);
+
     // ═══ ROGUE ═══
 
     // backstab — dagger pointing down
@@ -836,6 +1017,12 @@ export class SkillEffectSystem {
       case 'meteor': this.effectMeteor(targetX ?? casterX, targetY ?? casterY); break;
       case 'ice_armor': this.effectIceArmor(casterX, casterY); break;
       case 'chain_lightning': this.effectChainLightning(casterX, casterY, targets ?? []); break;
+      case 'fire_wall': this.effectFireWall(targetX ?? casterX, targetY ?? casterY); break;
+      case 'combustion': this.effectCombustion(targetX ?? casterX, targetY ?? casterY); break;
+      case 'ice_arrow': this.effectIceArrow(casterX, casterY, targetX ?? casterX, targetY ?? casterY); break;
+      case 'freeze': this.effectFreeze(targetX ?? casterX, targetY ?? casterY); break;
+      case 'teleport': this.effectTeleport(casterX, casterY, targetX ?? casterX, targetY ?? casterY); break;
+      case 'arcane_torrent': this.effectArcaneTorrent(targetX ?? casterX, targetY ?? casterY); break;
       // Rogue
       case 'backstab': this.effectBackstab(targetX ?? casterX, targetY ?? casterY); break;
       case 'poison_blade': this.effectPoisonBlade(casterX, casterY); break;
@@ -1637,6 +1824,241 @@ export class SkillEffectSystem {
       bolt.lineTo(x2, y2); bolt.strokePath();
       this.scene.tweens.add({ targets: bolt, alpha: 0, duration: 350, ease: 'Power2', onComplete: () => bolt.destroy() });
     }
+  }
+
+  // ── New Mage effects ────────────────────────────────────
+
+  private effectFireWall(tx: number, ty: number): void {
+    const y = ty - 16;
+
+    // Ground fire zone — horizontal wall of flames
+    const wall = this.scene.add.particles(tx, y, 'particle_flame', {
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Rectangle(-40, -8, 80, 16) as any },
+      tint: [0xff4400, 0xff6600, 0xffaa00, 0xffdd44],
+      speed: { min: 40, max: 100 }, angle: { min: 250, max: 290 },
+      lifespan: 600, scale: { start: 1.2, end: 0.3 }, alpha: { start: 0.9, end: 0 },
+      blendMode: 'ADD', frequency: 20, stopAfter: 36,
+      rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
+    wall.on('complete', () => { this.scene.time.delayedCall(700, () => wall.destroy()); });
+
+    // Ground scorch line
+    const scorch = this.scene.add.graphics().setDepth(EFFECT_DEPTH - 1);
+    scorch.fillStyle(0xff4400, 0.3);
+    scorch.fillRect(tx - 40, y - 4, 80, 8);
+    scorch.setScale(1, 0.5);
+    this.scene.tweens.add({ targets: scorch, alpha: 0, duration: 2000, delay: 400, onComplete: () => scorch.destroy() });
+
+    // Expanding heat rings
+    this.ring(tx, y, 0xff6600, 10, 4, 500, 2);
+    this.ring(tx, y, 0xffaa00, 8, 3, 400, 2);
+
+    // Sparks rising
+    this.burst(tx, y, 'particle_spark', 0xffaa00, 14, {
+      speed: 80, lifespan: 500, scale: { start: 0.8, end: 0 }, gravityY: -60,
+    });
+    this.flash(tx, y, 0xff4400, 14, 250);
+  }
+
+  private effectCombustion(tx: number, ty: number): void {
+    const y = ty - 16;
+    this.scene.cameras.main.shake(200, 0.01);
+
+    // Intense internal explosion — multi-layer fire burst
+    // Inner core — white hot
+    this.flash(tx, y, 0xffffff, 18, 150);
+    // Middle layer — bright orange
+    this.flash(tx, y, 0xffaa00, 24, 300);
+    // Outer layer — red
+    this.flash(tx, y, 0xff4400, 30, 450);
+
+    // Rapid expanding fire rings
+    for (let r = 0; r < 4; r++) {
+      this.ring(tx, y, r < 2 ? 0xffaa00 : 0xff4400, 6 + r * 3, 5 + r * 1.5, 350 + r * 60, 3);
+    }
+
+    // Intense fire particle burst
+    this.burst(tx, y, 'particle_flame', 0xff4400, 24, { speed: 200, lifespan: 500, scale: { start: 1.4, end: 0 } });
+    this.burst(tx, y, 'particle_spark', 0xffdd44, 16, { speed: 240, lifespan: 400, scale: { start: 1, end: 0 }, gravityY: 60 });
+
+    // Smoke plume
+    this.burst(tx, y, 'particle_smoke', 0x555555, 10, {
+      speed: 50, lifespan: 900, scale: { start: 0.6, end: 2 }, alpha: { start: 0.5, end: 0 }, blend: 'NORMAL', gravityY: -40,
+    });
+  }
+
+  private effectIceArrow(cx: number, cy: number, tx: number, ty: number): void {
+    const sx = cx, sy = cy - 16, ex = tx, ey = ty - 16;
+    const dist = Phaser.Math.Distance.Between(sx, sy, ex, ey);
+    const dur = Math.max(250, Math.min(500, dist * 1.5));
+    const angle = Phaser.Math.RadToDeg(Math.atan2(ey - sy, ex - sx));
+
+    // Ice arrow projectile
+    const arrow = this.scene.add.image(sx, sy, 'particle_arrow')
+      .setDepth(EFFECT_DEPTH).setTint(0x88ccff).setScale(1.2).setAlpha(1)
+      .setAngle(angle + 90)
+      .setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    const glow = this.scene.add.circle(sx, sy, 10, 0x88ccff, 0.4).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+
+    // Ice crystal trail
+    const trail = this.scene.add.particles(sx, sy, 'particle_ice', {
+      follow: arrow, tint: [0x88ccff, 0xaaddff, 0xcceeFF],
+      speed: { min: 10, max: 30 }, lifespan: 300,
+      scale: { start: 0.8, end: 0 }, alpha: { start: 0.8, end: 0 },
+      blendMode: 'ADD', frequency: 20, quantity: 2,
+      rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
+
+    this.scene.tweens.add({
+      targets: [arrow, glow], x: ex, y: ey, duration: dur, ease: 'Power1',
+      onComplete: () => {
+        arrow.destroy(); glow.destroy(); trail.stop();
+        this.scene.time.delayedCall(350, () => trail.destroy());
+        // Impact: frost burst
+        this.burst(ex, ey, 'particle_ice', 0x88ccff, 12, { speed: 120, lifespan: 400, scale: { start: 1, end: 0 } });
+        this.burst(ex, ey, 'particle_star', 0xccddff, 8, { speed: 80, lifespan: 350, scale: { start: 0.6, end: 0 } });
+        this.flash(ex, ey, 0x88ccff, 12, 200);
+        this.ring(ex, ey, 0xaaddff, 6, 3, 350, 2);
+      },
+    });
+  }
+
+  private effectFreeze(tx: number, ty: number): void {
+    const y = ty - 16;
+
+    // Frost implosion — ring shrinks inward
+    const implosion = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    implosion.lineStyle(4, 0x88ccff, 0.8);
+    implosion.strokeCircle(tx, y, 40);
+    this.scene.tweens.add({ targets: implosion, scaleX: 0.1, scaleY: 0.1, alpha: 0, duration: 350, ease: 'Power2', onComplete: () => implosion.destroy() });
+
+    // Ice crystal cage forming around target
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const radius = 18;
+      const cx = tx + Math.cos(angle) * radius;
+      const cy = y + Math.sin(angle) * radius * 0.6;
+      const crystal = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      crystal.fillStyle(0x88ccff, 0.6);
+      crystal.fillPoints([
+        new Phaser.Geom.Point(cx, cy - 12),
+        new Phaser.Geom.Point(cx + 5, cy),
+        new Phaser.Geom.Point(cx, cy + 6),
+        new Phaser.Geom.Point(cx - 5, cy),
+      ], true);
+      crystal.fillStyle(0xaaddff, 0.4);
+      crystal.fillPoints([
+        new Phaser.Geom.Point(cx, cy - 10),
+        new Phaser.Geom.Point(cx + 3, cy),
+        new Phaser.Geom.Point(cx, cy + 4),
+        new Phaser.Geom.Point(cx - 3, cy),
+      ], true);
+      crystal.setAlpha(0).setScale(0.3);
+      this.scene.tweens.add({
+        targets: crystal, alpha: 1, scaleX: 1, scaleY: 1, duration: 200, delay: i * 40, ease: 'Back.easeOut',
+        onComplete: () => {
+          this.scene.tweens.add({ targets: crystal, alpha: 0, duration: 1500, ease: 'Power1', onComplete: () => crystal.destroy() });
+        },
+      });
+    }
+
+    // Frost sparkle burst
+    this.burst(tx, y, 'particle_ice', 0xaaddff, 16, { speed: 60, lifespan: 600, scale: { start: 1, end: 0.3 } });
+    this.burst(tx, y, 'particle_star', 0xccddff, 10, { speed: 40, lifespan: 500, scale: { start: 0.6, end: 0 } });
+
+    // Ground frost circle
+    const frost = this.scene.add.circle(tx, y, 20, 0x88ccff, 0.25).setDepth(EFFECT_DEPTH - 1).setScale(1, 0.5);
+    this.scene.tweens.add({ targets: frost, alpha: 0, duration: 2000, delay: 300, onComplete: () => frost.destroy() });
+
+    this.flash(tx, y, 0xcceeFF, 16, 300);
+  }
+
+  private effectTeleport(cx: number, cy: number, tx: number, ty: number): void {
+    const sy = cy - 16;
+    const ey = ty - 16;
+
+    // Departure effect — purple implosion
+    const departureSphere = this.scene.add.circle(cx, sy, 20, 0x8855cc, 0.5).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    this.scene.tweens.add({
+      targets: departureSphere, scaleX: 0, scaleY: 0, alpha: 0, duration: 250, ease: 'Power3',
+      onComplete: () => departureSphere.destroy(),
+    });
+
+    // Departure sparks
+    this.burst(cx, sy, 'particle_spark', 0x9966ff, 14, {
+      speed: 140, lifespan: 400, scale: { start: 0.8, end: 0 },
+    });
+    this.burst(cx, sy, 'particle_star', 0xbb88ff, 8, {
+      speed: 80, lifespan: 350, scale: { start: 0.6, end: 0 },
+    });
+
+    // Connecting trail flash (from origin to destination)
+    const trailLine = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    trailLine.lineStyle(3, 0x9966ff, 0.5);
+    trailLine.beginPath(); trailLine.moveTo(cx, sy); trailLine.lineTo(tx, ey); trailLine.strokePath();
+    this.scene.tweens.add({ targets: trailLine, alpha: 0, duration: 300, onComplete: () => trailLine.destroy() });
+
+    // Arrival effect — purple expansion (slightly delayed)
+    this.scene.time.delayedCall(100, () => {
+      const arrivalSphere = this.scene.add.circle(tx, ey, 4, 0x8855cc, 0.6).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      this.scene.tweens.add({
+        targets: arrivalSphere, scaleX: 5, scaleY: 4, alpha: 0, duration: 350, ease: 'Power2',
+        onComplete: () => arrivalSphere.destroy(),
+      });
+
+      // Arrival sparks
+      this.burst(tx, ey, 'particle_spark', 0x9966ff, 16, {
+        speed: 120, lifespan: 400, scale: { start: 1, end: 0 },
+      });
+      this.burst(tx, ey, 'particle_star', 0xddbbff, 10, {
+        speed: 60, lifespan: 500, scale: { start: 0.7, end: 0 },
+      });
+
+      // Arcane ring at arrival
+      this.ring(tx, ey, 0x8855cc, 6, 4, 400, 3);
+      this.flash(tx, ey, 0xbb88ff, 14, 250);
+    });
+  }
+
+  private effectArcaneTorrent(tx: number, ty: number): void {
+    const y = ty - 16;
+    this.scene.cameras.main.shake(250, 0.01);
+
+    // Arcane projectile barrage raining from above
+    const torrent = this.scene.add.particles(tx, y - 60, 'particle_star', {
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Rectangle(-30, 0, 60, 20) as any },
+      tint: [0x8844cc, 0x9966ff, 0xbb88ff, 0xddbbff],
+      speed: { min: 100, max: 180 }, angle: { min: 70, max: 110 },
+      lifespan: 500, scale: { start: 1.0, end: 0.3 }, alpha: { start: 0.9, end: 0 },
+      blendMode: 'ADD', frequency: 25, stopAfter: 28,
+      rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
+    torrent.on('complete', () => { this.scene.time.delayedCall(600, () => torrent.destroy()); });
+
+    // Secondary energy sparks
+    const sparks = this.scene.add.particles(tx, y - 40, 'particle_spark', {
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Rectangle(-25, 0, 50, 15) as any },
+      tint: [0x9966ff, 0xbb88ff],
+      speed: { min: 80, max: 150 }, angle: { min: 75, max: 105 },
+      lifespan: 400, scale: { start: 0.8, end: 0 }, alpha: { start: 0.8, end: 0 },
+      blendMode: 'ADD', frequency: 30, stopAfter: 18,
+    }).setDepth(EFFECT_DEPTH);
+    sparks.on('complete', () => { this.scene.time.delayedCall(500, () => sparks.destroy()); });
+
+    // Ground impact — expanding arcane rings
+    this.ring(tx, y, 0x8844cc, 10, 5, 600, 3);
+    this.ring(tx, y, 0x9966ff, 8, 4, 500, 2);
+
+    // Arcane ground glow
+    this.flash(tx, y, 0x8855cc, 18, 400);
+    this.flash(tx, y, 0xbb88ff, 12, 250);
+
+    // Impact burst
+    this.scene.time.delayedCall(200, () => {
+      this.burst(tx, y, 'particle_spark', 0x9966ff, 14, {
+        speed: 100, lifespan: 400, scale: { start: 0.8, end: 0 },
+      });
+    });
   }
 
   // ══════════════════════════════════════════════════════════
