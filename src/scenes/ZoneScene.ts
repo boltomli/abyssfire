@@ -99,6 +99,8 @@ export class ZoneScene extends Phaser.Scene {
   private inCombat = false;
   private isTransitioning = false;
   private isPortaling = false;
+  /** Track which entities have status tints applied (entityId -> Set of applied tint types) */
+  private statusTintApplied: Map<string, Set<string>> = new Map();
   private combatDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private targetIndicator: Phaser.GameObjects.Ellipse | null = null;
   private currentTargetId: string | null = null;
@@ -129,6 +131,7 @@ export class ZoneScene extends Phaser.Scene {
     this.npcs = [];
     this.lootDrops = [];
     this.potionDrops = [];
+    this.statusTintApplied.clear();
 
     this.combatSystem = new CombatSystem();
     this.lootSystem = new LootSystem();
@@ -442,11 +445,11 @@ export class ZoneScene extends Phaser.Scene {
       const hasOffhand = !!this.inventorySystem.equipment['offhand'];
       if (hasWeapon && hasOffhand) {
         // Check if buff is already active (avoid stacking multiple copies)
-        const hasDWBuff = this.player.buffs.some(b => b.stat === 'dualWieldBonus');
+        const hasDWBuff = this.player.buffs.some(b => b.tag === 'dualWieldMastery');
         if (!hasDWBuff) {
           // +3% damage per level via a persistent buff that refreshes
           const bonusValue = dualWieldLevel * 0.03;
-          this.player.buffs.push({ stat: 'damageBonus', value: bonusValue, duration: 2000, startTime: time });
+          this.player.buffs.push({ stat: 'damageBonus', value: bonusValue, duration: 2000, startTime: time, tag: 'dualWieldMastery' });
         }
       }
     }
@@ -1127,6 +1130,13 @@ export class ZoneScene extends Phaser.Scene {
               }
             }
           }
+        }
+        // Abort teleport if no walkable tile found within search radius
+        if (!found) {
+          EventBus.emit(GameEvents.LOG_MESSAGE, { text: '传送失败：目标位置不可到达!', type: 'combat' });
+          // Refund mana since teleport was already deducted
+          this.player.mana = Math.min(this.player.maxMana, this.player.mana + scaledManaCost);
+          return;
         }
       }
       const origX = this.player.sprite.x;
@@ -2206,9 +2216,10 @@ export class ZoneScene extends Phaser.Scene {
         break;
       }
     }
-    this.monsters[idx] = new Monster(this, dead.definition, c, r);
+    // Use originalDefinition to avoid compounding affix stat inflation
+    this.monsters[idx] = new Monster(this, dead.originalDefinition, c, r);
     // Re-apply elite affixes on respawn
-    if (dead.definition.elite) {
+    if (dead.originalDefinition.elite) {
       const affixes = this.eliteAffixSystem.rollAffixes(this.currentMapId, true);
       if (affixes.length > 0) {
         this.monsters[idx].applyEliteAffixes(affixes, this.eliteAffixSystem);
@@ -2527,17 +2538,16 @@ export class ZoneScene extends Phaser.Scene {
           // Apply curse debuff as a timed buff on the player (amplifies damage taken)
           const reduction = curseAffix.definition.curseAuraReduction;
           const existingCurse = this.player.buffs.find(
-            b => b.stat === 'damageAmplify' && (b as any)._curseAura,
+            b => b.stat === 'damageAmplify' && b.tag === 'curseAura',
           );
           if (!existingCurse) {
-            const curseBuff: any = {
+            this.player.buffs.push({
               stat: 'damageAmplify',
               value: reduction, // e.g. 0.15 = 15% more damage taken
               duration: 2000,
               startTime: time,
-              _curseAura: true, // tag so we can find and refresh it
-            };
-            this.player.buffs.push(curseBuff);
+              tag: 'curseAura', // tag so we can find and refresh it
+            });
           } else {
             // Refresh duration
             existingCurse.startTime = time;
@@ -2565,18 +2575,24 @@ export class ZoneScene extends Phaser.Scene {
 
     const tracked = this.statusEffects.getTrackedEntities();
     for (const entityId of tracked) {
-      // Apply visual status tints via VFXManager
+      // Apply visual status tints via VFXManager (only when newly needed)
       if (this.vfx) {
         const effects = this.statusEffects.getEffectsOnEntity(entityId);
         const sprite = this.getEntitySprite(entityId);
         if (sprite) {
+          let appliedSet = this.statusTintApplied.get(entityId);
+          if (!appliedSet) {
+            appliedSet = new Set();
+            this.statusTintApplied.set(entityId, appliedSet);
+          }
           for (const effect of effects) {
             const tintType = effect.type === 'burn' ? 'burn'
               : (effect.type === 'freeze' || effect.type === 'stun') ? 'freeze'
               : effect.type === 'poison' ? 'poison'
               : null;
-            if (tintType) {
+            if (tintType && !appliedSet.has(tintType)) {
               this.vfx.applyStatusTint(sprite, tintType);
+              appliedSet.add(tintType);
             }
           }
         }
@@ -2630,10 +2646,30 @@ export class ZoneScene extends Phaser.Scene {
           EventBus.emit(GameEvents.LOG_MESSAGE, {
             text: `${effectNames[type] ?? type}效果已消失`,
           });
-          // Clear status tint on expiry by resetting FX
-          const sprite = this.getEntitySprite(entityId);
-          if (sprite && (sprite as any).preFX) {
-            (sprite as any).preFX.clear();
+        }
+        // Clear all tints and re-apply remaining active effects' tints
+        const sprite = this.getEntitySprite(entityId);
+        if (sprite && (sprite as any).preFX) {
+          (sprite as any).preFX.clear();
+          // Reset tint tracking for this entity
+          this.statusTintApplied.delete(entityId);
+          // Re-apply tints for any remaining active effects
+          const remainingEffects = this.statusEffects.getEffectsOnEntity(entityId);
+          if (this.vfx) {
+            const newAppliedSet = new Set<string>();
+            for (const effect of remainingEffects) {
+              const tintType = effect.type === 'burn' ? 'burn'
+                : (effect.type === 'freeze' || effect.type === 'stun') ? 'freeze'
+                : effect.type === 'poison' ? 'poison'
+                : null;
+              if (tintType && !newAppliedSet.has(tintType)) {
+                this.vfx.applyStatusTint(sprite, tintType);
+                newAppliedSet.add(tintType);
+              }
+            }
+            if (newAppliedSet.size > 0) {
+              this.statusTintApplied.set(entityId, newAppliedSet);
+            }
           }
         }
       }
@@ -2804,6 +2840,7 @@ export class ZoneScene extends Phaser.Scene {
     if (this.weather) this.weather.destroy();
     if (this.trails) this.trails.destroy();
     if (this.statusEffects) this.statusEffects.clearAll();
+    this.statusTintApplied.clear();
     for (const key of this.textures.getTextureKeys()) {
       if (key.startsWith('tile_t_')) this.textures.remove(key);
     }

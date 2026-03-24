@@ -86,6 +86,8 @@ export interface ActiveBuff {
   value: number;
   duration: number;
   startTime: number;
+  /** Optional tag for identifying special buff sources (e.g. 'curseAura'). */
+  tag?: string;
 }
 
 export interface DamageResult {

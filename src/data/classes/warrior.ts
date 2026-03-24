@@ -318,7 +318,7 @@ export const WarriorClass: ClassDefinition = {
       id: 'frenzy',
       name: '狂乱',
       nameEn: 'Frenzy',
-      description: '进入狂乱状态，攻击速度+35%，伤害+20%，持续8秒。等级提升增加效果和持续时间。',
+      description: '进入狂乱状态，伤害+20%，持续8秒。等级提升增加效果和持续时间。',
       tree: 'berserker',
       tier: 1,
       maxLevel: 20,

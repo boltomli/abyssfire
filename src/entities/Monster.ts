@@ -25,6 +25,8 @@ export class Monster {
 
   id: string;
   definition: MonsterDefinition;
+  /** Original unmodified definition, preserved for respawn to avoid stat inflation. */
+  readonly originalDefinition: MonsterDefinition;
   hp: number;
   maxHp: number;
   mana: number = 0;
@@ -57,6 +59,7 @@ export class Monster {
   constructor(scene: Phaser.Scene, definition: MonsterDefinition, col: number, row: number) {
     this.scene = scene;
     this.definition = definition;
+    this.originalDefinition = definition;
     this.id = `monster_${Monster.idCounter++}`;
     this.tileCol = col;
     this.tileRow = row;
