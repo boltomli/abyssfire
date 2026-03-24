@@ -981,6 +981,225 @@ export class SkillEffectSystem {
     }
     g.generateTexture('skill_icon_explosive_trap', S, S);
 
+    // ═══ NEW ROGUE SKILLS ═══
+
+    // shadow_step — dark teleport dash silhouette
+    fillBg(0x111122);
+    // Dark figure silhouette (at destination)
+    g.fillStyle(0x333355, 0.7);
+    g.fillCircle(C + 6, 16, 8); // head
+    g.fillTriangle(C - 6, 50, C + 6, 20, C + 18, 50); // body
+    // Shadow trail behind (faded copy at origin)
+    g.fillStyle(0x222244, 0.3);
+    g.fillCircle(C - 10, 20, 7);
+    g.fillTriangle(C - 20, 48, C - 10, 24, C, 48);
+    // Motion lines connecting origin to destination
+    g.lineStyle(2, 0x8866cc, 0.5);
+    g.beginPath(); g.moveTo(C - 12, 22); g.lineTo(C + 4, 18); g.strokePath();
+    g.lineStyle(1.5, 0x8866cc, 0.4);
+    g.beginPath(); g.moveTo(C - 14, 34); g.lineTo(C + 2, 32); g.strokePath();
+    g.lineStyle(1, 0x8866cc, 0.3);
+    g.beginPath(); g.moveTo(C - 16, 44); g.lineTo(C, 42); g.strokePath();
+    // Purple sparkles around destination
+    g.fillStyle(0xbb88ff, 0.7);
+    g.fillCircle(C + 16, 12, 2);
+    g.fillCircle(C + 20, 24, 1.5);
+    g.fillCircle(C + 14, 32, 2);
+    // Dark aura
+    g.fillStyle(0x6644aa, 0.15);
+    g.fillCircle(C + 6, C, 22);
+    g.generateTexture('skill_icon_shadow_step', S, S);
+
+    // death_mark — skull with crossbones / death symbol
+    fillBg(0x220022);
+    // Skull circle (dark purple)
+    g.fillStyle(0x663366, 0.7);
+    g.fillCircle(C, C - 4, 14);
+    g.fillStyle(0x884488, 0.5);
+    g.fillCircle(C, C - 4, 10);
+    // Eye sockets
+    g.fillStyle(0xff44ff, 0.9);
+    g.fillCircle(C - 5, C - 6, 3);
+    g.fillCircle(C + 5, C - 6, 3);
+    g.fillStyle(0x220022, 0.9);
+    g.fillCircle(C - 5, C - 6, 1.5);
+    g.fillCircle(C + 5, C - 6, 1.5);
+    // Jaw/mouth
+    g.fillStyle(0x553355, 0.8);
+    g.fillRect(C - 6, C + 2, 12, 6);
+    g.lineStyle(1.5, 0xcc44cc, 0.7);
+    g.beginPath(); g.moveTo(C - 3, C + 2); g.lineTo(C - 3, C + 8); g.strokePath();
+    g.beginPath(); g.moveTo(C, C + 2); g.lineTo(C, C + 8); g.strokePath();
+    g.beginPath(); g.moveTo(C + 3, C + 2); g.lineTo(C + 3, C + 8); g.strokePath();
+    // Cross mark behind skull
+    g.lineStyle(3, 0xcc22cc, 0.6);
+    g.beginPath(); g.moveTo(C - 18, C - 18); g.lineTo(C + 18, C + 18); g.strokePath();
+    g.beginPath(); g.moveTo(C + 18, C - 18); g.lineTo(C - 18, C + 18); g.strokePath();
+    // Outer glow ring
+    g.lineStyle(2, 0xff44ff, 0.4);
+    g.strokeCircle(C, C, 24);
+    // Purple aura
+    g.fillStyle(0xcc22cc, 0.15);
+    g.fillCircle(C, C, 26);
+    g.generateTexture('skill_icon_death_mark', S, S);
+
+    // piercing_arrow — bright golden arrow with speed lines
+    fillBg(0x222211);
+    // Speed lines (horizontal, suggesting piercing motion)
+    g.lineStyle(2, 0xffcc44, 0.4);
+    g.beginPath(); g.moveTo(4, 16); g.lineTo(30, 16); g.strokePath();
+    g.lineStyle(1.5, 0xffcc44, 0.3);
+    g.beginPath(); g.moveTo(6, 28); g.lineTo(28, 28); g.strokePath();
+    g.lineStyle(1, 0xffcc44, 0.2);
+    g.beginPath(); g.moveTo(8, 40); g.lineTo(26, 40); g.strokePath();
+    // Arrow shaft (angled, pointing right/forward)
+    g.fillStyle(0xddcc88, 0.9);
+    g.fillPoints([new P(10, C + 4), new P(12, C - 4), new P(52, C - 8), new P(52, C - 2)], true);
+    // Arrow head (bright golden, larger for piercing emphasis)
+    g.fillStyle(0xffdd44, 0.9);
+    g.fillPoints([new P(50, C - 12), new P(60, C - 5), new P(50, C + 2), new P(48, C - 5)], true);
+    g.fillStyle(0xffffff, 0.5);
+    g.fillPoints([new P(52, C - 10), new P(58, C - 5), new P(52, C)], true);
+    // Fletching
+    g.fillStyle(0xccaa44, 0.6);
+    g.fillTriangle(10, C - 6, 4, C - 14, 16, C - 2);
+    g.fillTriangle(10, C + 6, 4, C + 14, 16, C + 2);
+    // Piercing impact lines at head
+    g.lineStyle(2, 0xffdd44, 0.7);
+    g.beginPath(); g.moveTo(54, C - 14); g.lineTo(60, C - 18); g.strokePath();
+    g.beginPath(); g.moveTo(56, C - 5); g.lineTo(62, C - 5); g.strokePath();
+    g.beginPath(); g.moveTo(54, C + 4); g.lineTo(60, C + 8); g.strokePath();
+    // Golden glow around arrowhead
+    g.fillStyle(0xffcc00, 0.2);
+    g.fillCircle(54, C - 5, 12);
+    g.generateTexture('skill_icon_piercing_arrow', S, S);
+
+    // poison_arrow — green-tipped arrow with poison drips
+    fillBg(0x112211);
+    // Arrow shaft (angled)
+    g.fillStyle(0xaabb88, 0.9);
+    g.fillPoints([new P(10, C + 4), new P(12, C - 2), new P(48, C - 6), new P(48, C)], true);
+    // Arrow head (poison green crystal)
+    g.fillStyle(0x33cc33, 0.9);
+    g.fillPoints([new P(46, C - 10), new P(56, C - 3), new P(46, C + 4), new P(44, C - 3)], true);
+    g.fillStyle(0x66ff66, 0.5);
+    g.fillPoints([new P(47, C - 8), new P(54, C - 3), new P(47, C + 2)], true);
+    // Fletching
+    g.fillStyle(0x668844, 0.6);
+    g.fillTriangle(10, C - 4, 4, C - 12, 16, C);
+    g.fillTriangle(10, C + 6, 4, C + 14, 16, C + 2);
+    // Poison drips from arrowhead
+    g.fillStyle(0x33cc33, 0.8);
+    g.fillCircle(48, C + 8, 2.5);
+    g.fillTriangle(48, C + 5, 46, C + 8, 50, C + 8);
+    g.fillStyle(0x44dd44, 0.7);
+    g.fillCircle(44, C + 14, 2);
+    g.fillTriangle(44, C + 11, 42, C + 14, 46, C + 14);
+    g.fillStyle(0x22bb22, 0.6);
+    g.fillCircle(50, C + 16, 1.5);
+    // Green glow around tip
+    g.fillStyle(0x33cc33, 0.2);
+    g.fillCircle(50, C - 3, 10);
+    g.generateTexture('skill_icon_poison_arrow', S, S);
+
+    // poison_cloud — green toxic cloud
+    fillBg(0x112211);
+    // Multiple overlapping cloud puffs
+    g.fillStyle(0x22aa22, 0.5);
+    g.fillCircle(C - 10, C - 6, 14);
+    g.fillCircle(C + 10, C - 4, 12);
+    g.fillCircle(C, C + 4, 16);
+    g.fillCircle(C - 14, C + 8, 10);
+    g.fillCircle(C + 14, C + 6, 11);
+    g.fillStyle(0x33cc33, 0.4);
+    g.fillCircle(C - 6, C - 2, 10);
+    g.fillCircle(C + 6, C, 9);
+    g.fillCircle(C, C + 8, 12);
+    // Skull silhouette in cloud (danger)
+    g.fillStyle(0x44dd44, 0.7);
+    g.fillCircle(C, C - 4, 6);
+    g.fillStyle(0x112211, 0.9);
+    g.fillCircle(C - 2, C - 5, 1.5);
+    g.fillCircle(C + 2, C - 5, 1.5);
+    g.fillRect(C - 3, C, 6, 3);
+    // Poison droplets rising from cloud
+    g.fillStyle(0x66ff66, 0.6);
+    g.fillCircle(C - 12, C - 16, 2);
+    g.fillCircle(C + 8, C - 18, 1.5);
+    g.fillCircle(C + 16, C - 14, 2);
+    g.fillCircle(C - 4, C - 20, 1.5);
+    // Green glow
+    g.fillStyle(0x33cc33, 0.15);
+    g.fillCircle(C, C, 26);
+    g.generateTexture('skill_icon_poison_cloud', S, S);
+
+    // slow_trap — frost/ice trap device
+    fillBg(0x112233);
+    // Trap base (metallic circle)
+    g.fillStyle(0x4466aa, 0.8);
+    g.fillCircle(C, C + 4, 16);
+    g.fillStyle(0x5588bb, 0.6);
+    g.fillCircle(C, C + 4, 12);
+    // Ice crystal on top of trap
+    g.fillStyle(0x88ccff, 0.8);
+    g.fillPoints([new P(C, C - 14), new P(C + 6, C), new P(C, C + 6), new P(C - 6, C)], true);
+    g.fillStyle(0xaaddff, 0.5);
+    g.fillPoints([new P(C, C - 12), new P(C + 3, C), new P(C, C + 4), new P(C - 3, C)], true);
+    // Frost emanation rings
+    g.lineStyle(2, 0x88ccff, 0.5);
+    g.strokeCircle(C, C + 4, 20);
+    g.lineStyle(1.5, 0xaaddff, 0.3);
+    g.strokeCircle(C, C + 4, 26);
+    // Icicle spikes around trap
+    g.fillStyle(0x88ccff, 0.6);
+    g.fillTriangle(C - 18, C + 4, C - 14, C - 4, C - 12, C + 4);
+    g.fillTriangle(C + 18, C + 4, C + 14, C - 4, C + 12, C + 4);
+    g.fillTriangle(C, C + 20, C - 4, C + 12, C + 4, C + 12);
+    // Snowflake sparkles
+    g.fillStyle(0xccddff, 0.7);
+    g.fillCircle(C - 14, C - 8, 1.5);
+    g.fillCircle(C + 12, C - 10, 2);
+    g.fillCircle(C + 16, C + 14, 1.5);
+    // Blue glow
+    g.fillStyle(0x4488cc, 0.2);
+    g.fillCircle(C, C + 4, 22);
+    g.generateTexture('skill_icon_slow_trap', S, S);
+
+    // chain_trap — linked chain device
+    fillBg(0x222211);
+    // Central trap mechanism
+    g.fillStyle(0xaa8833, 0.8);
+    g.fillCircle(C, C, 10);
+    g.fillStyle(0xccaa44, 0.6);
+    g.fillCircle(C, C, 7);
+    // Chain links radiating outward (5 directions)
+    for (let ci = 0; ci < 5; ci++) {
+      const ca = (ci / 5) * Math.PI * 2 - Math.PI / 2;
+      const linkDist = 18;
+      const lcx = C + Math.cos(ca) * linkDist;
+      const lcy = C + Math.sin(ca) * linkDist;
+      // Chain line
+      g.lineStyle(2.5, 0xccaa44, 0.7);
+      g.beginPath(); g.moveTo(C, C); g.lineTo(lcx, lcy); g.strokePath();
+      // Chain link circle at end
+      g.lineStyle(2, 0xddbb55, 0.8);
+      g.strokeCircle(lcx, lcy, 5);
+      g.fillStyle(0xffcc44, 0.5);
+      g.fillCircle(lcx, lcy, 3);
+    }
+    // Spark at center
+    g.fillStyle(0xffdd44, 0.9);
+    g.fillCircle(C, C, 4);
+    g.fillStyle(0xffffff, 0.5);
+    g.fillCircle(C, C, 2);
+    // Outer warning ring
+    g.lineStyle(1.5, 0xffaa00, 0.4);
+    g.strokeCircle(C, C, 26);
+    // Golden aura
+    g.fillStyle(0xffcc44, 0.12);
+    g.fillCircle(C, C, 26);
+    g.generateTexture('skill_icon_chain_trap', S, S);
+
     g.destroy();
   }
 
@@ -1030,6 +1249,13 @@ export class SkillEffectSystem {
       case 'vanish': this.effectVanish(casterX, casterY); break;
       case 'explosive_trap': this.effectExplosiveTrap(targetX ?? casterX, targetY ?? casterY); break;
       case 'arrow_rain': this.effectArrowRain(targetX ?? casterX, targetY ?? casterY); break;
+      case 'death_mark': this.effectDeathMark(targetX ?? casterX, targetY ?? casterY); break;
+      case 'shadow_step': this.effectShadowStep(casterX, casterY, targetX ?? casterX, targetY ?? casterY); break;
+      case 'piercing_arrow': this.effectPiercingArrow(casterX, casterY, targetX ?? casterX, targetY ?? casterY); break;
+      case 'poison_arrow': this.effectPoisonArrow(casterX, casterY, targetX ?? casterX, targetY ?? casterY); break;
+      case 'poison_cloud': this.effectPoisonCloud(targetX ?? casterX, targetY ?? casterY); break;
+      case 'slow_trap': this.effectSlowTrap(targetX ?? casterX, targetY ?? casterY); break;
+      case 'chain_trap': this.effectChainTrap(targetX ?? casterX, targetY ?? casterY); break;
       default:
         this.effectGeneric(targetX ?? casterX, targetY ?? casterY, 0xf39c12);
         break;
@@ -2224,6 +2450,318 @@ export class SkillEffectSystem {
         speed: 30, lifespan: 500, scale: { start: 0.5, end: 1 }, alpha: { start: 0.4, end: 0 }, blend: 'NORMAL',
       });
     });
+  }
+
+  // ── New Rogue effects ────────────────────────────────
+
+  private effectShadowStep(cx: number, cy: number, tx: number, ty: number): void {
+    const sy = cy - 16;
+    const ey = ty - 16;
+
+    // Departure — dark shadow implosion
+    const departure = this.scene.add.circle(cx, sy, 18, 0x333355, 0.5).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    this.scene.tweens.add({
+      targets: departure, scaleX: 0, scaleY: 0, alpha: 0, duration: 200, ease: 'Power3',
+      onComplete: () => departure.destroy(),
+    });
+    // Dark smoke puff
+    this.burst(cx, sy, 'particle_smoke', 0x444466, 12, {
+      speed: 80, lifespan: 350, scale: { start: 0.6, end: 1.2 }, alpha: { start: 0.6, end: 0 }, blend: 'NORMAL',
+    });
+    // Shadow sparks
+    this.burst(cx, sy, 'particle_spark', 0x8866cc, 10, {
+      speed: 100, lifespan: 300, scale: { start: 0.7, end: 0 },
+    });
+
+    // Shadow trail line (from origin to destination)
+    const trailLine = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    trailLine.lineStyle(2, 0x6644aa, 0.4);
+    trailLine.beginPath(); trailLine.moveTo(cx, sy); trailLine.lineTo(tx, ey); trailLine.strokePath();
+    this.scene.tweens.add({ targets: trailLine, alpha: 0, duration: 300, onComplete: () => trailLine.destroy() });
+
+    // Arrival — dark expansion at target
+    this.scene.time.delayedCall(80, () => {
+      const arrival = this.scene.add.circle(tx, ey, 4, 0x333355, 0.6).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      this.scene.tweens.add({
+        targets: arrival, scaleX: 4, scaleY: 3, alpha: 0, duration: 300, ease: 'Power2',
+        onComplete: () => arrival.destroy(),
+      });
+      this.burst(tx, ey, 'particle_spark', 0x8866cc, 14, {
+        speed: 100, lifespan: 350, scale: { start: 0.8, end: 0 },
+      });
+      this.ring(tx, ey, 0x6644aa, 6, 3, 350, 2);
+      this.flash(tx, ey, 0x8866cc, 12, 200);
+    });
+  }
+
+  private effectDeathMark(tx: number, ty: number): void {
+    const y = ty - 16;
+
+    // Dark skull mark appearing on target
+    const mark = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    // Skull circle
+    mark.lineStyle(3, 0xcc22cc, 0.9);
+    mark.strokeCircle(tx, y, 18);
+    // Cross inside circle (death mark symbol)
+    mark.lineStyle(2, 0xff44ff, 0.8);
+    mark.beginPath(); mark.moveTo(tx - 10, y - 10); mark.lineTo(tx + 10, y + 10); mark.strokePath();
+    mark.beginPath(); mark.moveTo(tx + 10, y - 10); mark.lineTo(tx - 10, y + 10); mark.strokePath();
+    // Inner dot
+    mark.fillStyle(0xff66ff, 0.9);
+    mark.fillCircle(tx, y, 4);
+    mark.setAlpha(0).setScale(2);
+    this.scene.tweens.add({
+      targets: mark, alpha: 1, scaleX: 1, scaleY: 1, duration: 250, ease: 'Back.easeOut',
+      onComplete: () => {
+        this.scene.tweens.add({ targets: mark, alpha: 0, duration: 1500, ease: 'Power1', onComplete: () => mark.destroy() });
+      },
+    });
+
+    // Purple/dark particles orbiting
+    const orbits = this.scene.add.particles(tx, y, 'particle_circle', {
+      emitZone: { type: 'edge' as const, source: new Phaser.Geom.Circle(0, 0, 20) as any, quantity: 10 },
+      tint: [0xcc22cc, 0xff44ff, 0x9922aa],
+      lifespan: 600, scale: { start: 0.6, end: 0 }, alpha: { start: 0.9, end: 0 },
+      blendMode: 'ADD', speed: { min: 10, max: 30 },
+      frequency: 50, stopAfter: 10,
+    }).setDepth(EFFECT_DEPTH);
+    orbits.on('complete', () => { this.scene.time.delayedCall(700, () => orbits.destroy()); });
+
+    // Dark ring pulse
+    this.ring(tx, y, 0xcc22cc, 8, 4, 400, 3);
+    this.flash(tx, y, 0xff44ff, 12, 250);
+  }
+
+  private effectPiercingArrow(cx: number, cy: number, tx: number, ty: number): void {
+    const sx = cx, sy = cy - 16, ex = tx, ey = ty - 16;
+    const dist = Phaser.Math.Distance.Between(sx, sy, ex, ey);
+    const angle = Math.atan2(ey - sy, ex - sx);
+    const dur = Math.max(200, Math.min(400, dist * 1.2));
+
+    // Extend arrow beyond target to show piercing
+    const pierceExtend = 60;
+    const finalX = ex + Math.cos(angle) * pierceExtend;
+    const finalY = ey + Math.sin(angle) * pierceExtend;
+
+    // Arrow projectile (brighter, more intense for piercing)
+    const arrow = this.scene.add.image(sx, sy, 'particle_arrow')
+      .setDepth(EFFECT_DEPTH).setTint(0xffdd44).setScale(1.4).setAlpha(1)
+      .setAngle(Phaser.Math.RadToDeg(angle) + 90)
+      .setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    const glow = this.scene.add.circle(sx, sy, 12, 0xffcc00, 0.5).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+
+    // Bright golden trail showing piercing power
+    const trail = this.scene.add.particles(sx, sy, 'particle_spark', {
+      follow: arrow, tint: [0xffdd44, 0xffcc00, 0xffaa00],
+      speed: { min: 10, max: 40 }, lifespan: 300,
+      scale: { start: 0.8, end: 0 }, alpha: { start: 0.9, end: 0 },
+      blendMode: 'ADD', frequency: 15, quantity: 2,
+    }).setDepth(EFFECT_DEPTH);
+
+    this.scene.tweens.add({
+      targets: [arrow, glow], x: finalX, y: finalY, duration: dur + 150, ease: 'Power1',
+      onComplete: () => {
+        arrow.destroy(); glow.destroy(); trail.stop();
+        this.scene.time.delayedCall(350, () => trail.destroy());
+      },
+    });
+
+    // Impact burst at initial target position
+    this.scene.time.delayedCall(dur * 0.7, () => {
+      this.burst(ex, ey, 'particle_spark', 0xffcc44, 10, { speed: 100, lifespan: 300, scale: { start: 0.8, end: 0 } });
+      this.flash(ex, ey, 0xffffff, 10, 150);
+    });
+
+    // Piercing speed lines along the path
+    for (let i = 0; i < 4; i++) {
+      const lineG = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+      const offset = (Math.random() - 0.5) * 20;
+      const perpX = Math.cos(angle + Math.PI / 2) * offset;
+      const perpY = Math.sin(angle + Math.PI / 2) * offset;
+      lineG.lineStyle(2, 0xffdd44, 0.6);
+      lineG.beginPath();
+      lineG.moveTo(sx + perpX, sy + perpY);
+      lineG.lineTo(sx + perpX + Math.cos(angle) * 50, sy + perpY + Math.sin(angle) * 50);
+      lineG.strokePath();
+      this.scene.tweens.add({
+        targets: lineG, alpha: 0, duration: 350, delay: i * 30,
+        onComplete: () => lineG.destroy(),
+      });
+    }
+  }
+
+  private effectPoisonArrow(cx: number, cy: number, tx: number, ty: number): void {
+    const sx = cx, sy = cy - 16, ex = tx, ey = ty - 16;
+    const dist = Phaser.Math.Distance.Between(sx, sy, ex, ey);
+    const dur = Math.max(250, Math.min(500, dist * 1.5));
+    const angle = Phaser.Math.RadToDeg(Math.atan2(ey - sy, ex - sx));
+
+    // Poison-tipped arrow projectile
+    const arrow = this.scene.add.image(sx, sy, 'particle_arrow')
+      .setDepth(EFFECT_DEPTH).setTint(0x33cc33).setScale(1.2).setAlpha(1)
+      .setAngle(angle + 90)
+      .setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    const glow = this.scene.add.circle(sx, sy, 10, 0x33cc33, 0.4).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+
+    // Poison drip trail
+    const trail = this.scene.add.particles(sx, sy, 'particle_poison', {
+      follow: arrow, tint: [0x33cc33, 0x44dd44, 0x66ff66],
+      speed: { min: 10, max: 30 }, lifespan: 300,
+      scale: { start: 0.8, end: 0 }, alpha: { start: 0.8, end: 0 },
+      blendMode: 'ADD', frequency: 20, quantity: 2,
+      rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
+
+    this.scene.tweens.add({
+      targets: [arrow, glow], x: ex, y: ey, duration: dur, ease: 'Power1',
+      onComplete: () => {
+        arrow.destroy(); glow.destroy(); trail.stop();
+        this.scene.time.delayedCall(350, () => trail.destroy());
+        // Impact: poison burst
+        this.burst(ex, ey, 'particle_poison', 0x33cc33, 14, { speed: 100, lifespan: 500, scale: { start: 1, end: 0 } });
+        this.burst(ex, ey, 'particle_circle', 0x66ff66, 8, { speed: 60, lifespan: 400, scale: { start: 0.6, end: 0 } });
+        this.flash(ex, ey, 0x33cc33, 12, 200);
+        this.ring(ex, ey, 0x27ae60, 6, 3, 400, 2);
+        // Lingering poison cloud at impact (suggesting DoT)
+        const poison = this.scene.add.particles(ex, ey, 'particle_poison', {
+          tint: [0x33cc33, 0x22aa22],
+          speed: { min: 15, max: 40 }, angle: { min: 240, max: 300 },
+          lifespan: 500, scale: { start: 0.6, end: 0.2 }, alpha: { start: 0.6, end: 0 },
+          blendMode: 'ADD', frequency: 60, stopAfter: 6,
+          emitZone: { type: 'random' as const, source: new Phaser.Geom.Rectangle(-8, -4, 16, 8) as any },
+        }).setDepth(EFFECT_DEPTH);
+        poison.on('complete', () => { this.scene.time.delayedCall(600, () => poison.destroy()); });
+      },
+    });
+  }
+
+  private effectPoisonCloud(tx: number, ty: number): void {
+    const y = ty - 16;
+
+    // Large poison gas cloud — expanding green mist
+    const cloud = this.scene.add.particles(tx, y, 'particle_smoke', {
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Circle(0, 0, 24) as any },
+      tint: [0x22aa22, 0x33cc33, 0x44dd44],
+      speed: { min: 20, max: 60 }, lifespan: 900,
+      scale: { start: 0.8, end: 1.8 }, alpha: { start: 0.6, end: 0 },
+      blendMode: 'ADD', frequency: 30, stopAfter: 24,
+      rotate: { min: 0, max: 360 },
+    }).setDepth(EFFECT_DEPTH);
+    cloud.on('complete', () => { this.scene.time.delayedCall(1000, () => cloud.destroy()); });
+
+    // Rising poison droplets
+    const droplets = this.scene.add.particles(tx, y, 'particle_poison', {
+      emitZone: { type: 'random' as const, source: new Phaser.Geom.Circle(0, 0, 20) as any },
+      tint: [0x33cc33, 0x66ff66],
+      speed: { min: 30, max: 80 }, angle: { min: 230, max: 310 },
+      lifespan: 600, scale: { start: 0.8, end: 0.2 }, alpha: { start: 0.9, end: 0 },
+      blendMode: 'ADD', frequency: 40, stopAfter: 16,
+    }).setDepth(EFFECT_DEPTH);
+    droplets.on('complete', () => { this.scene.time.delayedCall(700, () => droplets.destroy()); });
+
+    // Green ground zone
+    const zone = this.scene.add.circle(tx, y, 24, 0x22aa22, 0.2).setDepth(EFFECT_DEPTH - 1).setScale(1, 0.5);
+    this.scene.tweens.add({ targets: zone, alpha: 0, duration: 2000, delay: 400, onComplete: () => zone.destroy() });
+
+    // Expanding rings
+    this.ring(tx, y, 0x33cc33, 8, 4, 500, 2);
+    this.ring(tx, y, 0x27ae60, 6, 3, 400, 2);
+    this.flash(tx, y, 0x33cc33, 14, 300);
+  }
+
+  private effectSlowTrap(tx: number, ty: number): void {
+    const y = ty - 16;
+
+    // Trap deployment — brief placement flash
+    const deploy = this.scene.add.circle(tx, y, 10, 0x4488cc, 0.6).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    this.scene.tweens.add({
+      targets: deploy, alpha: 0.8, scaleX: 1.3, scaleY: 1.3, yoyo: true, duration: 120, repeat: 1,
+      onComplete: () => { deploy.destroy(); this.slowTrapTrigger(tx, y); },
+    });
+  }
+
+  private slowTrapTrigger(x: number, y: number): void {
+    // Ice-blue frost ring expanding (slow effect visual)
+    for (let r = 0; r < 3; r++) {
+      this.ring(x, y, r < 2 ? 0x4488cc : 0x88bbdd, 6 + r * 3, 4 + r, 500 + r * 80, 2);
+    }
+
+    // Frost/cold ground effect
+    const frost = this.scene.add.circle(x, y, 22, 0x4488cc, 0.25).setDepth(EFFECT_DEPTH - 1).setScale(1, 0.5);
+    this.scene.tweens.add({ targets: frost, alpha: 0, duration: 2500, delay: 200, onComplete: () => frost.destroy() });
+
+    // Ice crystal particles spreading outward
+    this.burst(x, y, 'particle_ice', 0x88ccff, 12, {
+      speed: 80, lifespan: 500, scale: { start: 0.8, end: 0.2 },
+    });
+    // Sparkles
+    this.burst(x, y, 'particle_star', 0xaaddff, 8, {
+      speed: 50, lifespan: 400, scale: { start: 0.5, end: 0 },
+    });
+
+    this.flash(x, y, 0x4488cc, 14, 250);
+  }
+
+  private effectChainTrap(tx: number, ty: number): void {
+    const y = ty - 16;
+
+    // Initial trap activation flash
+    this.flash(tx, y, 0xffaa00, 16, 200);
+    this.scene.cameras.main.shake(150, 0.006);
+
+    // Chain lightning-like arcs radiating outward (suggesting chain effect)
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2;
+      const endX = tx + Math.cos(angle) * 40;
+      const endY = y + Math.sin(angle) * 30;
+      this.scene.time.delayedCall(i * 40, () => {
+        this.drawChainArc(tx, y, endX, endY, 0xffaa00);
+        this.burst(endX, endY, 'particle_spark', 0xffcc44, 6, {
+          speed: 60, lifespan: 300, scale: { start: 0.6, end: 0 },
+        });
+      });
+    }
+
+    // Expanding chain rings
+    this.ring(tx, y, 0xffaa00, 8, 5, 500, 3);
+    this.ring(tx, y, 0xddaa33, 6, 4, 400, 2);
+
+    // Central burst
+    this.burst(tx, y, 'particle_spark', 0xffcc44, 14, {
+      speed: 120, lifespan: 400, scale: { start: 1, end: 0 },
+    });
+
+    // Metal chain links (small circle particles in a ring)
+    const chains = this.scene.add.particles(tx, y, 'particle_circle', {
+      emitZone: { type: 'edge' as const, source: new Phaser.Geom.Circle(0, 0, 28) as any, quantity: 14 },
+      tint: [0xccaa44, 0xddbb55, 0xaa8833],
+      lifespan: 500, scale: { start: 0.6, end: 0.2 }, alpha: { start: 0.8, end: 0 },
+      blendMode: 'ADD', speed: { min: 20, max: 50 },
+      frequency: 30, stopAfter: 14,
+    }).setDepth(EFFECT_DEPTH);
+    chains.on('complete', () => { this.scene.time.delayedCall(600, () => chains.destroy()); });
+  }
+
+  private drawChainArc(x1: number, y1: number, x2: number, y2: number, color: number): void {
+    const dx = x2 - x1, dy = y2 - y1;
+    const segments = 6;
+    const arc = this.scene.add.graphics().setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
+    arc.lineStyle(3, color, 0.8);
+    arc.beginPath(); arc.moveTo(x1, y1);
+    for (let s = 1; s < segments; s++) {
+      const t = s / segments;
+      arc.lineTo(x1 + dx * t + (Math.random() - 0.5) * 10, y1 + dy * t + (Math.random() - 0.5) * 8);
+    }
+    arc.lineTo(x2, y2); arc.strokePath();
+    // Inner bright line
+    arc.lineStyle(1.5, 0xffffff, 0.5);
+    arc.beginPath(); arc.moveTo(x1, y1);
+    for (let s = 1; s < segments; s++) {
+      const t = s / segments;
+      arc.lineTo(x1 + dx * t + (Math.random() - 0.5) * 6, y1 + dy * t + (Math.random() - 0.5) * 5);
+    }
+    arc.lineTo(x2, y2); arc.strokePath();
+    this.scene.tweens.add({ targets: arc, alpha: 0, duration: 350, ease: 'Power2', onComplete: () => arc.destroy() });
   }
 
   // ══════════════════════════════════════════════════════════
