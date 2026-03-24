@@ -83,7 +83,8 @@ export const DungeonBossDef: MonsterDefinition = {
   goldReward: [200, 400],
   spriteKey: 'monster_dungeon_boss',
   elite: true,
-  isMiniBoss: false,
+  isMiniBoss: true,
+  isSubDungeonMiniBoss: true,
   bossSkills: ['void_nova', 'shadow_barrage', 'summon_shades', 'dark_enrage'],
   lootTable: [
     { quality: 'rare', dropRate: 1.0 },

@@ -14,7 +14,7 @@
  * - VFX coverage (no generic fallback)
  * - Skill tree UI data integrity
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   CombatSystem,
   getSkillManaCost,
@@ -260,20 +260,26 @@ describe('Synergy Bonuses', () => {
   });
 
   it('Synergy bonus is applied in damage calculation', () => {
-    const skill = getSkill(WarriorClass, 'charge');
-    const attacker = makeEntity();
-    const defender = makeDefender({ stats: { str: 10, dex: 0, vit: 10, int: 5, spi: 5, lck: 0 } });
+    // Mock Math.random to eliminate dodge/crit RNG flakiness
+    const mockRandom = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      const skill = getSkill(WarriorClass, 'charge');
+      const attacker = makeEntity();
+      const defender = makeDefender({ stats: { str: 10, dex: 0, vit: 10, int: 5, spi: 5, lck: 0 } });
 
-    // Without synergies
-    const noSynLevels = new Map<string, number>();
-    const r1 = combat.calculateDamage(attacker, defender, skill, 5, noSynLevels);
+      // Without synergies
+      const noSynLevels = new Map<string, number>();
+      const r1 = combat.calculateDamage(attacker, defender, skill, 5, noSynLevels);
 
-    // With synergies: slash at level 5
-    const synLevels = new Map<string, number>([['slash', 5], ['lethal_strike', 3]]);
-    const r2 = combat.calculateDamage(attacker, defender, skill, 5, synLevels);
+      // With synergies: slash at level 5
+      const synLevels = new Map<string, number>([['slash', 5], ['lethal_strike', 3]]);
+      const r2 = combat.calculateDamage(attacker, defender, skill, 5, synLevels);
 
-    // Synergy damage should be higher (approximately 54% more based on calculation)
-    expect(r2.damage).toBeGreaterThan(r1.damage);
+      // Synergy damage should be higher (approximately 54% more based on calculation)
+      expect(r2.damage).toBeGreaterThan(r1.damage);
+    } finally {
+      mockRandom.mockRestore();
+    }
   });
 });
 
@@ -397,22 +403,28 @@ describe('Elemental Damage through Resistance', () => {
 
 describe('Death Mark damageAmplify Debuff', () => {
   it('damageAmplify buff on defender increases damage taken', () => {
-    const skill = getSkill(WarriorClass, 'slash');
-    const attacker = makeEntity();
-    const defenderNormal = makeDefender({ stats: { str: 10, dex: 0, vit: 10, int: 5, spi: 5, lck: 0 } });
-    const defenderMarked = makeDefender({
-      stats: { str: 10, dex: 0, vit: 10, int: 5, spi: 5, lck: 0 },
-      buffs: [{ stat: 'damageAmplify', value: 0.25, duration: 8000, startTime: 0 }],
-    });
+    // Mock Math.random to eliminate dodge/crit RNG flakiness
+    const mockRandom = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      const skill = getSkill(WarriorClass, 'slash');
+      const attacker = makeEntity();
+      const defenderNormal = makeDefender({ stats: { str: 10, dex: 0, vit: 10, int: 5, spi: 5, lck: 0 } });
+      const defenderMarked = makeDefender({
+        stats: { str: 10, dex: 0, vit: 10, int: 5, spi: 5, lck: 0 },
+        buffs: [{ stat: 'damageAmplify', value: 0.25, duration: 8000, startTime: 0 }],
+      });
 
-    const dmgNormal = combat.calculateDamage(attacker, defenderNormal, skill, 5);
-    const dmgMarked = combat.calculateDamage(attacker, defenderMarked, skill, 5);
+      const dmgNormal = combat.calculateDamage(attacker, defenderNormal, skill, 5);
+      const dmgMarked = combat.calculateDamage(attacker, defenderMarked, skill, 5);
 
-    // Marked target should take ~25% more damage
-    expect(dmgMarked.damage).toBeGreaterThan(dmgNormal.damage);
-    const ratio = dmgMarked.damage / dmgNormal.damage;
-    expect(ratio).toBeGreaterThanOrEqual(1.2);
-    expect(ratio).toBeLessThanOrEqual(1.3);
+      // Marked target should take ~25% more damage
+      expect(dmgMarked.damage).toBeGreaterThan(dmgNormal.damage);
+      const ratio = dmgMarked.damage / dmgNormal.damage;
+      expect(ratio).toBeGreaterThanOrEqual(1.2);
+      expect(ratio).toBeLessThanOrEqual(1.3);
+    } finally {
+      mockRandom.mockRestore();
+    }
   });
 
   it('Death Mark skill definition has correct buff stat', () => {

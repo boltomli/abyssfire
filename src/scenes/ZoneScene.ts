@@ -202,6 +202,9 @@ export class ZoneScene extends Phaser.Scene {
   /** Dungeon portal position in Abyss Rift. */
   private static readonly DUNGEON_PORTAL_COL = 60;
   private static readonly DUNGEON_PORTAL_ROW = 60;
+  /** Abyss Rift entrance (first camp) — used as save position when inside dungeon. */
+  private static readonly ABYSS_ENTRANCE_COL = 15;
+  private static readonly ABYSS_ENTRANCE_ROW = 22;
 
   private readonly contextMenuHandler = (e: Event): void => {
     e.preventDefault();
@@ -560,6 +563,8 @@ export class ZoneScene extends Phaser.Scene {
 
   private handlePlayerLevelUp(data: { level: number }): void {
     this.showLevelUpBanner(data.level);
+    // Check level achievements from ALL level-up sources (monster kills, quest rewards, dialogue exp, etc.)
+    this.achievementSystem.checkLevel(data.level);
   }
 
   private handleQuestCompleted(data: { questName: string }): void {
@@ -2397,6 +2402,8 @@ export class ZoneScene extends Phaser.Scene {
       monster.definition.id, this.currentMapId, this.difficulty, this.completedDifficulties,
     )) {
       this.completedDifficulties.push(this.difficulty);
+      // Persist difficulty completion immediately so it's not lost if game is closed
+      this.autoSave();
       const unlocked = DifficultySystem.getNewlyUnlockedDifficulty(this.completedDifficulties);
       if (unlocked) {
         const msg = DIFFICULTY_UNLOCK_MESSAGES[unlocked];
@@ -2791,9 +2798,10 @@ export class ZoneScene extends Phaser.Scene {
   private async autoSave(): Promise<void> {
     try {
       // When inside a random dungeon, save returns to Abyss Rift entrance (ephemeral runs)
+      // Use the Abyss Rift camp entrance position, not the dungeon portal position
       const saveMapId = this.isInDungeon ? 'abyss_rift' : this.currentMapId;
-      const saveTileCol = this.isInDungeon ? ZoneScene.DUNGEON_PORTAL_COL : this.player.tileCol;
-      const saveTileRow = this.isInDungeon ? (ZoneScene.DUNGEON_PORTAL_ROW - 2) : this.player.tileRow;
+      const saveTileCol = this.isInDungeon ? ZoneScene.ABYSS_ENTRANCE_COL : this.player.tileCol;
+      const saveTileRow = this.isInDungeon ? ZoneScene.ABYSS_ENTRANCE_ROW : this.player.tileRow;
 
       await this.saveSystem.autoSave({
         id: 'autosave',

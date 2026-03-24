@@ -235,23 +235,26 @@ export class CombatSystem {
     const atkEq = attacker.equipStats;
     const defEq = defender.equipStats;
 
-    // Dodge check
-    const dodgeRate = clamp(defender.stats.dex * 0.3, 0, 30);
+    // Dodge check — include DEX from equipment/gems for effective dodge rate
+    const eqDex = defEq?.dex ?? 0;
+    const dodgeRate = clamp((defender.stats.dex + eqDex) * 0.3, 0, 30);
     if (chance(dodgeRate)) {
       return { damage: 0, isCrit: false, isDodged: true, damageType: 'physical', lifeStolen: 0, manaStolen: 0 };
     }
 
-    // Crit check
+    // Crit check — include DEX and LCK from equipment/gems for effective crit rate
     const skillCritBonus = skill?.critBonus ?? 0;
     const eqCritRate = atkEq?.critRate ?? 0;
+    const eqAtkDex = atkEq?.dex ?? 0;
+    const eqAtkLck = atkEq?.lck ?? 0;
     const critRate = clamp(
-      attacker.stats.dex * 0.2 + attacker.stats.lck * 0.5 + skillCritBonus + eqCritRate,
+      (attacker.stats.dex + eqAtkDex) * 0.2 + (attacker.stats.lck + eqAtkLck) * 0.5 + skillCritBonus + eqCritRate,
       0,
       75,
     );
     const isCrit = forceCrit || chance(critRate);
     const eqCritDmg = atkEq?.critDamage ?? 0;
-    const critMultiplier = isCrit ? 1.5 + attacker.stats.lck * 0.01 + eqCritDmg / 100 : 1;
+    const critMultiplier = isCrit ? 1.5 + (attacker.stats.lck + eqAtkLck) * 0.01 + eqCritDmg / 100 : 1;
 
     const damageType = skill?.damageType ?? 'physical';
     let baseDmg: number;

@@ -68,6 +68,15 @@ export function migrateV1toV2(save: SaveData): SaveData {
 
   // Mercenary — undefined means no mercenary hired (safe default)
   // We intentionally do NOT set a default; undefined is the correct "no mercenary" state.
+  // Explicitly ensure no stale/corrupt mercenary data from partial saves
+  if (save.mercenary && typeof save.mercenary !== 'object') {
+    save.mercenary = undefined;
+  }
+
+  // Companion defaults: ensure homestead pets array and activePet exist
+  // These comprise the companion state (mercenary + pets) for v2 saves
+  if (!save.homestead.pets) save.homestead.pets = [];
+  if (save.homestead.activePet === undefined) save.homestead.activePet = undefined;
 
   // Dialogue tree state
   if (!save.dialogueState) save.dialogueState = {};
