@@ -13,7 +13,7 @@ import { InventorySystem } from '../systems/InventorySystem';
 import { QuestSystem } from '../systems/QuestSystem';
 import { HomesteadSystem } from '../systems/HomesteadSystem';
 import { AchievementSystem } from '../systems/AchievementSystem';
-import { SaveSystem } from '../systems/SaveSystem';
+import { SaveSystem, CURRENT_SAVE_VERSION, findNearestWalkablePosition } from '../systems/SaveSystem';
 import { SkillEffectSystem } from '../systems/SkillEffectSystem';
 import { MobileControlsSystem, isMobileDevice } from '../systems/MobileControlsSystem';
 import { LightingSystem } from '../systems/LightingSystem';
@@ -2797,7 +2797,7 @@ export class ZoneScene extends Phaser.Scene {
 
       await this.saveSystem.autoSave({
         id: 'autosave',
-        version: 1,
+        version: CURRENT_SAVE_VERSION,
         timestamp: Date.now(),
         classId: this.player.classData.id,
         player: {
@@ -2843,7 +2843,24 @@ export class ZoneScene extends Phaser.Scene {
     this.player.recalcDerived();
     this.player.hp = Math.min(save.player.hp, this.player.maxHp);
     this.player.mana = Math.min(save.player.mana, this.player.maxMana);
-    this.player.moveTo(save.player.tileCol, save.player.tileRow);
+
+    // Position safety check: reset to nearest camp if saved position is unwalkable
+    // (handles old 80x80 saves loaded in 120x120 maps, or positions that became walls)
+    const resetPos = findNearestWalkablePosition(
+      save.player.tileCol,
+      save.player.tileRow,
+      this.mapData.collisions,
+      this.campPositions,
+      this.mapData.cols,
+      this.mapData.rows,
+    );
+    if (resetPos) {
+      console.log('存档位置不可达，已重置至营地');
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: '存档位置不可达，已重置至营地', type: 'system' });
+      this.player.moveTo(resetPos.col, resetPos.row);
+    } else {
+      this.player.moveTo(save.player.tileCol, save.player.tileRow);
+    }
 
     // 2. Inventory (mark all items identified as temp fix)
     const identifyAll = (items: ItemInstance[]) => { for (const i of items) i.identified = true; };
