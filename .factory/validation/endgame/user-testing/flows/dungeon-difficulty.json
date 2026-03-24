@@ -1,0 +1,72 @@
+{
+  "surface": "browser",
+  "assertions": [
+    {
+      "id": "VAL-END-001",
+      "status": "blocked",
+      "reason": "Blocked by prerequisite UI interaction failure in browser validation: despite repeated canvas clicks on '新的旅程' and class selection targets, the session never reliably progressed from the menu into a controllable gameplay state, so the dungeon portal and multi-run procedural floor generation could not be exercised through the user surface.",
+      "evidence": [
+        "endgame/dungeon-difficulty/menu-fresh.png",
+        "endgame/dungeon-difficulty/class-select-fresh.png",
+        "endgame/dungeon-difficulty/zone-after-offset-start.png"
+      ]
+    },
+    {
+      "id": "VAL-END-002",
+      "status": "blocked",
+      "reason": "Blocked by the same prerequisite browser UX issue preventing entry into gameplay; unable to reach dungeon floors to compare floor-1 vs floor-5 monster scaling, floor monster variety, or applied difficulty modifiers through the real user surface.",
+      "evidence": [
+        "endgame/dungeon-difficulty/class-select-fresh.png",
+        "endgame/dungeon-difficulty/zone-after-offset-start.png"
+      ]
+    },
+    {
+      "id": "VAL-END-003",
+      "status": "blocked",
+      "reason": "Blocked by inability to traverse from menu into a playable zone in browser validation, so dungeon boss encounters and guaranteed boss loot could not be validated via the real UI flow.",
+      "evidence": [
+        "endgame/dungeon-difficulty/menu-fresh.png",
+        "endgame/dungeon-difficulty/zone-after-offset-start.png"
+      ]
+    },
+    {
+      "id": "VAL-END-004",
+      "status": "blocked",
+      "reason": "Blocked by prerequisite browser interaction failure before dungeon entry; could not verify exiting/re-entering, fresh run generation, or save/reload return-to-entrance behavior from the user surface.",
+      "evidence": [
+        "endgame/dungeon-difficulty/menu-fresh.png",
+        "endgame/dungeon-difficulty/zone-after-offset-start.png"
+      ]
+    },
+    {
+      "id": "VAL-END-005",
+      "status": "blocked",
+      "reason": "Blocked because the required progression prerequisite (clearing Normal) could not be achieved from a fresh browser session due to the same menu-to-game interaction problem; therefore Nightmare/Hell unlock sequencing and persistence could not be confirmed in-browser.",
+      "evidence": [
+        "endgame/dungeon-difficulty/menu-fresh.png",
+        "endgame/dungeon-difficulty/class-select-fresh.png"
+      ]
+    },
+    {
+      "id": "VAL-END-006",
+      "status": "blocked",
+      "reason": "Blocked by inability to enter a live run and compare the same monster across Normal, Nightmare, and Hell through the browser surface; no in-surface combat state was reached for measurement.",
+      "evidence": [
+        "endgame/dungeon-difficulty/menu-fresh.png",
+        "endgame/dungeon-difficulty/class-select-fresh.png"
+      ]
+    }
+  ],
+  "frictions": [
+    "Canvas-only Phaser UI was opaque to DOM/a11y tools, requiring coordinate clicks.",
+    "Repeated coordinate clicks on the fresh menu and class-selection screens did not yield a reliable transition into a playable zone, making the assigned endgame assertions untestable through the user surface.",
+    "Phaser runtime instance was not exposed on window/Phaser.GAMES in this browser context, limiting eval-based state inspection and preventing minimal setup acceleration suggested by the guidance."
+  ],
+  "blockers": [
+    "Prerequisite browser UX blocker: from a fresh session at http://localhost:5173/abyssfire/, the validator could reach the class-selection screen but could not reliably transition from menu/class-selection into an interactive gameplay zone, so all dungeon/difficulty assertions remained blocked at the user-surface entry step."
+  ],
+  "toolsUsed": [
+    "agent-browser"
+  ],
+  "summary": "Attempted browser validation for VAL-END-001 through VAL-END-006 from a fresh session, captured evidence screenshots, and confirmed the work is blocked by a prerequisite user-surface interaction issue preventing reliable transition from the menu/class-selection flow into gameplay. No assigned assertion could be positively executed past that prerequisite in the browser."
+}

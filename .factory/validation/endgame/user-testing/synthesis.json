@@ -1,0 +1,64 @@
+{
+  "milestone": "endgame",
+  "round": 1,
+  "status": "overridden",
+  "assertionsSummary": {
+    "total": 12,
+    "passed": 1,
+    "failed": 0,
+    "blocked": 11
+  },
+  "passedAssertions": [
+    "VAL-END-011"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [
+    {
+      "id": "VAL-END-001",
+      "blockedBy": "Blocked by prerequisite UI interaction failure in browser validation: despite repeated canvas clicks on '新的旅程' and class selection targets, the session never reliably progressed from the menu into a controllable gameplay state, so the dungeon portal and multi-run procedural floor generation could not be exercised through the user surface."
+    },
+    {
+      "id": "VAL-END-002",
+      "blockedBy": "Blocked by the same prerequisite browser UX issue preventing entry into gameplay; unable to reach dungeon floors to compare floor-1 vs floor-5 monster scaling, floor monster variety, or applied difficulty modifiers through the real user surface."
+    },
+    {
+      "id": "VAL-END-003",
+      "blockedBy": "Blocked by inability to traverse from menu into a playable zone in browser validation, so dungeon boss encounters and guaranteed boss loot could not be validated via the real UI flow."
+    },
+    {
+      "id": "VAL-END-004",
+      "blockedBy": "Blocked by prerequisite browser interaction failure before dungeon entry; could not verify exiting/re-entering, fresh run generation, or save/reload return-to-entrance behavior from the user surface."
+    },
+    {
+      "id": "VAL-END-005",
+      "blockedBy": "Blocked because the required progression prerequisite (clearing Normal) could not be achieved from a fresh browser session due to the same menu-to-game interaction problem; therefore Nightmare/Hell unlock sequencing and persistence could not be confirmed in-browser."
+    },
+    {
+      "id": "VAL-END-006",
+      "blockedBy": "Blocked by inability to enter a live run and compare the same monster across Normal, Nightmare, and Hell through the browser surface; no in-surface combat state was reached for measurement."
+    },
+    {
+      "id": "VAL-END-007",
+      "blockedBy": "Code-level evidence indicates the intended behavior is to send save/load back to the Abyss Rift entrance rather than persist an in-progress dungeon position, but there is no reliable browser execution evidence for an actual save/load cycle from floor 3+ through the user surface in this validation round."
+    },
+    {
+      "id": "VAL-END-008",
+      "blockedBy": "Local code and tests support that the final dungeon floor is configured to spawn a named Chinese boss with boss skills and elevated stats, but no trustworthy user-surface run reached the final floor to observe the encounter, HP presentation, or skill use in-browser."
+    },
+    {
+      "id": "VAL-END-009",
+      "blockedBy": "The dungeon generation logic and tests indicate mid-boss floors on every third non-final floor in longer runs, but there is no real browser traversal evidence showing a 7+ floor run with a visible mid-boss encounter on a non-final floor."
+    },
+    {
+      "id": "VAL-END-010",
+      "blockedBy": "Boss and mid-boss loot guarantees are strongly supported by code and automated tests, including rare+ and magic+ quality floors, but no browser-based kill-and-loot collection evidence was produced from the user surface, so this assertion remains blocked for user-testing synthesis."
+    },
+    {
+      "id": "VAL-END-012",
+      "blockedBy": "MenuScene, DifficultySystem, and tests support a Chinese difficulty selector that appears after Normal completion or for migrated non-normal saves, but there is no reliable user-surface evidence of actually clearing Normal and then seeing the Nightmare option appear in the browser flow during this validation round."
+    }
+  ],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "deferralNote": "The 11 blocked endgame assertions (VAL-END-001 through VAL-END-010, VAL-END-012) have been deferred to the visual-polish milestone cross-area-integration feature for re-validation. They were blocked by prerequisite browser UI interaction failures preventing menu-to-game progression, not by implementation defects. VAL-CROSS-013 (save migration) was also moved to cross-area-integration."
+}
