@@ -1932,7 +1932,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   private buildCompanionPanel(): void {
-    const pw = px(480), ph = px(440), panelX = (W - pw) / 2, panelY = px(20);
+    const pw = px(500), ph = px(520), panelX = (W - pw) / 2, panelY = px(10);
     this.companionPanel = this.add.container(panelX, panelY).setDepth(4000);
     this.animatePanelOpen(this.companionPanel);
 
@@ -1942,7 +1942,7 @@ export class UIScene extends Phaser.Scene {
     );
 
     // Title
-    this.companionPanel.add(this.add.text(pw / 2, px(10), '佣兵伙伴', {
+    this.companionPanel.add(this.add.text(pw / 2, px(10), '伙伴系统', {
       fontSize: fs(18), color: '#27ae60', fontFamily: TITLE_FONT, fontStyle: 'bold',
     }).setOrigin(0.5, 0));
 
@@ -1958,13 +1958,32 @@ export class UIScene extends Phaser.Scene {
 
     const merc = mercSys.getMercenary();
 
+    // Mercenary section header
+    this.companionPanel.add(this.add.text(px(14), px(36), '─ 佣兵 ─', {
+      fontSize: fs(13), color: '#c0934a', fontFamily: FONT,
+    }));
+
     if (!merc) {
-      // No mercenary — show hire panel
-      this.renderHirePanel(pw, ph, mercSys);
+      // No mercenary — compact hire hint
+      this.companionPanel.add(this.add.text(px(14), px(56), '在营地NPC处雇佣佣兵 (详见佣兵面板)', {
+        fontSize: fs(12), color: '#888', fontFamily: FONT,
+      }));
     } else {
-      // Has mercenary — show info panel
-      this.renderMercenaryInfo(pw, ph, merc, mercSys);
+      // Has mercenary — show compact info
+      const def = MERCENARY_DEFS[merc.type];
+      const typeNames: Record<string, string> = {
+        tank: '坦克', melee: '近战输出', ranged: '远程输出', healer: '治疗', mage: '法师',
+      };
+      const statusText = merc.alive
+        ? `${def.name} (${typeNames[merc.type]}) Lv.${merc.level}  HP:${Math.ceil(merc.hp)}/${merc.maxHp}`
+        : `${def.name} (${typeNames[merc.type]}) Lv.${merc.level}  [阵亡]`;
+      this.companionPanel.add(this.add.text(px(14), px(56), statusText, {
+        fontSize: fs(12), color: merc.alive ? '#e0d8cc' : '#e74c3c', fontFamily: FONT,
+      }));
     }
+
+    // Pet section
+    this.renderPetSection(pw, ph);
 
     // Footer
     this.companionPanel.add(this.add.text(pw / 2, ph - px(14), '按 P 关闭', {
@@ -2307,6 +2326,190 @@ export class UIScene extends Phaser.Scene {
         fontSize: fs(13), color: '#e74c3c', fontFamily: FONT,
       }).setOrigin(0.5));
     }
+  }
+
+  /** Render the pet section within the companion panel. */
+  private renderPetSection(pw: number, ph: number): void {
+    if (!this.companionPanel) return;
+    const hs = this.zone?.homesteadSystem;
+    if (!hs) return;
+
+    const petStartY = px(82);
+    const maxSlots = hs.getMaxPetSlots();
+
+    this.companionPanel.add(this.add.text(px(14), petStartY, `─ 宠物 (${hs.pets.length}/${maxSlots}) ─`, {
+      fontSize: fs(13), color: '#c0934a', fontFamily: FONT,
+    }));
+
+    if (hs.pets.length === 0) {
+      this.companionPanel.add(this.add.text(px(14), petStartY + px(22), '暂无宠物。可通过击杀BOSS、完成任务或探索获得。', {
+        fontSize: fs(11), color: '#888', fontFamily: FONT,
+        wordWrap: { width: pw - px(28) },
+      }));
+      return;
+    }
+
+    const cardH = px(52);
+    const startY = petStartY + px(22);
+    const allPets = hs.getAllPets();
+
+    const rarityColors: Record<string, string> = {
+      common: '#88cc88', rare: '#5599ff', epic: '#cc66ff',
+    };
+
+    hs.pets.forEach((pet, i) => {
+      const def = allPets.find(p => p.id === pet.petId);
+      if (!def) return;
+      const cy = startY + i * (cardH + px(4));
+      if (cy + cardH > ph - px(30)) return; // Prevent overflow
+
+      const isActive = hs.activePet === pet.petId;
+      const rarityColor = rarityColors[def.rarity] ?? '#888';
+      const cardBgColor = isActive ? 0x1a2a1a : 0x111122;
+      const borderColor = isActive ? 0x27ae60 : 0x333344;
+
+      // Card background
+      const cardBg = this.add.rectangle(pw / 2, cy + cardH / 2, pw - px(24), cardH, cardBgColor, 0.95)
+        .setStrokeStyle(Math.round(1 * DPR), borderColor, 0.8)
+        .setInteractive({ useHandCursor: true });
+      this.companionPanel!.add(cardBg);
+
+      // Active indicator
+      if (isActive) {
+        this.companionPanel!.add(this.add.text(px(16), cy + px(4), '★', {
+          fontSize: fs(14), color: '#f1c40f', fontFamily: FONT,
+        }));
+      }
+
+      // Pet name with evolution
+      const displayName = hs.getPetDisplayName(pet);
+      this.companionPanel!.add(this.add.text(px(32), cy + px(4), `${displayName} Lv.${pet.level}`, {
+        fontSize: fs(13), color: rarityColor, fontFamily: FONT, fontStyle: 'bold',
+      }));
+
+      // Description
+      this.companionPanel!.add(this.add.text(px(32), cy + px(20), def.description, {
+        fontSize: fs(10), color: '#888', fontFamily: FONT,
+        wordWrap: { width: pw - px(200) },
+      }));
+
+      // EXP bar
+      const expNeeded = pet.level * 20;
+      const expRatio = pet.level >= def.maxLevel ? 1 : pet.exp / expNeeded;
+      const barW = px(80), barH = px(6);
+      const barX = px(32), barY = cy + px(36);
+      this.companionPanel!.add(
+        this.add.rectangle(barX + barW / 2, barY + barH / 2, barW, barH, 0x1a1a1a)
+          .setStrokeStyle(Math.round(1 * DPR), 0x333333)
+      );
+      if (expRatio > 0) {
+        this.companionPanel!.add(
+          this.add.rectangle(barX, barY, Math.max(1, barW * expRatio), barH, 0x8e44ad).setOrigin(0, 0)
+        );
+      }
+      const expText = pet.level >= def.maxLevel ? 'MAX' : `${pet.exp}/${expNeeded}`;
+      this.companionPanel!.add(this.add.text(barX + barW + px(4), barY - px(1), expText, {
+        fontSize: fs(9), color: '#b08cce', fontFamily: FONT,
+      }));
+
+      // Evolution badge
+      if (pet.evolved > 0) {
+        const evoBadge = pet.evolved >= 2 ? '至尊' : '觉醒';
+        this.companionPanel!.add(this.add.text(barX + barW + px(44), barY - px(1), `[${evoBadge}]`, {
+          fontSize: fs(9), color: '#f1c40f', fontFamily: FONT,
+        }));
+      }
+
+      // Bonus stat display
+      const evoMult = hs.getEvolutionMultiplier(pet);
+      const baseBonus = def.bonusValue + def.bonusPerLevel * pet.level;
+      const bonusVal = Math.floor(baseBonus * evoMult);
+      this.companionPanel!.add(this.add.text(pw - px(110), cy + px(4), `+${bonusVal} ${def.bonusStat}`, {
+        fontSize: fs(11), color: '#aaa', fontFamily: FONT,
+      }));
+
+      // Activate button
+      if (!isActive) {
+        const actBtn = this.add.text(pw - px(60), cy + px(22), '[激活]', {
+          fontSize: fs(12), color: '#27ae60', fontFamily: FONT,
+        }).setInteractive({ useHandCursor: true });
+        actBtn.on('pointerdown', () => {
+          hs.setActivePet(pet.petId);
+          // Respawn pet sprite
+          const zoneScene = this.zone as any;
+          if (zoneScene?.spawnPetSprite) zoneScene.spawnPetSprite();
+          this.companionPanel?.destroy();
+          this.companionPanel = null;
+          this.buildCompanionPanel();
+        });
+        this.companionPanel!.add(actBtn);
+      } else {
+        const deactBtn = this.add.text(pw - px(60), cy + px(22), '[取消]', {
+          fontSize: fs(12), color: '#888', fontFamily: FONT,
+        }).setInteractive({ useHandCursor: true });
+        deactBtn.on('pointerdown', () => {
+          hs.setActivePet(null);
+          // Remove pet sprite
+          const zoneScene = this.zone as any;
+          if (zoneScene?.destroyPetSprite) zoneScene.destroyPetSprite();
+          this.companionPanel?.destroy();
+          this.companionPanel = null;
+          this.buildCompanionPanel();
+        });
+        this.companionPanel!.add(deactBtn);
+      }
+
+      // Feed button
+      const feedBtn = this.add.text(pw - px(110), cy + px(36), '[喂养]', {
+        fontSize: fs(11), color: pet.level >= def.maxLevel ? '#555' : '#5dade2', fontFamily: FONT,
+      });
+      if (pet.level < def.maxLevel) {
+        feedBtn.setInteractive({ useHandCursor: true });
+        feedBtn.on('pointerdown', () => {
+          // Check if player has the feed item
+          const inv = this.zone?.inventorySystem;
+          if (!inv) return;
+          const feedItemIdx = inv.inventory.findIndex(it => it.baseId === def.feedItem);
+          if (feedItemIdx === -1) {
+            EventBus.emit(GameEvents.LOG_MESSAGE, { text: `需要 ${def.feedItem} 来喂养宠物!`, type: 'system' });
+            return;
+          }
+          // Consume feed item
+          const feedItem = inv.inventory[feedItemIdx];
+          if (feedItem.quantity > 1) {
+            feedItem.quantity--;
+          } else {
+            inv.inventory.splice(feedItemIdx, 1);
+          }
+          hs.feedPet(pet.petId);
+          // Respawn pet sprite to update name if evolved
+          const zoneScene = this.zone as any;
+          if (zoneScene?.spawnPetSprite && hs.activePet === pet.petId) {
+            zoneScene.spawnPetSprite();
+          }
+          this.companionPanel?.destroy();
+          this.companionPanel = null;
+          this.buildCompanionPanel();
+        });
+      }
+      this.companionPanel!.add(feedBtn);
+
+      // Click card to toggle active
+      cardBg.on('pointerdown', () => {
+        if (isActive) {
+          hs.setActivePet(null);
+          const zoneScene = this.zone as any;
+          if (zoneScene?.destroyPetSprite) zoneScene.destroyPetSprite();
+        } else {
+          hs.setActivePet(pet.petId);
+          const zoneScene = this.zone as any;
+          if (zoneScene?.spawnPetSprite) zoneScene.spawnPetSprite();
+        }
+        this.companionPanel?.destroy();
+        this.companionPanel = null;
+        this.buildCompanionPanel();
+      });
+    });
   }
 
   // --- Audio Settings Panel ---

@@ -103,6 +103,10 @@ export class ZoneScene extends Phaser.Scene {
   private mercenaryHpBar: Phaser.GameObjects.Rectangle | null = null;
   private mercenaryHpBarBg: Phaser.GameObjects.Rectangle | null = null;
   private mercenaryNameLabel: Phaser.GameObjects.Text | null = null;
+  private petSprite: Phaser.GameObjects.Container | null = null;
+  private petNameLabel: Phaser.GameObjects.Text | null = null;
+  private petTileCol = 0;
+  private petTileRow = 0;
   private inCombat = false;
   private isTransitioning = false;
   private isPortaling = false;
@@ -201,6 +205,7 @@ export class ZoneScene extends Phaser.Scene {
     this.spawnMonsters();
     this.spawnNPCs();
     this.spawnMercenarySprite();
+    this.spawnPetSprite();
     this.buildCampDecorations();
     this.rebuildWorldCaches();
     for (const decor of this.campDecorPositions) {
@@ -514,6 +519,8 @@ export class ZoneScene extends Phaser.Scene {
     this.handleCombat(time);
     this.handleMercenaryCombat(time);
     this.updateMercenary(time, delta);
+    this.updatePetFollower(time, delta);
+    this.handlePetCombat(time);
     this.updateEliteAffixBehaviors(time);
     this.updateStatusEffects(time);
     this.updateCombatState();
@@ -1737,7 +1744,7 @@ export class ZoneScene extends Phaser.Scene {
 
     // Mercenary exp share
     if (this.mercenarySystem?.isAlive()) {
-      const trainingBonus = homeBonus['expBonus'] ?? 0;
+      const trainingBonus = this.homesteadSystem.getTrainingGroundBonus();
       this.mercenarySystem.addExp(exp, trainingBonus);
     }
 
@@ -1774,6 +1781,11 @@ export class ZoneScene extends Phaser.Scene {
     this.achievementSystem.checkLevel(this.player.level);
 
     this.questSystem.updateProgress('kill', monster.definition.id);
+
+    // Boss pet drops: certain bosses have a chance to drop specific pets
+    if (monster.definition.elite) {
+      this.checkBossPetDrop(monster.definition.id);
+    }
 
     // Progress collect quests: monsters in this zone drop quest collectibles
     const activeQuests = this.questSystem.getActiveQuests();
@@ -1988,6 +2000,10 @@ export class ZoneScene extends Phaser.Scene {
               this.player.gold += reward.gold;
               this.achievementSystem.update('quest');
               turnedIn.push(qid);
+              // Pet reward from quest
+              if (reward.petReward) {
+                this.homesteadSystem.addPet(reward.petReward);
+              }
             }
           }
         }
@@ -2145,7 +2161,12 @@ export class ZoneScene extends Phaser.Scene {
     // 4. Homestead
     if (save.homestead) {
       this.homesteadSystem.buildings = save.homestead.buildings ?? {};
-      this.homesteadSystem.pets = save.homestead.pets ?? [];
+      this.homesteadSystem.pets = (save.homestead.pets ?? []).map(p => ({
+        petId: p.petId,
+        level: p.level,
+        exp: p.exp,
+        evolved: p.evolved ?? 0,
+      }));
       this.homesteadSystem.activePet = save.homestead.activePet ?? null;
     }
 
@@ -3111,10 +3132,194 @@ export class ZoneScene extends Phaser.Scene {
     return best;
   }
 
+  // ---------------------------------------------------------------------------
+  // ─── Pet Visual Follower ────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+
+  /** Create or recreate the pet sprite following the player. */
+  spawnPetSprite(): void {
+    this.destroyPetSprite();
+    const petInst = this.homesteadSystem.getActivePetInstance();
+    const petDef = this.homesteadSystem.getActivePetDef();
+    if (!petInst || !petDef) return;
+
+    // Position 2-3 tiles offset from player
+    this.petTileCol = this.player.tileCol - 2;
+    this.petTileRow = this.player.tileRow + 1;
+    const worldPos = cartToIso(this.petTileCol, this.petTileRow);
+
+    this.petSprite = this.add.container(worldPos.x, worldPos.y);
+    this.petSprite.setDepth(worldPos.y + 50);
+
+    // Pet body — small colored circle based on rarity
+    const rarityColors: Record<string, number> = {
+      common: 0x88cc88,
+      rare: 0x5599ff,
+      epic: 0xcc66ff,
+    };
+    const color = rarityColors[petDef.rarity] ?? 0x88cc88;
+
+    // Pet body (small circular shape)
+    const body = this.add.circle(0, -12, 10, color);
+    body.setStrokeStyle(1.5, 0xffffff, 0.5);
+    this.petSprite.add(body);
+
+    // Shadow
+    const shadow = this.add.ellipse(0, 4, 16, 6, 0x000000, 0.2);
+    this.petSprite.add(shadow);
+    this.petSprite.sendToBack(shadow);
+
+    // Friendly indicator (small diamond)
+    const indicator = this.add.rectangle(0, -28, 4, 4, 0x88ccff);
+    indicator.setAngle(45);
+    this.petSprite.add(indicator);
+
+    // Name label with evolution suffix
+    const displayName = this.homesteadSystem.getPetDisplayName(petInst);
+    this.petNameLabel = this.add.text(0, -36, `${displayName} Lv.${petInst.level}`, {
+      fontSize: fs(9), color: '#aaddff', fontFamily: '"Noto Sans SC", sans-serif',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+    }).setOrigin(0.5);
+    this.petSprite.add(this.petNameLabel);
+
+    // Idle floating animation
+    this.tweens.add({
+      targets: body,
+      y: body.y - 3,
+      duration: 1200,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+  }
+
+  destroyPetSprite(): void {
+    if (this.petSprite) {
+      this.tweens.killTweensOf(this.petSprite);
+      // Kill tweens on children too
+      for (const child of this.petSprite.list) {
+        this.tweens.killTweensOf(child);
+      }
+      this.petSprite.destroy();
+      this.petSprite = null;
+      this.petNameLabel = null;
+    }
+  }
+
+  /** Update the pet follower position — follows player with 2-3 tile offset. */
+  private updatePetFollower(_time: number, _delta: number): void {
+    if (!this.petSprite) {
+      // Check if we should spawn a pet sprite (e.g., pet was activated mid-game)
+      if (this.homesteadSystem.activePet) {
+        this.spawnPetSprite();
+      }
+      return;
+    }
+    if (!this.homesteadSystem.activePet) {
+      this.destroyPetSprite();
+      return;
+    }
+
+    // Follow player with smooth interpolation at 2 tile offset
+    const targetCol = this.player.tileCol - 2;
+    const targetRow = this.player.tileRow + 1;
+    const dx = targetCol - this.petTileCol;
+    const dy = targetRow - this.petTileRow;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 0.2) {
+      const speed = 0.05;
+      const nx = dx / dist;
+      const ny = dy / dist;
+      this.petTileCol += nx * Math.min(speed * dist, speed * 3);
+      this.petTileRow += ny * Math.min(speed * dist, speed * 3);
+    }
+
+    const worldPos = cartToIso(this.petTileCol, this.petTileRow);
+    this.petSprite.setPosition(worldPos.x, worldPos.y);
+    this.petSprite.setDepth(worldPos.y + 50);
+
+    // Update name label if pet level changes
+    const petInst = this.homesteadSystem.getActivePetInstance();
+    if (petInst && this.petNameLabel) {
+      const displayName = this.homesteadSystem.getPetDisplayName(petInst);
+      const expected = `${displayName} Lv.${petInst.level}`;
+      if (this.petNameLabel.text !== expected) {
+        this.petNameLabel.setText(expected);
+      }
+    }
+  }
+
+  /** Pet periodic combat attack — 5-15% of player damage scaling with pet level. */
+  private handlePetCombat(time: number): void {
+    if (!this.homesteadSystem.activePet || !this.homesteadSystem.canPetAttack(time)) return;
+
+    // Disable in safe zones
+    const safeRadius = this.mapData.safeZoneRadius ?? 9;
+    for (const camp of this.campPositions) {
+      if (euclideanDistance(this.player.tileCol, this.player.tileRow, camp.col, camp.row) < safeRadius) {
+        return;
+      }
+    }
+
+    // Find player's current attack target or nearest aggroed monster
+    const target = this.player.attackTarget
+      ? this.monsters.find(m => m.id === this.player.attackTarget && m.isAlive())
+      : this.findNearestAggroMonster();
+
+    if (!target || !target.isAlive()) return;
+
+    // Calculate pet damage based on player damage
+    const eqStats = this.getEquipStats();
+    const playerDamage = this.player.baseDamage + (eqStats.damage ?? 0);
+    const petDamage = this.homesteadSystem.calculatePetDamage(playerDamage);
+
+    if (petDamage <= 0) return;
+
+    this.homesteadSystem.recordPetAttack(time);
+
+    // Apply damage through CombatSystem for consistency
+    target.takeDamage(petDamage, this.petSprite?.x ?? this.player.sprite.x, this.petSprite?.y ?? this.player.sprite.y);
+    this.showDamageText(target.sprite.x + 10, target.sprite.y - 30, petDamage, false, false, false, 'physical');
+
+    // Brief visual feedback on pet sprite
+    if (this.petSprite) {
+      this.tweens.add({
+        targets: this.petSprite,
+        scaleX: 1.2,
+        scaleY: 1.2,
+        duration: 100,
+        yoyo: true,
+        ease: 'Power2',
+      });
+    }
+
+    if (!target.isAlive()) {
+      this.onMonsterKilled(target);
+    }
+  }
+
+  /** Boss pet drop table: elite bosses have a chance to drop specific pets. */
+  private checkBossPetDrop(monsterId: string): void {
+    const bossDrops: Record<string, { petId: string; chance: number }> = {
+      'werewolf_alpha': { petId: 'pet_cat', chance: 0.15 },
+      'mountain_troll': { petId: 'pet_storm_wolf', chance: 0.12 },
+      'phoenix': { petId: 'pet_phoenix', chance: 0.10 },
+      'demon_lord': { petId: 'pet_dragon', chance: 0.15 },
+      'goblin_chief': { petId: 'pet_owl', chance: 0.20 },
+    };
+    const drop = bossDrops[monsterId];
+    if (!drop) return;
+    if (Math.random() < drop.chance) {
+      this.homesteadSystem.addPet(drop.petId);
+    }
+  }
+
   shutdown(): void {
     this.isTransitioning = false;
     this.isPortaling = false;
     this.destroyMercenarySprite();
+    this.destroyPetSprite();
     this.input.off('pointerdown', this.handlePointerDown, this);
     EventBus.off(GameEvents.PLAYER_DIED, this.handlePlayerDied, this);
     EventBus.off(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp, this);

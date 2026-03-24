@@ -263,6 +263,7 @@ export interface QuestReward {
   exp: number;
   gold: number;
   items?: string[];
+  petReward?: string;
 }
 
 export interface QuestProgress {
@@ -374,7 +375,7 @@ export interface SaveData {
   exploration: Record<string, boolean[][]>;
   homestead: {
     buildings: Record<string, number>;
-    pets: { petId: string; level: number; exp: number }[];
+    pets: { petId: string; level: number; exp: number; evolved?: number }[];
     activePet?: string;
   };
   achievements: Record<string, number>;

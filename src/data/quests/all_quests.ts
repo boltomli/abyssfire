@@ -739,4 +739,38 @@ export const AllQuests: QuestDefinition[] = [
     level: 46,
     questArea: { col: 45, row: 42, radius: 12 },
   },
+
+  // ═══════════════════════════════════════
+  // Pet Reward Quests
+  // ═══════════════════════════════════════
+  {
+    id: 'q_pet_jade_tortoise',
+    name: '远古守护之魂',
+    description: '山岭深处沉睡着一只远古玄武龟的灵魂，消灭石魔像收集灵魂碎片来唤醒它。',
+    zone: 'anvil_mountains',
+    type: 'kill',
+    category: 'side',
+    objectives: [
+      { type: 'kill', targetId: 'stone_golem', targetName: '石魔像', required: 15, current: 0 },
+      { type: 'kill', targetId: 'gargoyle', targetName: '石像鬼', required: 10, current: 0 },
+    ],
+    rewards: { exp: 3000, gold: 250, petReward: 'pet_jade_tortoise' },
+    prereqQuests: ['q_kill_gargoyles'],
+    level: 22,
+    questArea: { col: 40, row: 35, radius: 15 },
+  },
+  {
+    id: 'q_pet_sprite_friend',
+    name: '精灵朋友',
+    description: '翡翠平原上住着一只可爱的小精灵，完成它的考验就能获得它的友谊。',
+    zone: 'emerald_plains',
+    type: 'kill',
+    category: 'side',
+    objectives: [
+      { type: 'kill', targetId: 'slime_green', targetName: '绿色史莱姆', required: 20, current: 0 },
+    ],
+    rewards: { exp: 200, gold: 50, petReward: 'pet_sprite' },
+    level: 3,
+    questArea: { col: 35, row: 20, radius: 15 },
+  },
 ];

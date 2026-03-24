@@ -9,10 +9,10 @@ const BUILDINGS: HomesteadBuilding[] = [
     bonusPerLevel: [{ stat: 'potionDiscount', value: 5 }],
   },
   {
-    id: 'training_ground', name: '训练场', description: '离线经验获取',
+    id: 'training_ground', name: '训练场', description: '佣兵经验加成',
     maxLevel: 5,
     costPerLevel: [{ gold: 150 }, { gold: 350 }, { gold: 700 }, { gold: 1400 }, { gold: 2800 }],
-    bonusPerLevel: [{ stat: 'expBonus', value: 1 }],
+    bonusPerLevel: [{ stat: 'mercExpBonus', value: 5 }],
   },
   {
     id: 'gem_workshop', name: '宝石工坊', description: '合成/升级宝石',
@@ -21,9 +21,9 @@ const BUILDINGS: HomesteadBuilding[] = [
     bonusPerLevel: [{ stat: 'gemBonus', value: 2 }],
   },
   {
-    id: 'pet_house', name: '宠物小屋', description: '饲养宠物',
-    maxLevel: 3,
-    costPerLevel: [{ gold: 300 }, { gold: 800 }, { gold: 2000 }],
+    id: 'pet_house', name: '宠物小屋', description: '饲养宠物，等级决定宠物容量',
+    maxLevel: 5,
+    costPerLevel: [{ gold: 300 }, { gold: 600 }, { gold: 1200 }, { gold: 2000 }, { gold: 3500 }],
     bonusPerLevel: [{ stat: 'petSlots', value: 1 }],
   },
   {
@@ -40,18 +40,37 @@ const BUILDINGS: HomesteadBuilding[] = [
   },
 ];
 
+/** Evolution thresholds and names for pets. */
+export interface PetEvolution {
+  level: number;
+  nameSuffix: string;
+  bonusMultiplier: number;
+}
+
+/** Default evolution stages at levels 10 and 20. */
+const EVOLUTION_STAGES: PetEvolution[] = [
+  { level: 10, nameSuffix: '·觉醒', bonusMultiplier: 1.5 },
+  { level: 20, nameSuffix: '·至尊', bonusMultiplier: 2.0 },
+];
+
+// 5 original pets (unchanged)
 const PETS: PetDefinition[] = [
   { id: 'pet_sprite', name: '小精灵', description: '可爱的精灵，增加经验获取', rarity: 'common', bonusStat: 'expBonus', bonusValue: 3, bonusPerLevel: 0.5, maxLevel: 20, feedItem: 'c_hp_potion_s' },
   { id: 'pet_dragon', name: '小火龙', description: '火龙幼崽，增加攻击力', rarity: 'rare', bonusStat: 'damage', bonusValue: 5, bonusPerLevel: 1, maxLevel: 20, feedItem: 'c_mp_potion_s' },
   { id: 'pet_owl', name: '猫头鹰', description: '智慧的猫头鹰，增加掉宝率', rarity: 'common', bonusStat: 'magicFind', bonusValue: 5, bonusPerLevel: 1, maxLevel: 20, feedItem: 'c_hp_potion_s' },
   { id: 'pet_cat', name: '暗影猫', description: '神秘的黑猫，增加暴击率', rarity: 'rare', bonusStat: 'critRate', bonusValue: 2, bonusPerLevel: 0.3, maxLevel: 20, feedItem: 'c_mp_potion_s' },
   { id: 'pet_phoenix', name: '凤凰雏', description: '凤凰之子，增加生命回复', rarity: 'epic', bonusStat: 'hpRegen', bonusValue: 3, bonusPerLevel: 0.8, maxLevel: 20, feedItem: 'c_hp_potion_m' },
+  // 3 new rare/epic pets with unique bonusStat and distinct acquisition
+  { id: 'pet_storm_wolf', name: '雷狼', description: '雷暴之子，增加攻击速度（BOSS掉落）', rarity: 'epic', bonusStat: 'attackSpeed', bonusValue: 3, bonusPerLevel: 0.5, maxLevel: 20, feedItem: 'c_mp_potion_m' },
+  { id: 'pet_jade_tortoise', name: '玄武龟', description: '远古守护，增加防御力（任务奖励）', rarity: 'epic', bonusStat: 'defense', bonusValue: 4, bonusPerLevel: 0.8, maxLevel: 20, feedItem: 'c_hp_potion_m' },
+  { id: 'pet_void_butterfly', name: '虚空蝶', description: '虚空使者，增加法力回复（稀有刷新）', rarity: 'epic', bonusStat: 'manaRegen', bonusValue: 2, bonusPerLevel: 0.6, maxLevel: 20, feedItem: 'c_mp_potion_s' },
 ];
 
 export interface PetInstance {
   petId: string;
   level: number;
   exp: number;
+  evolved: number; // tracks evolution stage count (0, 1, 2)
 }
 
 export class HomesteadSystem {
@@ -59,15 +78,55 @@ export class HomesteadSystem {
   pets: PetInstance[] = [];
   activePet: string | null = null;
 
+  /** Last time the active pet attacked (for periodic pet combat). */
+  petLastAttackTime = -Infinity;
+  /** Pet attack interval in ms (3 seconds). */
+  static readonly PET_ATTACK_INTERVAL = 3000;
+  /** Base pet damage fraction of player damage. */
+  static readonly PET_DAMAGE_BASE_FRACTION = 0.05;
+  /** Additional damage fraction per pet level. */
+  static readonly PET_DAMAGE_PER_LEVEL_FRACTION = 0.005;
+  /** Max pet damage fraction (at level 20: 5% + 20*0.5% = 15%). */
+  static readonly PET_DAMAGE_MAX_FRACTION = 0.15;
+
   getBuildingDef(id: string): HomesteadBuilding | undefined {
     return BUILDINGS.find(b => b.id === id);
   }
 
   getAllBuildings(): HomesteadBuilding[] { return BUILDINGS; }
   getAllPets(): PetDefinition[] { return PETS; }
+  getEvolutionStages(): PetEvolution[] { return EVOLUTION_STAGES; }
+
+  getPetDef(petId: string): PetDefinition | undefined {
+    return PETS.find(p => p.id === petId);
+  }
+
+  getPetInstance(petId: string): PetInstance | undefined {
+    return this.pets.find(p => p.petId === petId);
+  }
+
+  getActivePetInstance(): PetInstance | undefined {
+    if (!this.activePet) return undefined;
+    return this.pets.find(p => p.petId === this.activePet);
+  }
+
+  getActivePetDef(): PetDefinition | undefined {
+    if (!this.activePet) return undefined;
+    return PETS.find(p => p.id === this.activePet);
+  }
 
   getBuildingLevel(id: string): number {
     return this.buildings[id] ?? 0;
+  }
+
+  /** Pet capacity = 1 + pet_house level. */
+  getMaxPetSlots(): number {
+    return 1 + (this.buildings['pet_house'] ?? 0);
+  }
+
+  /** Training ground mercenary exp bonus (percentage). */
+  getTrainingGroundBonus(): number {
+    return (this.buildings['training_ground'] ?? 0) * 5;
   }
 
   canUpgrade(id: string, gold: number): boolean {
@@ -93,6 +152,24 @@ export class HomesteadSystem {
     return cost;
   }
 
+  /** Get the evolution multiplier for a pet based on its evolved stage. */
+  getEvolutionMultiplier(pet: PetInstance): number {
+    if (pet.evolved <= 0) return 1.0;
+    // Each evolution stage has a specific multiplier
+    const stage = EVOLUTION_STAGES[pet.evolved - 1];
+    return stage ? stage.bonusMultiplier : 1.0;
+  }
+
+  /** Get the display name for a pet including evolution suffix. */
+  getPetDisplayName(pet: PetInstance): string {
+    const def = this.getPetDef(pet.petId);
+    if (!def) return pet.petId;
+    if (pet.evolved > 0 && pet.evolved <= EVOLUTION_STAGES.length) {
+      return def.name + EVOLUTION_STAGES[pet.evolved - 1].nameSuffix;
+    }
+    return def.name;
+  }
+
   getTotalBonuses(): Record<string, number> {
     const bonuses: Record<string, number> = {};
     for (const [id, level] of Object.entries(this.buildings)) {
@@ -102,13 +179,15 @@ export class HomesteadSystem {
         bonuses[bonus.stat] = (bonuses[bonus.stat] ?? 0) + bonus.value * level;
       }
     }
-    // Active pet bonus
+    // Active pet bonus (with evolution multiplier)
     if (this.activePet) {
       const pet = this.pets.find(p => p.petId === this.activePet);
       if (pet) {
         const def = PETS.find(p => p.id === pet.petId);
         if (def) {
-          bonuses[def.bonusStat] = (bonuses[def.bonusStat] ?? 0) + def.bonusValue + def.bonusPerLevel * pet.level;
+          const evoMult = this.getEvolutionMultiplier(pet);
+          const baseBonus = def.bonusValue + def.bonusPerLevel * pet.level;
+          bonuses[def.bonusStat] = (bonuses[def.bonusStat] ?? 0) + Math.floor(baseBonus * evoMult);
         }
       }
     }
@@ -116,13 +195,17 @@ export class HomesteadSystem {
   }
 
   addPet(petId: string): boolean {
-    if (this.pets.find(p => p.petId === petId)) return false;
-    const maxSlots = 1 + (this.buildings['pet_house'] ?? 0);
+    // Duplicate prevention
+    if (this.pets.find(p => p.petId === petId)) {
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: '你已经拥有这只宠物了!', type: 'system' });
+      return false;
+    }
+    const maxSlots = this.getMaxPetSlots();
     if (this.pets.length >= maxSlots) {
       EventBus.emit(GameEvents.LOG_MESSAGE, { text: '宠物小屋已满!', type: 'system' });
       return false;
     }
-    this.pets.push({ petId, level: 1, exp: 0 });
+    this.pets.push({ petId, level: 1, exp: 0, evolved: 0 });
     const def = PETS.find(p => p.id === petId);
     EventBus.emit(GameEvents.LOG_MESSAGE, {
       text: `获得宠物: ${def?.name ?? petId}!`,
@@ -146,11 +229,61 @@ export class HomesteadSystem {
         text: `${def.name} 升级到 Lv.${pet.level}!`,
         type: 'system',
       });
+
+      // Check for evolution at threshold levels
+      this.checkEvolution(pet, def);
     }
     return true;
   }
 
+  /** Check and apply evolution at specific level thresholds. */
+  private checkEvolution(pet: PetInstance, def: PetDefinition): void {
+    for (let i = 0; i < EVOLUTION_STAGES.length; i++) {
+      const stage = EVOLUTION_STAGES[i];
+      if (pet.level >= stage.level && pet.evolved <= i) {
+        pet.evolved = i + 1;
+        const evolvedName = def.name + stage.nameSuffix;
+        EventBus.emit(GameEvents.LOG_MESSAGE, {
+          text: `${def.name} 进化为 ${evolvedName}! 属性加成提升!`,
+          type: 'system',
+        });
+      }
+    }
+  }
+
+  /** Calculate pet attack damage as fraction of player damage, scaling with pet level. */
+  calculatePetDamage(playerDamage: number): number {
+    const pet = this.getActivePetInstance();
+    if (!pet) return 0;
+    const fraction = Math.min(
+      HomesteadSystem.PET_DAMAGE_MAX_FRACTION,
+      HomesteadSystem.PET_DAMAGE_BASE_FRACTION + pet.level * HomesteadSystem.PET_DAMAGE_PER_LEVEL_FRACTION,
+    );
+    const evoMult = this.getEvolutionMultiplier(pet);
+    const raw = Math.floor(playerDamage * fraction * evoMult);
+    return raw > 0 ? Math.max(1, raw) : 0;
+  }
+
+  /** Whether the pet can attack this tick (periodic interval check). */
+  canPetAttack(time: number): boolean {
+    if (!this.activePet) return false;
+    return time - this.petLastAttackTime >= HomesteadSystem.PET_ATTACK_INTERVAL;
+  }
+
+  /** Record that a pet attack was performed. */
+  recordPetAttack(time: number): void {
+    this.petLastAttackTime = time;
+  }
+
   setActivePet(petId: string | null): void {
     this.activePet = petId;
+  }
+
+  /** Reset all pet/homestead state for a new game. */
+  resetState(): void {
+    this.buildings = {};
+    this.pets = [];
+    this.activePet = null;
+    this.petLastAttackTime = -Infinity;
   }
 }
