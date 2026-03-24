@@ -912,7 +912,7 @@ export class ZoneScene extends Phaser.Scene {
                 const exitLabel = this.add.text(pos.x, pos.y - 30 * DPR, labelText, {
                   fontSize: fs(9),
                   color: this.dungeonFloorConfig.isBossFloor ? '#66CCFF' : '#FF9933',
-                  fontFamily: 'sans-serif',
+                  fontFamily: '"Noto Sans SC", sans-serif',
                   stroke: '#000000',
                   strokeThickness: Math.round(2 * DPR),
                 }).setOrigin(0.5).setDepth(pos.y + 3);
@@ -2007,10 +2007,10 @@ export class ZoneScene extends Phaser.Scene {
     // Simple visual: a circle with a help indicator
     const body = this.add.circle(0, -12 * DPR, 8 * DPR, 0x44aaff);
     const helpMark = this.add.text(0, -28 * DPR, '!', {
-      fontSize: `${Math.round(14 * DPR)}px`, color: '#ff4444', fontFamily: 'Arial', fontStyle: 'bold',
+      fontSize: fs(14), color: '#ff4444', fontFamily: '"Noto Sans SC", sans-serif', fontStyle: 'bold',
     }).setOrigin(0.5);
     const nameLabel = this.add.text(0, 4 * DPR, rescueNpcName, {
-      fontSize: `${Math.round(10 * DPR)}px`, color: '#aaddff', fontFamily: 'Arial',
+      fontSize: fs(10), color: '#aaddff', fontFamily: '"Noto Sans SC", sans-serif',
     }).setOrigin(0.5, 0);
     rescueNpcSprite.add([body, helpMark, nameLabel]);
 
@@ -2124,10 +2124,10 @@ export class ZoneScene extends Phaser.Scene {
     // Visual: a glowing rune circle
     const glow = this.add.circle(0, -8 * DPR, 12 * DPR, 0xaa66ff, 0.4);
     const icon = this.add.text(0, -14 * DPR, '?', {
-      fontSize: `${Math.round(16 * DPR)}px`, color: '#ffcc00', fontFamily: 'Arial', fontStyle: 'bold',
+      fontSize: fs(16), color: '#ffcc00', fontFamily: '"Noto Sans SC", sans-serif', fontStyle: 'bold',
     }).setOrigin(0.5);
     const label = this.add.text(0, 8 * DPR, '谜题装置', {
-      fontSize: `${Math.round(10 * DPR)}px`, color: '#ccaaff', fontFamily: 'Arial',
+      fontSize: fs(10), color: '#ccaaff', fontFamily: '"Noto Sans SC", sans-serif',
     }).setOrigin(0.5, 0);
     puzzleSprite.add([glow, icon, label]);
     puzzleSprite.setSize(24 * DPR, 32 * DPR);
@@ -2168,7 +2168,7 @@ export class ZoneScene extends Phaser.Scene {
     popup.add(bg);
 
     const promptText = this.add.text(0, -30 * DPR, puzzle.prompt, {
-      fontSize: `${Math.round(11 * DPR)}px`, color: '#e0d8cc', fontFamily: 'Arial',
+      fontSize: fs(11), color: '#e0d8cc', fontFamily: '"Noto Sans SC", sans-serif',
       wordWrap: { width: popW - 20 * DPR },
       align: 'center',
     }).setOrigin(0.5, 0.5);
@@ -2176,7 +2176,7 @@ export class ZoneScene extends Phaser.Scene {
 
     // Correct choice button (the solution)
     const correctBtn = this.add.text(-40 * DPR, 20 * DPR, puzzle.solution, {
-      fontSize: `${Math.round(10 * DPR)}px`, color: '#44ff44', fontFamily: 'Arial',
+      fontSize: fs(10), color: '#44ff44', fontFamily: '"Noto Sans SC", sans-serif',
       wordWrap: { width: 80 * DPR },
       align: 'center',
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
@@ -2184,7 +2184,7 @@ export class ZoneScene extends Phaser.Scene {
 
     // Wrong choice button
     const wrongBtn = this.add.text(40 * DPR, 20 * DPR, '离开', {
-      fontSize: `${Math.round(10 * DPR)}px`, color: '#ff4444', fontFamily: 'Arial',
+      fontSize: fs(10), color: '#ff4444', fontFamily: '"Noto Sans SC", sans-serif',
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     popup.add(wrongBtn);
 
@@ -3524,7 +3524,7 @@ export class ZoneScene extends Phaser.Scene {
     const label = this.add.text(0, -30 * DPR, reward.type === 'chest' ? '宝箱' : reward.type === 'gold_pile' ? '金币堆' : '卷轴', {
       fontSize: fs(9),
       color: '#FFD700',
-      fontFamily: 'sans-serif',
+      fontFamily: '"Noto Sans SC", sans-serif',
       stroke: '#000000',
       strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0.5);
@@ -3645,7 +3645,7 @@ export class ZoneScene extends Phaser.Scene {
     const label = this.add.text(0, -46 * DPR, DungeonSystem.getDungeonPortalLabel(), {
       fontSize: fs(11),
       color: '#FF6633',
-      fontFamily: 'sans-serif',
+      fontFamily: '"Noto Sans SC", sans-serif',
       stroke: '#000000',
       strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0.5);
@@ -3839,7 +3839,7 @@ export class ZoneScene extends Phaser.Scene {
       const label = this.add.text(0, -40 * DPR, entrance.name, {
         fontSize: fs(10),
         color: '#CC88FF',
-        fontFamily: 'sans-serif',
+        fontFamily: '"Noto Sans SC", sans-serif',
         stroke: '#000000',
         strokeThickness: Math.round(2 * DPR),
       }).setOrigin(0.5);
@@ -4098,7 +4098,7 @@ export class ZoneScene extends Phaser.Scene {
       const label = this.add.text(0, -28 * DPR, decoration.name, {
         fontSize: fs(8),
         color: '#CCCCAA',
-        fontFamily: 'sans-serif',
+        fontFamily: '"Noto Sans SC", sans-serif',
         stroke: '#000000',
         strokeThickness: Math.round(2 * DPR),
       }).setOrigin(0.5).setAlpha(0);
@@ -4181,7 +4181,7 @@ export class ZoneScene extends Phaser.Scene {
     const title = this.add.text(0, 0, decoration.name, {
       fontSize: fs(11),
       color: '#FFD700',
-      fontFamily: 'sans-serif',
+      fontFamily: '"Noto Sans SC", sans-serif',
       fontStyle: 'bold',
       wordWrap: { width: tooltipWidth - padding * 2 },
     }).setOrigin(0.5, 0);
@@ -4191,7 +4191,7 @@ export class ZoneScene extends Phaser.Scene {
     const desc = this.add.text(0, title.height + Math.round(4 * DPR), decoration.description, {
       fontSize: fs(9),
       color: '#DDDDCC',
-      fontFamily: 'sans-serif',
+      fontFamily: '"Noto Sans SC", sans-serif',
       wordWrap: { width: tooltipWidth - padding * 2 },
       lineSpacing: Math.round(2 * DPR),
     }).setOrigin(0.5, 0);
