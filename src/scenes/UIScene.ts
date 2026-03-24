@@ -21,6 +21,47 @@ const TITLE_FONT = '"Cinzel", "Noto Sans SC", serif';
 const LOG_MAX_LINES = 8;
 const GLOBE_R = Math.round(40 * DPR);
 
+/** Unified panel styling config used by ALL panels for visual consistency. */
+const PANEL_STYLE = {
+  /** Panel background */
+  bg: { color: 0x0f0f1e, alpha: 0.95 },
+  /** Panel border — same for all panels */
+  border: { color: 0xc0934a, width: 2, radius: 0 },
+  /** Header area */
+  header: {
+    height: 36,
+    font: TITLE_FONT,
+    fontSize: 18,
+    color: '#c0934a',
+  },
+  /** Close button */
+  close: {
+    fontSize: 16,
+    color: '#e74c3c',
+    hoverColor: '#ff6666',
+  },
+  /** Depth layering */
+  depth: {
+    backdrop: 3999,
+    panel: 4000,
+    subPanel: 4001,
+    tooltip: 5000,
+    contextMenu: 5001,
+    confirmDialog: 5002,
+    toast: 6000,
+  },
+  /** Tooltip styling */
+  tooltip: {
+    bg: { color: 0x0a0a18, alpha: 0.97 },
+    border: { color: 0xc0934a, width: 1.5 },
+    font: FONT,
+    titleSize: 13,
+    bodySize: 11,
+    lineSpacing: 2,
+    padding: 10,
+  },
+} as const;
+
 const W = GAME_WIDTH * DPR;
 const H = GAME_HEIGHT * DPR;
 
@@ -440,14 +481,13 @@ export class UIScene extends Phaser.Scene {
     const totalPages = Math.max(1, Math.ceil(inv.length / itemsPerPage));
     if (this.inventoryPage >= totalPages) this.inventoryPage = totalPages - 1;
 
-    this.inventoryPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.inventoryPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.inventoryPanel);
-    const bg = this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0xc0934a);
-    this.inventoryPanel.add(bg);
+    this.inventoryPanel.add(this.createPanelBg(pw, ph));
 
     // Title with item count and page
     this.inventoryPanel.add(this.add.text(px(14), px(12), `背包 (${inv.length}/${100})`, {
-      fontSize: fs(16), color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
+      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
     }));
 
     // Sort button
@@ -472,11 +512,7 @@ export class UIScene extends Phaser.Scene {
     this.inventoryPanel.add(destroyBtn);
 
     // Close button
-    const closeBtn = this.add.text(pw - px(16), px(10), 'X', {
-      fontSize: fs(16), color: '#e74c3c', fontFamily: FONT,
-    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => this.toggleInventory());
-    this.inventoryPanel.add(closeBtn);
+    this.inventoryPanel.add(this.createPanelCloseBtn(pw, () => this.toggleInventory()));
 
     // Equipment slots — 5x2 grid
     const equipSlots = ['helmet', 'armor', 'gloves', 'boots', 'weapon', 'offhand', 'necklace', 'ring1', 'ring2', 'belt'];
@@ -603,7 +639,7 @@ export class UIScene extends Phaser.Scene {
 
     // Backdrop for outside-click dismiss
     this.dialogueBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.3)
-      .setInteractive().setDepth(3999);
+      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
     this.dialogueBackdrop.on('pointerdown', () => {
       this.hideItemTooltip();
       if (this.shopPanel) { this.shopPanel.destroy(); this.shopPanel = null; }
@@ -612,22 +648,16 @@ export class UIScene extends Phaser.Scene {
 
     const pw = px(700), ph = px(460), panelX = (W - pw) / 2, panelY = px(40);
     const dividerX = px(320);
-    this.shopPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.shopPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.shopPanel);
-    this.shopPanel.add(this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0xc0934a));
+    this.shopPanel.add(this.createPanelBg(pw, ph));
     const title = data.type === 'blacksmith' ? '铁匠铺' : '商店';
-    this.shopPanel.add(this.add.text(pw / 2, px(12), title, {
-      fontSize: fs(18), color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
-    const closeBtn = this.add.text(pw - px(16), px(10), 'X', {
-      fontSize: fs(16), color: '#e74c3c', fontFamily: FONT,
-    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => {
+    this.shopPanel.add(this.createPanelTitle(pw, title));
+    this.shopPanel.add(this.createPanelCloseBtn(pw, () => {
       this.hideItemTooltip();
       if (this.shopPanel) { this.shopPanel.destroy(); this.shopPanel = null; }
       if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
-    });
-    this.shopPanel.add(closeBtn);
+    }));
 
     // Divider
     this.shopPanel.add(this.add.rectangle(dividerX, px(36), Math.round(1 * DPR), ph - px(56), 0x333344).setOrigin(0, 0));
@@ -767,8 +797,8 @@ export class UIScene extends Phaser.Scene {
     const sellPrice = base ? base.sellPrice * item.quantity : 1;
     const popW = px(180), popH = px(60);
     const popX = (W - popW) / 2, popY = (H - popH) / 2;
-    this.contextPopup = this.add.container(popX, popY).setDepth(5002);
-    this.contextPopup.add(this.add.rectangle(0, 0, popW, popH, 0x0a0a18, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(1 * DPR), 0xc0934a));
+    this.contextPopup = this.add.container(popX, popY).setDepth(PANEL_STYLE.depth.confirmDialog);
+    this.contextPopup.add(this.add.rectangle(0, 0, popW, popH, 0x0a0a18, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(1 * DPR), PANEL_STYLE.border.color));
     this.contextPopup.add(this.add.text(popW / 2, px(8), `卖出 ${item.name} (${sellPrice}G)?`, {
       fontSize: fs(12), color: '#e0d8cc', fontFamily: FONT, wordWrap: { width: popW - px(16) },
     }).setOrigin(0.5, 0));
@@ -797,17 +827,11 @@ export class UIScene extends Phaser.Scene {
     if (this.mapPanel) { this.mapPanel.destroy(); this.mapPanel = null; return; }
     this.closeAllPanels();
     const pw = px(480), ph = px(220), panelX = (W - pw) / 2, panelY = px(80);
-    this.mapPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.mapPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.mapPanel);
-    this.mapPanel.add(this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0x27ae60));
-    this.mapPanel.add(this.add.text(pw / 2, px(10), '渊火', {
-      fontSize: fs(18), color: '#27ae60', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
-    const closeBtn = this.add.text(pw - px(16), px(8), 'X', {
-      fontSize: fs(18), color: '#e74c3c', fontFamily: FONT,
-    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => this.toggleMap());
-    this.mapPanel.add(closeBtn);
+    this.mapPanel.add(this.createPanelBg(pw, ph));
+    this.mapPanel.add(this.createPanelTitle(pw, '渊火'));
+    this.mapPanel.add(this.createPanelCloseBtn(pw, () => this.toggleMap()));
 
     MapOrder.forEach((mapId, i) => {
       const map = AllMaps[mapId];
@@ -861,18 +885,11 @@ export class UIScene extends Phaser.Scene {
 
     const pw = px(660), ph = px(500);
     const panelX = (W - pw) / 2, panelY = px(5);
-    this.skillPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.skillPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.skillPanel);
 
-    // Background with double border
-    const bg = this.add.graphics().setDepth(0);
-    bg.fillStyle(0x0d0d1a, 0.97);
-    bg.fillRoundedRect(0, 0, pw, ph, px(8));
-    bg.lineStyle(Math.round(2 * DPR), 0x8e44ad, 0.6);
-    bg.strokeRoundedRect(0, 0, pw, ph, px(8));
-    bg.lineStyle(Math.round(1 * DPR), 0x8e44ad, 0.15);
-    bg.strokeRoundedRect(px(4), px(4), pw - px(8), ph - px(8), px(6));
-    this.skillPanel.add(bg);
+    // Background with unified style
+    this.skillPanel.add(this.createPanelBg(pw, ph));
 
     // Header bar with gradient
     const headerH = px(50);
@@ -883,24 +900,14 @@ export class UIScene extends Phaser.Scene {
     headerBg.fillRect(px(4), px(4), pw - px(8), headerH);
     this.skillPanel.add(headerBg);
 
-    this.skillPanel.add(this.add.text(pw / 2, px(10), '技 能 树', {
-      fontSize: fs(20), color: '#d4b8e8', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    this.skillPanel.add(this.createPanelTitle(pw, '技 能 树'));
     const spColor = this.player.freeSkillPoints > 0 ? '#f1c40f' : '#555566';
     this.skillPanel.add(this.add.text(pw / 2, px(33), `${this.player.classData.name}  ·  剩余技能点: ${this.player.freeSkillPoints}`, {
       fontSize: fs(13), color: spColor, fontFamily: FONT,
     }).setOrigin(0.5, 0));
 
     // Close button
-    const closeBg = this.add.circle(pw - px(18), px(18), px(12), 0x331111, 0.6).setInteractive({ useHandCursor: true });
-    const closeX = this.add.text(pw - px(18), px(18), '\u2715', {
-      fontSize: fs(14), color: '#e74c3c', fontFamily: FONT, fontStyle: 'bold',
-    }).setOrigin(0.5);
-    closeBg.on('pointerdown', () => this.toggleSkillTree());
-    closeBg.on('pointerover', () => closeBg.setFillStyle(0x551111, 0.9));
-    closeBg.on('pointerout', () => closeBg.setFillStyle(0x331111, 0.6));
-    this.skillPanel.add(closeBg);
-    this.skillPanel.add(closeX);
+    this.skillPanel.add(this.createPanelCloseBtn(pw, () => this.toggleSkillTree()));
 
     // Gather trees
     const trees = new Map<string, typeof this.player.classData.skills>();
@@ -977,13 +984,13 @@ export class UIScene extends Phaser.Scene {
       }
 
       const tipW = px(280);
-      const tipPad = px(12);
+      const tipPad = px(PANEL_STYLE.tooltip.padding);
       const wrapW = tipW - tipPad * 2;
       const tipText = lines.join('\n');
 
       // Measure header first
       const tipHeader = this.add.text(0, 0, `${skill.name} (${skill.nameEn})`, {
-        fontSize: fs(12), color: '#f0e8d0', fontFamily: FONT, fontStyle: 'bold',
+        fontSize: fs(PANEL_STYLE.tooltip.titleSize), color: '#f0e8d0', fontFamily: PANEL_STYLE.tooltip.font, fontStyle: 'bold',
         wordWrap: { width: wrapW, useAdvancedWrap: true },
       });
       const headerH = tipHeader.height;
@@ -991,7 +998,7 @@ export class UIScene extends Phaser.Scene {
 
       // Body text positioned below header
       const textObj = this.add.text(tipPad, headerBottom, tipText, {
-        fontSize: fs(11), color: '#ddd8cc', fontFamily: FONT, lineSpacing: px(2),
+        fontSize: fs(PANEL_STYLE.tooltip.bodySize), color: '#ddd8cc', fontFamily: PANEL_STYLE.tooltip.font, lineSpacing: px(PANEL_STYLE.tooltip.lineSpacing),
         wordWrap: { width: wrapW, useAdvancedWrap: true },
       });
 
@@ -1004,12 +1011,10 @@ export class UIScene extends Phaser.Scene {
       if (tipY + finalH > H) tipY = H - finalH - px(4);
       if (tipY < px(4)) tipY = px(4);
 
-      this.skillTooltip = this.add.container(tipX, tipY).setDepth(5000);
-      const tipBg = this.add.graphics();
-      tipBg.fillStyle(0x0a0a18, 0.97);
-      tipBg.fillRoundedRect(0, 0, tipW, finalH, px(4));
-      tipBg.lineStyle(Math.round(2 * DPR), 0x8e44ad, 0.7);
-      tipBg.strokeRoundedRect(0, 0, tipW, finalH, px(4));
+      this.skillTooltip = this.add.container(tipX, tipY).setDepth(PANEL_STYLE.depth.tooltip);
+      const tipBg = this.add.rectangle(0, 0, tipW, finalH, PANEL_STYLE.tooltip.bg.color, PANEL_STYLE.tooltip.bg.alpha)
+        .setOrigin(0, 0)
+        .setStrokeStyle(PANEL_STYLE.tooltip.border.width * DPR, PANEL_STYLE.tooltip.border.color);
       this.skillTooltip.add(tipBg);
       tipHeader.setPosition(tipW / 2, tipPad).setOrigin(0.5, 0);
       this.skillTooltip.add(tipHeader);
@@ -1270,20 +1275,14 @@ export class UIScene extends Phaser.Scene {
     if (this.charPanel) { this.charPanel.destroy(); this.charPanel = null; return; }
     this.closeAllPanels();
     const pw = px(320), ph = px(380), panelX = (W - pw) / 2, panelY = px(30);
-    this.charPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.charPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.charPanel);
-    this.charPanel.add(this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0x2471a3));
-    this.charPanel.add(this.add.text(pw / 2, px(10), `角色属性 - ${this.player.classData.name}`, {
-      fontSize: fs(17), color: '#5dade2', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    this.charPanel.add(this.createPanelBg(pw, ph));
+    this.charPanel.add(this.createPanelTitle(pw, `角色属性 - ${this.player.classData.name}`));
     this.charPanel.add(this.add.text(pw / 2, px(28), `Lv.${this.player.level}  剩余属性点: ${this.player.freeStatPoints}`, {
       fontSize: fs(13), color: '#f1c40f', fontFamily: FONT,
     }).setOrigin(0.5, 0));
-    const closeBtn = this.add.text(pw - px(14), px(8), 'X', {
-      fontSize: fs(18), color: '#e74c3c', fontFamily: FONT,
-    }).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => this.toggleCharacter());
-    this.charPanel.add(closeBtn);
+    this.charPanel.add(this.createPanelCloseBtn(pw, () => this.toggleCharacter()));
 
     const statKeys: [string, keyof typeof this.player.stats, string][] = [
       ['力量 STR', 'str', '物理伤害/负重'],
@@ -1349,17 +1348,11 @@ export class UIScene extends Phaser.Scene {
     if (this.homesteadPanel) { this.homesteadPanel.destroy(); this.homesteadPanel = null; return; }
     this.closeAllPanels();
     const pw = px(420), ph = px(400), panelX = (W - pw) / 2, panelY = px(20);
-    this.homesteadPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.homesteadPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.homesteadPanel);
-    this.homesteadPanel.add(this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0xc0934a));
-    this.homesteadPanel.add(this.add.text(pw / 2, px(10), '家园', {
-      fontSize: fs(18), color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
-    const closeBtn = this.add.text(pw - px(14), px(8), 'X', {
-      fontSize: fs(18), color: '#e74c3c', fontFamily: FONT,
-    }).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => this.toggleHomestead());
-    this.homesteadPanel.add(closeBtn);
+    this.homesteadPanel.add(this.createPanelBg(pw, ph));
+    this.homesteadPanel.add(this.createPanelTitle(pw, '家园'));
+    this.homesteadPanel.add(this.createPanelCloseBtn(pw, () => this.toggleHomestead()));
 
     const hs = this.zone.homesteadSystem;
     const buildings = hs.getAllBuildings();
@@ -1563,19 +1556,18 @@ export class UIScene extends Phaser.Scene {
 
     // Full-screen transparent backdrop to catch outside clicks
     this.dialogueBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.3)
-      .setInteractive().setDepth(3999);
+      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
     this.dialogueBackdrop.on('pointerdown', () => this.closeDialogue());
 
     const pw = px(360), ph = px(60) + data.actions.length * px(32) + px(30);
     const panelX = (W - pw) / 2, panelY = H / 2 - ph / 2;
-    this.dialoguePanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.dialoguePanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.dialoguePanel);
-    const bg = this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0xc0934a);
-    this.dialoguePanel.add(bg);
+    this.dialoguePanel.add(this.createPanelBg(pw, ph));
 
     // NPC name
     this.dialoguePanel.add(this.add.text(pw / 2, px(10), data.npcName, {
-      fontSize: fs(16), color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
+      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
     }).setOrigin(0.5, 0));
 
     // Dialogue text
@@ -1664,7 +1656,7 @@ export class UIScene extends Phaser.Scene {
 
     // Full-screen transparent backdrop
     this.dialogueBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.35)
-      .setInteractive().setDepth(3999);
+      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
 
     const pw = px(460), maxPh = px(500);
     const headerH = px(50);
@@ -1715,12 +1707,11 @@ export class UIScene extends Phaser.Scene {
     const ph = headerH + scrollAreaH + btnAreaH + footerH;
     const panelX = (W - pw) / 2, panelY = Math.max(px(20), (H - ph) / 2);
 
-    this.dialoguePanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.dialoguePanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.dialoguePanel);
 
     // Background
-    const bg = this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.96).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0xc0934a);
-    this.dialoguePanel.add(bg);
+    this.dialoguePanel.add(this.createPanelBg(pw, ph));
 
     // Header accent line
     const headerLine = this.add.rectangle(pw / 2, headerH, pw - px(20), Math.round(1 * DPR), 0x333344);
@@ -1728,7 +1719,7 @@ export class UIScene extends Phaser.Scene {
 
     // NPC name
     this.dialoguePanel.add(this.add.text(pw / 2, px(12), npcName, {
-      fontSize: fs(17), color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
+      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
     }).setOrigin(0.5, 0));
 
     // NPC type subtitle
@@ -1934,24 +1925,17 @@ export class UIScene extends Phaser.Scene {
   private createQuestLogPanel(): void {
     const pw = px(700), ph = px(480);
     const panelX = (W - pw) / 2, panelY = (H - ph) / 2;
-    this.questLogPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.questLogPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.questLogPanel);
 
     // Background
-    const bg = this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0xc0934a);
-    this.questLogPanel.add(bg);
+    this.questLogPanel.add(this.createPanelBg(pw, ph));
 
     // Title
-    this.questLogPanel.add(this.add.text(pw / 2, px(14), '任务日志', {
-      fontSize: fs(18), color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    this.questLogPanel.add(this.createPanelTitle(pw, '任务日志'));
 
     // Close button
-    const closeBtn = this.add.text(pw - px(16), px(10), '\u2715', {
-      fontSize: fs(18), color: '#c0392b', fontFamily: FONT,
-    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => this.toggleQuestLog());
-    this.questLogPanel.add(closeBtn);
+    this.questLogPanel.add(this.createPanelCloseBtn(pw, () => this.toggleQuestLog()));
 
     // Tab buttons
     const tabY = px(38);
@@ -2299,17 +2283,21 @@ export class UIScene extends Phaser.Scene {
     if (tx + tipW > W) tx = screenX - tipW - px(12);
     if (ty + tipH > H) ty = H - tipH - px(4);
     if (ty < px(4)) ty = px(4);
+    if (tx < px(4)) tx = px(4);
 
     const qualityBorderColors: Record<string, number> = {
       normal: 0x555555, magic: 0x5dade2, rare: 0xf1c40f, legendary: 0xe67e22, set: 0x2ecc71,
     };
-    const borderColor = qualityBorderColors[item.quality] ?? 0x666677;
-    this.tooltipContainer = this.add.container(tx, ty).setDepth(5000);
-    this.tooltipContainer.add(this.add.rectangle(0, 0, tipW, tipH, 0x0a0a18, 0.95).setOrigin(0, 0).setStrokeStyle(1.5 * DPR, borderColor));
+    const borderColor = qualityBorderColors[item.quality] ?? PANEL_STYLE.tooltip.border.color;
+    this.tooltipContainer = this.add.container(tx, ty).setDepth(PANEL_STYLE.depth.tooltip);
+    this.tooltipContainer.add(
+      this.add.rectangle(0, 0, tipW, tipH, PANEL_STYLE.tooltip.bg.color, PANEL_STYLE.tooltip.bg.alpha)
+        .setOrigin(0, 0).setStrokeStyle(PANEL_STYLE.tooltip.border.width * DPR, borderColor)
+    );
     let ly = px(6);
     for (const line of lines) {
       this.tooltipContainer.add(this.add.text(px(8), ly, line.text, {
-        fontSize: fs(line.size), color: line.color, fontFamily: FONT, wordWrap: { width: tipW - px(16) },
+        fontSize: fs(line.size), color: line.color, fontFamily: PANEL_STYLE.tooltip.font, wordWrap: { width: tipW - px(16) },
       }));
       ly += px(line.size) + px(4);
     }
@@ -2359,7 +2347,7 @@ export class UIScene extends Phaser.Scene {
     if (popX + popW > W) popX = W - popW - px(4);
     if (popY + popH > H) popY = H - popH - px(4);
 
-    this.contextPopup = this.add.container(popX, popY).setDepth(5001);
+    this.contextPopup = this.add.container(popX, popY).setDepth(PANEL_STYLE.depth.contextMenu);
     this.contextPopup.add(this.add.rectangle(0, 0, popW, popH, 0x0a0a18, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(1 * DPR), 0x555566));
     actions.forEach((action, i) => {
       const by = px(4) + i * btnH;
@@ -2383,7 +2371,7 @@ export class UIScene extends Phaser.Scene {
     this.hideContextPopup();
     const popW = px(160), popH = px(60);
     const popX = (W - popW) / 2, popY = (H - popH) / 2;
-    this.contextPopup = this.add.container(popX, popY).setDepth(5002);
+    this.contextPopup = this.add.container(popX, popY).setDepth(PANEL_STYLE.depth.confirmDialog);
     this.contextPopup.add(this.add.rectangle(0, 0, popW, popH, 0x0a0a18, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(1 * DPR), 0xe74c3c));
     this.contextPopup.add(this.add.text(popW / 2, px(8), '确定丢弃?', {
       fontSize: fs(14), color: '#e74c3c', fontFamily: FONT,
@@ -2422,29 +2410,19 @@ export class UIScene extends Phaser.Scene {
     audioManager.playSFX('click');
 
     const pw = px(360), ph = px(380), panelX = (W - pw) / 2, panelY = px(60);
-    this.socketPanel = this.add.container(panelX, panelY).setDepth(4001);
+    this.socketPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.subPanel);
     this.animatePanelOpen(this.socketPanel);
 
     // Background
-    this.socketPanel.add(
-      this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95)
-        .setOrigin(0, 0)
-        .setStrokeStyle(Math.round(2 * DPR), 0x8be9fd)
-    );
+    this.socketPanel.add(this.createPanelBg(pw, ph));
 
     // Title
-    this.socketPanel.add(this.add.text(pw / 2, px(12), '宝石镶嵌', {
-      fontSize: fs(18), color: '#8be9fd', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    this.socketPanel.add(this.createPanelTitle(pw, '宝石镶嵌'));
 
     // Close button
-    const closeBtn = this.add.text(pw - px(16), px(10), 'X', {
-      fontSize: fs(16), color: '#e74c3c', fontFamily: FONT,
-    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => {
+    this.socketPanel.add(this.createPanelCloseBtn(pw, () => {
       if (this.socketPanel) { this.socketPanel.destroy(); this.socketPanel = null; this.socketPanelSlot = null; }
-    });
-    this.socketPanel.add(closeBtn);
+    }));
 
     // Item name
     const qualityColors: Record<string, string> = {
@@ -2633,25 +2611,17 @@ export class UIScene extends Phaser.Scene {
 
   private buildCompanionPanel(): void {
     const pw = px(500), ph = px(520), panelX = (W - pw) / 2, panelY = px(10);
-    this.companionPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.companionPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.companionPanel);
 
     // Background
-    this.companionPanel.add(
-      this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0x27ae60)
-    );
+    this.companionPanel.add(this.createPanelBg(pw, ph));
 
     // Title
-    this.companionPanel.add(this.add.text(pw / 2, px(10), '伙伴系统', {
-      fontSize: fs(18), color: '#27ae60', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    this.companionPanel.add(this.createPanelTitle(pw, '伙伴系统'));
 
     // Close button
-    const closeBtn = this.add.text(pw - px(16), px(8), 'X', {
-      fontSize: fs(18), color: '#e74c3c', fontFamily: FONT,
-    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => this.toggleCompanion());
-    this.companionPanel.add(closeBtn);
+    this.companionPanel.add(this.createPanelCloseBtn(pw, () => this.toggleCompanion()));
 
     const mercSys = this.zone?.mercenarySystem;
     if (!mercSys) return;
@@ -3217,7 +3187,7 @@ export class UIScene extends Phaser.Scene {
     const ach = data.achievement;
     const toastW = px(320), toastH = px(60);
     const toastX = (W - toastW) / 2, toastY = px(60);
-    const toast = this.add.container(toastX, toastY).setDepth(6000).setAlpha(0);
+    const toast = this.add.container(toastX, toastY).setDepth(PANEL_STYLE.depth.toast).setAlpha(0);
 
     // Background with gold border
     const bg = this.add.graphics();
@@ -3278,29 +3248,17 @@ export class UIScene extends Phaser.Scene {
     audioManager.playSFX('click');
 
     const pw = px(520), ph = px(500), panelX = (W - pw) / 2, panelY = px(10);
-    this.achievementPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.achievementPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.achievementPanel);
 
     // Background
-    this.achievementPanel.add(
-      this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0xc0934a)
-    );
+    this.achievementPanel.add(this.createPanelBg(pw, ph));
 
     // Title
-    this.achievementPanel.add(this.add.text(pw / 2, px(10), '成 就', {
-      fontSize: fs(20), color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    this.achievementPanel.add(this.createPanelTitle(pw, '成 就'));
 
     // Close button
-    const closeBg = this.add.circle(pw - px(18), px(18), px(12), 0x331111, 0.6).setInteractive({ useHandCursor: true });
-    const closeX = this.add.text(pw - px(18), px(18), '\u2715', {
-      fontSize: fs(14), color: '#e74c3c', fontFamily: FONT, fontStyle: 'bold',
-    }).setOrigin(0.5);
-    closeBg.on('pointerdown', () => this.toggleAchievement());
-    closeBg.on('pointerover', () => closeBg.setFillStyle(0x551111, 0.9));
-    closeBg.on('pointerout', () => closeBg.setFillStyle(0x331111, 0.6));
-    this.achievementPanel.add(closeBg);
-    this.achievementPanel.add(closeX);
+    this.achievementPanel.add(this.createPanelCloseBtn(pw, () => this.toggleAchievement()));
 
     // Unlocked title display
     const achSystem = this.zone?.achievementSystem;
@@ -3487,12 +3445,10 @@ export class UIScene extends Phaser.Scene {
     }
     this.closeAllPanels();
     const pw = px(360), ph = px(180), panelX = (W - pw) / 2, panelY = (H - ph) / 2;
-    this.audioPanel = this.add.container(panelX, panelY).setDepth(4000);
+    this.audioPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.audioPanel);
-    this.audioPanel.add(this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(2 * DPR), 0xc0934a));
-    this.audioPanel.add(this.add.text(pw / 2, px(12), '音频设置', {
-      fontSize: fs(16), color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    this.audioPanel.add(this.createPanelBg(pw, ph));
+    this.audioPanel.add(this.createPanelTitle(pw, '音频设置'));
 
     const settings = audioManager.getSettings();
     const sliderW = px(160), sliderH = px(10), sliderX = px(90), labelX = px(14);
@@ -3551,13 +3507,10 @@ export class UIScene extends Phaser.Scene {
       () => { audioManager.toggleSFXMute(); return audioManager.getSettings().sfxMuted; });
 
     // Close button
-    const closeBtn = this.add.text(pw - px(12), px(8), 'X', {
-      fontSize: fs(14), color: '#888', fontFamily: FONT,
-    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => {
+    this.audioPanel.add(this.createPanelCloseBtn(pw, () => {
+      this.cleanupAudioPanelInputHandlers();
       if (this.audioPanel) { this.audioPanel.destroy(); this.audioPanel = null; }
-    });
-    this.audioPanel.add(closeBtn);
+    }));
   }
 
   // ─── Mini-Boss Cinematic Dialogue ─────────────────────────────────────
@@ -3569,21 +3522,21 @@ export class UIScene extends Phaser.Scene {
 
     // Full-screen dark backdrop
     this.miniBossDialogueBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.55)
-      .setInteractive().setDepth(4499);
+      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
 
     const pw = px(500), ph = px(260);
     const panelX = (W - pw) / 2, panelY = (H - ph) / 2;
-    this.miniBossDialoguePanel = this.add.container(panelX, panelY).setDepth(4500);
+    this.miniBossDialoguePanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.miniBossDialoguePanel);
 
-    // Background with special cinematic border
-    const bg = this.add.rectangle(0, 0, pw, ph, 0x0a0a18, 0.96).setOrigin(0, 0)
-      .setStrokeStyle(Math.round(3 * DPR), 0xe74c3c);
+    // Background with unified style + red accent border for boss encounter
+    const bg = this.add.rectangle(0, 0, pw, ph, PANEL_STYLE.bg.color, PANEL_STYLE.bg.alpha).setOrigin(0, 0)
+      .setStrokeStyle(Math.round(PANEL_STYLE.border.width * DPR), 0xe74c3c);
     this.miniBossDialoguePanel.add(bg);
 
     // Boss name header
-    this.miniBossDialoguePanel.add(this.add.text(pw / 2, px(16), `⚔ ${bossName} ⚔`, {
-      fontSize: fs(20), color: '#e74c3c', fontFamily: TITLE_FONT, fontStyle: 'bold',
+    this.miniBossDialoguePanel.add(this.add.text(pw / 2, px(10), `⚔ ${bossName} ⚔`, {
+      fontSize: fs(PANEL_STYLE.header.fontSize), color: '#e74c3c', fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
     }).setOrigin(0.5, 0));
 
     // Separator line
@@ -3655,21 +3608,19 @@ export class UIScene extends Phaser.Scene {
 
     // Semi-transparent backdrop
     this.loreTextBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.4)
-      .setInteractive().setDepth(4499);
+      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
 
     const pw = px(440), ph = px(240);
     const panelX = (W - pw) / 2, panelY = (H - ph) / 2;
-    this.loreTextPanel = this.add.container(panelX, panelY).setDepth(4500);
+    this.loreTextPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.loreTextPanel);
 
     // Background
-    const bg = this.add.rectangle(0, 0, pw, ph, 0x0f0f1e, 0.96).setOrigin(0, 0)
-      .setStrokeStyle(Math.round(2 * DPR), 0xDAA520);
-    this.loreTextPanel.add(bg);
+    this.loreTextPanel.add(this.createPanelBg(pw, ph));
 
     // Header icon + name
-    this.loreTextPanel.add(this.add.text(pw / 2, px(14), `📜 ${entry.name}`, {
-      fontSize: fs(17), color: '#DAA520', fontFamily: TITLE_FONT, fontStyle: 'bold',
+    this.loreTextPanel.add(this.add.text(pw / 2, px(10), `📜 ${entry.name}`, {
+      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
     }).setOrigin(0.5, 0));
 
     // Zone name
@@ -3693,11 +3644,7 @@ export class UIScene extends Phaser.Scene {
     }));
 
     // Close button
-    const closeBtn = this.add.text(pw - px(16), px(10), '✕', {
-      fontSize: fs(18), color: '#c0392b', fontFamily: FONT,
-    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => this.closeLoreText());
-    this.loreTextPanel.add(closeBtn);
+    this.loreTextPanel.add(this.createPanelCloseBtn(pw, () => this.closeLoreText()));
 
     // Dismiss on backdrop click
     this.loreTextBackdrop.on('pointerdown', () => this.closeLoreText());
@@ -3786,6 +3733,51 @@ export class UIScene extends Phaser.Scene {
         fontSize: fs(14), color: '#555', fontFamily: FONT,
       }).setOrigin(0.5, 0));
     }
+  }
+
+  /** Create a unified panel background rectangle using PANEL_STYLE. */
+  private createPanelBg(pw: number, ph: number): Phaser.GameObjects.Rectangle {
+    return this.add.rectangle(0, 0, pw, ph, PANEL_STYLE.bg.color, PANEL_STYLE.bg.alpha)
+      .setOrigin(0, 0)
+      .setStrokeStyle(Math.round(PANEL_STYLE.border.width * DPR), PANEL_STYLE.border.color);
+  }
+
+  /** Create a unified panel header title using PANEL_STYLE. */
+  private createPanelTitle(pw: number, title: string): Phaser.GameObjects.Text {
+    return this.add.text(pw / 2, px(10), title, {
+      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color,
+      fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
+    }).setOrigin(0.5, 0);
+  }
+
+  /** Create a unified close button at top-right using PANEL_STYLE. */
+  private createPanelCloseBtn(pw: number, onClose: () => void): Phaser.GameObjects.Text {
+    const btn = this.add.text(pw - px(16), px(10), '✕', {
+      fontSize: fs(PANEL_STYLE.close.fontSize), color: PANEL_STYLE.close.color, fontFamily: FONT,
+    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
+    btn.on('pointerdown', onClose);
+    btn.on('pointerover', () => btn.setColor(PANEL_STYLE.close.hoverColor));
+    btn.on('pointerout', () => btn.setColor(PANEL_STYLE.close.color));
+    return btn;
+  }
+
+  /** Create a unified tooltip container with PANEL_STYLE tooltip styling. */
+  private createTooltipContainer(
+    screenX: number, screenY: number, tipW: number, tipH: number, borderColor?: number,
+  ): { container: Phaser.GameObjects.Container; bg: Phaser.GameObjects.Rectangle } {
+    let tx = screenX + px(12);
+    let ty = screenY - px(10);
+    if (tx + tipW > W) tx = screenX - tipW - px(12);
+    if (ty + tipH > H) ty = H - tipH - px(4);
+    if (ty < px(4)) ty = px(4);
+    if (tx < px(4)) tx = px(4);
+
+    const container = this.add.container(tx, ty).setDepth(PANEL_STYLE.depth.tooltip);
+    const bg = this.add.rectangle(0, 0, tipW, tipH, PANEL_STYLE.tooltip.bg.color, PANEL_STYLE.tooltip.bg.alpha)
+      .setOrigin(0, 0)
+      .setStrokeStyle(PANEL_STYLE.tooltip.border.width * DPR, borderColor ?? PANEL_STYLE.tooltip.border.color);
+    container.add(bg);
+    return { container, bg };
   }
 
   /** Animate a panel container opening with scale + alpha pop-in */
