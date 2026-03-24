@@ -858,16 +858,28 @@ export class UIScene extends Phaser.Scene {
   }
 
   // --- Skill Tree Panel (K) ---
+  /** Active skill tree tab index (persists across panel reopens within session). */
+  private skillTreeActiveTab = 0;
+  /** Scroll offset per tab for skill tree overflow content. */
+  private skillTreeScrollY: number[] = [];
+  /** Wheel handler cleanup for skill tree panel. */
+  private skillTreeWheelHandler: ((e: Phaser.Input.Pointer, _gos: Phaser.GameObjects.GameObject[], dx: number, dy: number) => void) | null = null;
+
   private skillTooltip: Phaser.GameObjects.Container | null = null;
 
   private toggleSkillTree(): void {
-    if (this.skillPanel) { this.skillPanel.destroy(); this.skillPanel = null; this.skillTooltip?.destroy(); this.skillTooltip = null; return; }
+    if (this.skillPanel) {
+      if (this.skillTreeWheelHandler) {
+        this.input.off('wheel', this.skillTreeWheelHandler);
+        this.skillTreeWheelHandler = null;
+      }
+      this.skillPanel.destroy(); this.skillPanel = null; this.skillTooltip?.destroy(); this.skillTooltip = null; return;
+    }
     this.closeAllPanels();
-
     const TREE_NAMES: Record<string, string> = {
-      combat_master: '进攻大师', guardian: '守护者', berserker: '狂战士',
-      fire: '烈焰', frost: '寒冰', arcane: '奥术',
-      assassination: '暗杀', archery: '射术', traps: '陷阱',
+      combat_master: '战斗大师', guardian: '守护者', berserker: '狂战士',
+      fire: '烈焰', frost: '冰霜', arcane: '奥术',
+      assassination: '刺杀', archery: '箭术', traps: '陷阱',
     };
     const TREE_COLORS: Record<string, number> = {
       combat_master: 0xd4a017, guardian: 0xf1c40f, berserker: 0xcc3333,
@@ -883,7 +895,7 @@ export class UIScene extends Phaser.Scene {
       lightning: '闪电', poison: '毒素', arcane: '奥术',
     };
 
-    const pw = px(660), ph = px(500);
+    const pw = px(660), ph = px(520);
     const panelX = (W - pw) / 2, panelY = px(5);
     this.skillPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.skillPanel);
@@ -910,200 +922,211 @@ export class UIScene extends Phaser.Scene {
     this.skillPanel.add(this.createPanelCloseBtn(pw, () => this.toggleSkillTree()));
 
     // Gather trees
-    const trees = new Map<string, typeof this.player.classData.skills>();
+    const treeNames: string[] = [];
+    const treeSkillsMap = new Map<string, typeof this.player.classData.skills>();
     for (const skill of this.player.classData.skills) {
-      if (!trees.has(skill.tree)) trees.set(skill.tree, []);
-      trees.get(skill.tree)!.push(skill);
+      if (!treeSkillsMap.has(skill.tree)) { treeSkillsMap.set(skill.tree, []); treeNames.push(skill.tree); }
+      treeSkillsMap.get(skill.tree)!.push(skill);
     }
 
-    const treeCount = trees.size;
-    const margin = px(10);
-    const gapBetween = px(8);
-    const treeW = Math.floor((pw - margin * 2 - gapBetween * (treeCount - 1)) / treeCount);
-    const contentTop = headerH + px(12);
-    const contentH = ph - contentTop - px(20);
+    const treeCount = treeNames.length;
+    if (this.skillTreeScrollY.length !== treeCount) {
+      this.skillTreeScrollY = new Array(treeCount).fill(0);
+    }
+    if (this.skillTreeActiveTab >= treeCount) this.skillTreeActiveTab = 0;
 
-    // Card dimensions
-    const cardW = treeW - px(12);
-    const cardH = px(68);
-    const iconSize = px(38);
+    // === Tabs ===
+    const tabH = px(28);
+    const tabY = headerH + px(6);
+    const tabMargin = px(10);
+    const tabGap = px(4);
+    const tabTotalW = pw - tabMargin * 2;
+    const tabW = Math.floor((tabTotalW - tabGap * (treeCount - 1)) / treeCount);
 
-    // Tooltip builder
-    const showTooltip = (skill: typeof this.player.classData.skills[0], cardWorldX: number, cardWorldY: number) => {
-      this.skillTooltip?.destroy();
-      const level = this.player.getSkillLevel(skill.id);
-      const scaledDmg = getSkillDamageMultiplier(skill, level);
-      const scaledMana = getSkillManaCost(skill, level);
-      const scaledCD = getSkillCooldown(skill, level);
-      const scaledAoe = getSkillAoeRadius(skill, level);
-      const dmgName = DMG_NAMES[skill.damageType] ?? skill.damageType;
+    // Content area dimensions
+    const contentTop = tabY + tabH + px(8);
+    const contentH = ph - contentTop - px(24);
+    const contentInnerW = pw - px(24);
 
-      const lines: string[] = [];
-      lines.push(skill.description);
-      lines.push('');
-      if (skill.damageMultiplier > 0) lines.push(`伤害: ${Math.round(scaledDmg * 100)}% ${dmgName}`);
-      lines.push(`消耗: ${scaledMana} MP`);
-      lines.push(`冷却: ${(scaledCD / 1000).toFixed(1)}s`);
-      lines.push(`范围: ${skill.range}格`);
-      if (skill.aoe && scaledAoe > 0) lines.push(`AOE半径: ${scaledAoe.toFixed(1)}格`);
-      if (skill.critBonus) lines.push(`暴击加成: +${skill.critBonus}%`);
-      if (skill.stunDuration) lines.push(`眩晕: ${(skill.stunDuration / 1000).toFixed(1)}s`);
-      if (skill.buff) {
-        const buffVal = getSkillBuffValue(skill, level);
-        const buffDur = getSkillBuffDuration(skill, level);
-        lines.push(`增益: ${skill.buff.stat} +${Math.round(buffVal * 100)}% (${(buffDur / 1000).toFixed(0)}s)`);
+    // Card dimensions — uniform for all trees
+    const cardW = Math.min(contentInnerW - px(20), px(600));
+    const cardH = px(72);
+    const iconSize = px(42);
+    const cardGap = px(12);
+
+    // Scrollable content container
+    const scrollContainer = this.add.container(0, 0);
+    this.skillPanel.add(scrollContainer);
+
+    // Clip mask for scroll area
+    const clipMask = this.add.graphics();
+    clipMask.fillStyle(0xffffff);
+    clipMask.fillRect(panelX + px(10), panelY + contentTop, pw - px(20), contentH);
+    const mask = clipMask.createGeometryMask();
+    scrollContainer.setMask(mask);
+
+    // Render active tab content
+    const renderTab = (tabIndex: number) => {
+      scrollContainer.removeAll(true);
+      this.skillTooltip?.destroy(); this.skillTooltip = null;
+
+      const treeName = treeNames[tabIndex];
+      const treeSkills = treeSkillsMap.get(treeName) ?? [];
+      const treeColor = TREE_COLORS[treeName] ?? 0x888888;
+      const sortedSkills = [...treeSkills].sort((a, b) => a.tier - b.tier);
+
+      const scrollY = this.skillTreeScrollY[tabIndex] ?? 0;
+      const totalContentH = sortedSkills.length * (cardH + cardGap) + px(30);
+      const maxScrollY = Math.max(0, totalContentH - contentH);
+
+      // Scrollbar
+      if (totalContentH > contentH) {
+        const sbX = pw - px(16);
+        const sbTrackH = contentH - px(8);
+        const sbTrackY = contentTop + px(4);
+        const sbTrack = this.add.graphics();
+        sbTrack.fillStyle(0x1a1a2e, 0.6);
+        sbTrack.fillRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
+        scrollContainer.add(sbTrack);
+
+        const thumbRatio = Math.min(1, contentH / totalContentH);
+        const thumbH = Math.max(px(20), sbTrackH * thumbRatio);
+        const thumbY = sbTrackY + (maxScrollY > 0 ? (scrollY / maxScrollY) * (sbTrackH - thumbH) : 0);
+        const sbThumb = this.add.graphics();
+        sbThumb.fillStyle(treeColor, 0.5);
+        sbThumb.fillRoundedRect(sbX, thumbY, px(6), thumbH, px(3));
+        scrollContainer.add(sbThumb);
       }
 
-      // Synergy info
-      if (skill.synergies && skill.synergies.length > 0) {
-        lines.push('');
-        lines.push('─ 协同增益 ─');
-        for (const syn of skill.synergies) {
-          const synSkill = this.player.classData.skills.find(s => s.id === syn.skillId);
-          const synLv = this.player.getSkillLevel(syn.skillId);
-          if (synSkill) {
-            const bonus = Math.round(syn.damagePerLevel * synLv * 100);
-            lines.push(`${synSkill.name}: +${syn.damagePerLevel * 100}%/级 (当前+${bonus}%)`);
+      // Prerequisite lines (behind cards)
+      const skillStartY = contentTop + px(10);
+      const cardStartX = (pw - cardW) / 2;
+
+      for (let si = 0; si < sortedSkills.length - 1; si++) {
+        const curLevel = this.player.getSkillLevel(sortedSkills[si].id);
+        const isLearned = curLevel > 0;
+        const lineGfx = this.add.graphics();
+        const lineAlpha = isLearned ? 0.6 : 0.15;
+        const lineColor = isLearned ? treeColor : 0x3a3a4e;
+
+        const cx = cardStartX + cardW / 2;
+        const curCardY = skillStartY + si * (cardH + cardGap) - scrollY;
+        const nextCardY = skillStartY + (si + 1) * (cardH + cardGap) - scrollY;
+        const startLineY = curCardY + cardH;
+        const endLineY = nextCardY;
+
+        if (endLineY > startLineY) {
+          lineGfx.lineStyle(Math.round(2 * DPR), lineColor, lineAlpha);
+          lineGfx.beginPath();
+          lineGfx.moveTo(cx, startLineY);
+          lineGfx.lineTo(cx, endLineY);
+          lineGfx.strokePath();
+          // Arrow head
+          lineGfx.fillStyle(lineColor, lineAlpha);
+          lineGfx.fillTriangle(cx, endLineY, cx - px(5), endLineY - px(7), cx + px(5), endLineY - px(7));
+          // Glow for learned
+          if (isLearned) {
+            lineGfx.lineStyle(Math.round(4 * DPR), treeColor, 0.08);
+            lineGfx.beginPath();
+            lineGfx.moveTo(cx, startLineY);
+            lineGfx.lineTo(cx, endLineY);
+            lineGfx.strokePath();
           }
         }
+        scrollContainer.add(lineGfx);
       }
 
-      // Next level preview
-      if (level < skill.maxLevel) {
-        lines.push('');
-        lines.push(`─ 下一级 (Lv${level + 1}) ─`);
-        const nextDmg = getSkillDamageMultiplier(skill, level + 1);
-        const nextMana = getSkillManaCost(skill, level + 1);
-        const nextCD = getSkillCooldown(skill, level + 1);
-        if (skill.damageMultiplier > 0) {
-          const delta = Math.round((nextDmg - scaledDmg) * 100);
-          lines.push(`伤害: ${Math.round(nextDmg * 100)}% (+${delta}%)`);
-        }
-        if (nextMana !== scaledMana) lines.push(`消耗: ${nextMana} MP`);
-        if (nextCD !== scaledCD) lines.push(`冷却: ${(nextCD / 1000).toFixed(1)}s`);
-      }
-
-      const tipW = px(280);
-      const tipPad = px(PANEL_STYLE.tooltip.padding);
-      const wrapW = tipW - tipPad * 2;
-      const tipText = lines.join('\n');
-
-      // Measure header first
-      const tipHeader = this.add.text(0, 0, `${skill.name} (${skill.nameEn})`, {
-        fontSize: fs(PANEL_STYLE.tooltip.titleSize), color: '#f0e8d0', fontFamily: PANEL_STYLE.tooltip.font, fontStyle: 'bold',
-        wordWrap: { width: wrapW, useAdvancedWrap: true },
-      });
-      const headerH = tipHeader.height;
-      const headerBottom = tipPad + headerH + px(6);
-
-      // Body text positioned below header
-      const textObj = this.add.text(tipPad, headerBottom, tipText, {
-        fontSize: fs(PANEL_STYLE.tooltip.bodySize), color: '#ddd8cc', fontFamily: PANEL_STYLE.tooltip.font, lineSpacing: px(PANEL_STYLE.tooltip.lineSpacing),
-        wordWrap: { width: wrapW, useAdvancedWrap: true },
-      });
-
-      const finalH = textObj.y + textObj.height + tipPad;
-
-      // Position tooltip to the right of card, or left if not enough space
-      let tipX = cardWorldX + cardW + px(8);
-      if (tipX + tipW > W) tipX = cardWorldX - tipW - px(8);
-      let tipY = cardWorldY;
-      if (tipY + finalH > H) tipY = H - finalH - px(4);
-      if (tipY < px(4)) tipY = px(4);
-
-      this.skillTooltip = this.add.container(tipX, tipY).setDepth(PANEL_STYLE.depth.tooltip);
-      const tipBg = this.add.rectangle(0, 0, tipW, finalH, PANEL_STYLE.tooltip.bg.color, PANEL_STYLE.tooltip.bg.alpha)
-        .setOrigin(0, 0)
-        .setStrokeStyle(PANEL_STYLE.tooltip.border.width * DPR, PANEL_STYLE.tooltip.border.color);
-      this.skillTooltip.add(tipBg);
-      tipHeader.setPosition(tipW / 2, tipPad).setOrigin(0.5, 0);
-      this.skillTooltip.add(tipHeader);
-      this.skillTooltip.add(textObj);
-    };
-
-    const hideTooltip = () => {
-      this.skillTooltip?.destroy();
-      this.skillTooltip = null;
-    };
-
-    let treeIdx = 0;
-    for (const [treeName, treeSkills] of trees) {
-      const treeColor = TREE_COLORS[treeName] ?? 0x888888;
-      const treeColorHex = '#' + treeColor.toString(16).padStart(6, '0');
-      const tx = margin + treeIdx * (treeW + gapBetween);
-      const tcx = tx + treeW / 2;
-
-      // Tree column background
-      const colBg = this.add.graphics();
-      colBg.fillStyle(0x0e0e20, 0.6);
-      colBg.fillRoundedRect(tx, contentTop, treeW, contentH, px(5));
-      colBg.lineStyle(Math.round(1 * DPR), treeColor, 0.2);
-      colBg.strokeRoundedRect(tx, contentTop, treeW, contentH, px(5));
-      this.skillPanel.add(colBg);
-
-      // Tree header with accent
-      const treeHeaderY = contentTop + px(6);
-      const displayName = TREE_NAMES[treeName] ?? treeName;
-      this.skillPanel.add(this.add.text(tcx, treeHeaderY, `─ ${displayName} ─`, {
-        fontSize: fs(13), color: treeColorHex, fontFamily: FONT, fontStyle: 'bold',
-      }).setOrigin(0.5, 0));
-
-      // Sort skills by tier
-      const sortedSkills = [...treeSkills].sort((a, b) => a.tier - b.tier);
-      const skillStartY = treeHeaderY + px(26);
-      const cardGap = px(10);
-
+      // Render skill cards
       sortedSkills.forEach((skill, si) => {
         const level = this.player.getSkillLevel(skill.id);
         const canLevel = this.player.freeSkillPoints > 0 && level < skill.maxLevel;
         const isLearned = level > 0;
         const isMaxed = level >= skill.maxLevel;
-        const cardX = tcx - cardW / 2;
-        const cardY = skillStartY + si * (cardH + cardGap);
+        const cardX = cardStartX;
+        const cardY = skillStartY + si * (cardH + cardGap) - scrollY;
         const dmgColor = DMG_COLORS[skill.damageType] ?? 0xcccccc;
         const dmgColorHex = '#' + dmgColor.toString(16).padStart(6, '0');
 
-        // Connection line to next card
-        if (si < sortedSkills.length - 1) {
-          const lineGfx = this.add.graphics();
-          const lineAlpha = isLearned ? 0.5 : 0.12;
-          lineGfx.lineStyle(Math.round(2 * DPR), treeColor, lineAlpha);
-          lineGfx.beginPath();
-          lineGfx.moveTo(tcx, cardY + cardH);
-          lineGfx.lineTo(tcx, cardY + cardH + cardGap);
-          lineGfx.strokePath();
-          // Arrow
-          const arrowY = cardY + cardH + cardGap - px(1);
-          lineGfx.fillStyle(treeColor, lineAlpha);
-          lineGfx.fillTriangle(tcx, arrowY + px(2), tcx - px(4), arrowY - px(4), tcx + px(4), arrowY - px(4));
-          this.skillPanel!.add(lineGfx);
-        }
-
-        // Card background - bordered rectangle
+        // === Card background with 4 distinct states ===
         const cardGfx = this.add.graphics();
-        const cardBgColor = isLearned ? 0x161630 : 0x0c0c18;
-        const borderColor = isMaxed ? 0xf1c40f : (canLevel ? 0x44dd44 : (isLearned ? treeColor : 0x2a2a3e));
-        const borderAlpha = isLearned ? 0.9 : 0.4;
-        cardGfx.fillStyle(cardBgColor, 0.95);
-        cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(4));
-        cardGfx.lineStyle(Math.round(isMaxed ? 2 * DPR : 1.5 * DPR), borderColor, borderAlpha);
-        cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(4));
-        // Maxed golden glow
-        if (isMaxed) {
-          cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.15);
-          cardGfx.strokeRoundedRect(cardX - px(2), cardY - px(2), cardW + px(4), cardH + px(4), px(5));
-        }
-        this.skillPanel!.add(cardGfx);
+        let cardBgColor: number;
+        let borderColor: number;
+        let borderAlpha: number;
+        let borderWidth: number;
 
-        // Icon area (left side of card) — square with dark background
-        const iconX = cardX + px(6);
+        if (isMaxed) {
+          cardBgColor = 0x1e1a10;
+          borderColor = 0xf1c40f;
+          borderAlpha = 1;
+          borderWidth = 2.5;
+        } else if (isLearned) {
+          cardBgColor = 0x161630;
+          borderColor = treeColor;
+          borderAlpha = 0.9;
+          borderWidth = 1.5;
+        } else if (canLevel) {
+          cardBgColor = 0x101828;
+          borderColor = 0x44dd44;
+          borderAlpha = 0.8;
+          borderWidth = 2;
+        } else {
+          cardBgColor = 0x0c0c18;
+          borderColor = 0x2a2a3e;
+          borderAlpha = 0.4;
+          borderWidth = 1;
+        }
+
+        cardGfx.fillStyle(cardBgColor, 0.95);
+        cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(5));
+        cardGfx.lineStyle(Math.round(borderWidth * DPR), borderColor, borderAlpha);
+        cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(5));
+        if (isMaxed) {
+          cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.12);
+          cardGfx.strokeRoundedRect(cardX - px(2), cardY - px(2), cardW + px(4), cardH + px(4), px(6));
+          cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.06);
+          cardGfx.strokeRoundedRect(cardX - px(4), cardY - px(4), cardW + px(8), cardH + px(8), px(7));
+        }
+        if (canLevel && !isLearned) {
+          cardGfx.lineStyle(Math.round(1 * DPR), 0x44dd44, 0.06);
+          cardGfx.strokeRoundedRect(cardX + px(1), cardY + px(1), cardW - px(2), cardH - px(2), px(4));
+        }
+        scrollContainer.add(cardGfx);
+
+        // State badge (top-right)
+        const badgeGfx = this.add.graphics();
+        const badgeX = cardX + cardW - px(8);
+        const badgeY = cardY + px(8);
+        if (isMaxed) {
+          badgeGfx.fillStyle(0xf1c40f, 0.9);
+          badgeGfx.fillCircle(badgeX, badgeY, px(3));
+          for (let i = 0; i < 5; i++) {
+            const a = Phaser.Math.DegToRad(-90 + i * 72);
+            badgeGfx.fillCircle(badgeX + Math.cos(a) * px(6), badgeY + Math.sin(a) * px(6), px(1.5));
+          }
+        } else if (isLearned) {
+          badgeGfx.fillStyle(treeColor, 0.7);
+          badgeGfx.fillCircle(badgeX, badgeY, px(4));
+        } else if (canLevel) {
+          badgeGfx.fillStyle(0x44dd44, 0.5);
+          badgeGfx.fillCircle(badgeX, badgeY, px(5));
+          badgeGfx.fillStyle(0x44dd44, 0.8);
+          badgeGfx.fillCircle(badgeX, badgeY, px(3));
+        }
+        scrollContainer.add(badgeGfx);
+
+        // === Icon area with gradient shading ===
+        const iconX = cardX + px(8);
         const iconY = cardY + (cardH - iconSize) / 2;
         const iconGfx = this.add.graphics();
-        iconGfx.fillStyle(0x080810, 0.9);
-        iconGfx.fillRoundedRect(iconX, iconY, iconSize, iconSize, px(3));
-        iconGfx.lineStyle(Math.round(1 * DPR), dmgColor, isLearned ? 0.6 : 0.2);
-        iconGfx.strokeRoundedRect(iconX, iconY, iconSize, iconSize, px(3));
-        this.skillPanel!.add(iconGfx);
+        iconGfx.fillStyle(0x080810, 0.95);
+        iconGfx.fillRoundedRect(iconX, iconY, iconSize, iconSize, px(4));
+        iconGfx.lineStyle(Math.round(1.5 * DPR), dmgColor, isLearned ? 0.7 : 0.25);
+        iconGfx.strokeRoundedRect(iconX, iconY, iconSize, iconSize, px(4));
+        if (isLearned) {
+          iconGfx.fillStyle(dmgColor, 0.08);
+          iconGfx.fillRoundedRect(iconX + px(1), iconY + px(1), iconSize / 2, iconSize / 2, px(3));
+        }
+        scrollContainer.add(iconGfx);
 
         // Skill icon texture
         const iconKey = `skill_icon_${skill.id}`;
@@ -1111,143 +1134,153 @@ export class UIScene extends Phaser.Scene {
         const iconCy = iconY + iconSize / 2;
         if (this.textures.exists(iconKey)) {
           const iconImg = this.add.image(iconCx, iconCy, iconKey)
-            .setDisplaySize(iconSize - px(4), iconSize - px(4))
-            .setAlpha(isLearned ? 1 : 0.35);
-          this.skillPanel!.add(iconImg);
+            .setDisplaySize(iconSize - px(6), iconSize - px(6))
+            .setAlpha(isLearned ? 1 : 0.3);
+          scrollContainer.add(iconImg);
         } else {
-          // Fallback: colored dot + tier
-          const dotR = px(6);
-          iconGfx.fillStyle(dmgColor, isLearned ? 0.6 : 0.15);
-          iconGfx.fillCircle(iconCx, iconCy, dotR);
-          this.skillPanel!.add(this.add.text(iconCx, iconCy, `T${skill.tier}`, {
-            fontSize: fs(11), color: isLearned ? '#ccc' : '#444', fontFamily: FONT, fontStyle: 'bold',
+          iconGfx.fillStyle(dmgColor, isLearned ? 0.5 : 0.12);
+          const dR = px(8);
+          iconGfx.fillTriangle(iconCx, iconCy - dR, iconCx + dR, iconCy, iconCx, iconCy + dR);
+          iconGfx.fillTriangle(iconCx, iconCy - dR, iconCx - dR, iconCy, iconCx, iconCy + dR);
+          scrollContainer.add(this.add.text(iconCx, iconCy, `T${skill.tier}`, {
+            fontSize: fs(10), color: isLearned ? '#ccc' : '#444', fontFamily: FONT, fontStyle: 'bold',
           }).setOrigin(0.5));
         }
 
-        // Text area (right side of card)
-        const textX = iconX + iconSize + px(8);
-        const textAreaW = cardW - iconSize - px(22);
+        // === Text area ===
+        const textX = iconX + iconSize + px(10);
 
         // Skill name
-        const nameColor = isMaxed ? '#f1c40f' : (isLearned ? '#e8e0d0' : '#777788');
-        this.skillPanel!.add(this.add.text(textX, cardY + px(8), skill.name, {
-          fontSize: fs(13), color: nameColor, fontFamily: FONT, fontStyle: 'bold',
+        const nameColor = isMaxed ? '#f1c40f' : (isLearned ? '#e8e0d0' : (canLevel ? '#aabbcc' : '#555566'));
+        scrollContainer.add(this.add.text(textX, cardY + px(8), skill.name, {
+          fontSize: fs(14), color: nameColor, fontFamily: FONT, fontStyle: 'bold',
         }));
 
-        // Level bar — visual Lv / maxLv
-        const lvBarX = textX;
-        const lvBarY = cardY + px(26);
-        const lvBarW = Math.min(textAreaW - px(40), px(80));
-        const lvBarH = px(6);
-        const lvBarBg = this.add.graphics();
-        lvBarBg.fillStyle(0x1a1a2e, 1);
-        lvBarBg.fillRoundedRect(lvBarX, lvBarY, lvBarW, lvBarH, px(2));
-        const fillW = skill.maxLevel > 0 ? Math.round((level / skill.maxLevel) * lvBarW) : 0;
-        if (fillW > 0) {
-          lvBarBg.fillStyle(isMaxed ? 0xf1c40f : treeColor, 0.8);
-          lvBarBg.fillRoundedRect(lvBarX, lvBarY, fillW, lvBarH, px(2));
-        }
-        lvBarBg.lineStyle(Math.round(1 * DPR), treeColor, 0.3);
-        lvBarBg.strokeRoundedRect(lvBarX, lvBarY, lvBarW, lvBarH, px(2));
-        this.skillPanel!.add(lvBarBg);
+        // English name
+        scrollContainer.add(this.add.text(textX, cardY + px(24), skill.nameEn, {
+          fontSize: fs(9), color: '#444458', fontFamily: FONT,
+        }));
 
-        // Level text next to bar
-        const lvColor = isMaxed ? '#f1c40f' : (isLearned ? '#aaaacc' : '#555566');
-        this.skillPanel!.add(this.add.text(lvBarX + lvBarW + px(4), lvBarY - px(1), `${level}/${skill.maxLevel}`, {
+        // Level pips
+        const pipY = cardY + px(40);
+        const pipR = px(3);
+        const pipGap = px(8);
+        const maxPips = Math.min(skill.maxLevel, 20);
+        const pipStartX = textX;
+        for (let p = 0; p < maxPips; p++) {
+          const pipX = pipStartX + p * pipGap;
+          if (pipX + pipR > cardX + cardW - px(30)) break;
+          const pipGfx = this.add.graphics();
+          if (p < level) {
+            pipGfx.fillStyle(isMaxed ? 0xf1c40f : treeColor, 0.9);
+            pipGfx.fillCircle(pipX, pipY, pipR);
+          } else {
+            pipGfx.fillStyle(0x2a2a3e, 0.6);
+            pipGfx.fillCircle(pipX, pipY, pipR);
+            pipGfx.lineStyle(Math.round(0.5 * DPR), 0x3a3a4e, 0.5);
+            pipGfx.strokeCircle(pipX, pipY, pipR);
+          }
+          scrollContainer.add(pipGfx);
+        }
+        // Level text
+        const maxVisiblePips = Math.min(maxPips, Math.floor((cardW - iconSize - px(60)) / pipGap));
+        const lvColor = isMaxed ? '#f1c40f' : (isLearned ? '#aaaacc' : '#444458');
+        scrollContainer.add(this.add.text(pipStartX + maxVisiblePips * pipGap + px(4), pipY - px(4), `${level}/${skill.maxLevel}`, {
           fontSize: fs(10), color: lvColor, fontFamily: FONT,
         }));
 
-        // Stats row: damage%, mana, cooldown
+        // Stats row
         const scaledDmg = getSkillDamageMultiplier(skill, level);
         const scaledMana = getSkillManaCost(skill, level);
         const scaledCD = getSkillCooldown(skill, level);
-        const statsY = cardY + px(38);
+        const statsY = cardY + px(54);
         let statsStr = '';
         if (skill.damageMultiplier > 0) statsStr += `${Math.round(scaledDmg * 100)}%`;
         statsStr += `  MP${scaledMana}  CD${(scaledCD / 1000).toFixed(1)}s`;
-        this.skillPanel!.add(this.add.text(textX, statsY, statsStr, {
+        const dmgName = DMG_NAMES[skill.damageType] ?? '';
+        if (dmgName) statsStr += `  ${dmgName}`;
+        scrollContainer.add(this.add.text(textX, statsY, statsStr, {
           fontSize: fs(10), color: '#666680', fontFamily: FONT,
         }));
 
-        // Damage type label
-        const dmgName = DMG_NAMES[skill.damageType] ?? '';
-        if (dmgName) {
-          this.skillPanel!.add(this.add.text(textX, statsY + px(13), dmgName, {
-            fontSize: fs(9), color: dmgColorHex, fontFamily: FONT,
-          }));
-        }
-
-        // Synergy indicator dot
+        // Synergy badge
         if (skill.synergies && skill.synergies.length > 0 && isLearned) {
           let hasActiveSyn = false;
           for (const syn of skill.synergies) {
             if (this.player.getSkillLevel(syn.skillId) > 0) { hasActiveSyn = true; break; }
           }
           if (hasActiveSyn) {
-            const synDot = this.add.graphics();
-            synDot.fillStyle(0x7766cc, 0.8);
-            synDot.fillCircle(cardX + cardW - px(10), cardY + px(10), px(4));
-            this.skillPanel!.add(synDot);
+            const synBadge = this.add.graphics();
+            synBadge.fillStyle(0x7766cc, 0.6);
+            synBadge.fillRoundedRect(cardX + cardW - px(40), cardY + cardH - px(18), px(35), px(14), px(3));
+            scrollContainer.add(synBadge);
+            scrollContainer.add(this.add.text(cardX + cardW - px(22), cardY + cardH - px(11), '协同', {
+              fontSize: fs(8), color: '#aa99ee', fontFamily: FONT,
+            }).setOrigin(0.5));
           }
         }
 
-        // Hover area over entire card for tooltip
+        // Hover area for tooltip
         const cardHit = this.add.rectangle(cardX + cardW / 2, cardY + cardH / 2, cardW, cardH, 0x000000, 0)
           .setInteractive({ useHandCursor: false });
         cardHit.on('pointerover', () => {
           cardGfx.clear();
-          cardGfx.fillStyle(isLearned ? 0x1c1c3e : 0x101020, 0.98);
-          cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(4));
+          cardGfx.fillStyle(isLearned ? 0x1c1c3e : (canLevel ? 0x141e30 : 0x101020), 0.98);
+          cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(5));
           cardGfx.lineStyle(Math.round(2 * DPR), borderColor, 1);
-          cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(4));
-          showTooltip(skill, panelX + cardX, panelY + cardY);
+          cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(5));
+          this.showSkillTooltip(skill, panelX + cardX, panelY + cardY, cardW, DMG_NAMES, TREE_NAMES);
         });
         cardHit.on('pointerout', () => {
           cardGfx.clear();
           cardGfx.fillStyle(cardBgColor, 0.95);
-          cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(4));
-          cardGfx.lineStyle(Math.round(isMaxed ? 2 * DPR : 1.5 * DPR), borderColor, borderAlpha);
-          cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(4));
+          cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(5));
+          cardGfx.lineStyle(Math.round(borderWidth * DPR), borderColor, borderAlpha);
+          cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(5));
           if (isMaxed) {
-            cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.15);
-            cardGfx.strokeRoundedRect(cardX - px(2), cardY - px(2), cardW + px(4), cardH + px(4), px(5));
+            cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.12);
+            cardGfx.strokeRoundedRect(cardX - px(2), cardY - px(2), cardW + px(4), cardH + px(4), px(6));
           }
-          hideTooltip();
+          if (canLevel && !isLearned) {
+            cardGfx.lineStyle(Math.round(1 * DPR), 0x44dd44, 0.06);
+            cardGfx.strokeRoundedRect(cardX + px(1), cardY + px(1), cardW - px(2), cardH - px(2), px(4));
+          }
+          this.skillTooltip?.destroy(); this.skillTooltip = null;
         });
-        this.skillPanel!.add(cardHit);
+        scrollContainer.add(cardHit);
 
-        // + Button — bottom right of card (added AFTER cardHit so it sits on top and receives clicks)
+        // + Button
         if (canLevel) {
-          const btnSize = px(20);
-          const btnX = cardX + cardW - btnSize - px(5);
-          const btnY = cardY + cardH - btnSize - px(5);
+          const btnSize = px(22);
+          const btnX = cardX + cardW - btnSize - px(6);
+          const btnY = cardY + px(6);
           const btnBg = this.add.graphics();
           btnBg.fillStyle(0x1a3a1a, 0.9);
-          btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+          btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
           btnBg.lineStyle(Math.round(1 * DPR), 0x27ae60, 0.8);
-          btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
-          this.skillPanel!.add(btnBg);
+          btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
+          scrollContainer.add(btnBg);
           const btnText = this.add.text(btnX + btnSize / 2, btnY + btnSize / 2, '+', {
-            fontSize: fs(14), color: '#27ae60', fontFamily: FONT, fontStyle: 'bold',
+            fontSize: fs(15), color: '#27ae60', fontFamily: FONT, fontStyle: 'bold',
           }).setOrigin(0.5);
-          this.skillPanel!.add(btnText);
+          scrollContainer.add(btnText);
 
           const hitArea = this.add.rectangle(btnX + btnSize / 2, btnY + btnSize / 2, btnSize, btnSize, 0x000000, 0)
             .setInteractive({ useHandCursor: true });
           hitArea.on('pointerover', () => {
             btnBg.clear();
             btnBg.fillStyle(0x225522, 1);
-            btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+            btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
             btnBg.lineStyle(Math.round(2 * DPR), 0x44dd44, 1);
-            btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+            btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
             btnText.setColor('#44dd44');
           });
           hitArea.on('pointerout', () => {
             btnBg.clear();
             btnBg.fillStyle(0x1a3a1a, 0.9);
-            btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+            btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
             btnBg.lineStyle(Math.round(1 * DPR), 0x27ae60, 0.8);
-            btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(3));
+            btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
             btnText.setColor('#27ae60');
           });
           hitArea.on('pointerdown', () => {
@@ -1257,17 +1290,183 @@ export class UIScene extends Phaser.Scene {
               this.toggleSkillTree(); this.toggleSkillTree();
             }
           });
-          this.skillPanel!.add(hitArea);
+          scrollContainer.add(hitArea);
         }
       });
+    };
 
-      treeIdx++;
-    }
+    // Draw tab buttons
+    const tabContainer = this.add.container(0, 0);
+    this.skillPanel.add(tabContainer);
+
+    const drawTabs = () => {
+      tabContainer.removeAll(true);
+      treeNames.forEach((treeName, ti) => {
+        const treeColor = TREE_COLORS[treeName] ?? 0x888888;
+        const treeColorHex = '#' + treeColor.toString(16).padStart(6, '0');
+        const displayName = TREE_NAMES[treeName] ?? treeName;
+        const isActive = ti === this.skillTreeActiveTab;
+        const tx = tabMargin + ti * (tabW + tabGap);
+
+        const tabGfx = this.add.graphics();
+        if (isActive) {
+          tabGfx.fillStyle(0x1a1a34, 1);
+          tabGfx.fillRoundedRect(tx, tabY, tabW, tabH, { tl: px(5), tr: px(5), bl: 0, br: 0 });
+          tabGfx.lineStyle(Math.round(2 * DPR), treeColor, 0.8);
+          tabGfx.strokeRoundedRect(tx, tabY, tabW, tabH, { tl: px(5), tr: px(5), bl: 0, br: 0 });
+          tabGfx.fillStyle(treeColor, 0.8);
+          tabGfx.fillRect(tx + px(4), tabY + tabH - px(3), tabW - px(8), px(3));
+        } else {
+          tabGfx.fillStyle(0x0e0e1e, 0.7);
+          tabGfx.fillRoundedRect(tx, tabY, tabW, tabH, { tl: px(5), tr: px(5), bl: 0, br: 0 });
+          tabGfx.lineStyle(Math.round(1 * DPR), 0x2a2a3e, 0.5);
+          tabGfx.strokeRoundedRect(tx, tabY, tabW, tabH, { tl: px(5), tr: px(5), bl: 0, br: 0 });
+        }
+        tabContainer.add(tabGfx);
+
+        const treeSkills = treeSkillsMap.get(treeName) ?? [];
+        const learnedCount = treeSkills.filter(s => this.player.getSkillLevel(s.id) > 0).length;
+
+        const tabLabel = this.add.text(tx + tabW / 2, tabY + tabH / 2 - px(1), displayName, {
+          fontSize: fs(12), color: isActive ? treeColorHex : '#555566', fontFamily: FONT, fontStyle: isActive ? 'bold' : 'normal',
+        }).setOrigin(0.5);
+        tabContainer.add(tabLabel);
+
+        if (learnedCount > 0) {
+          const badge = this.add.text(tx + tabW - px(8), tabY + px(4), `${learnedCount}`, {
+            fontSize: fs(8), color: isActive ? treeColorHex : '#444', fontFamily: FONT,
+          }).setOrigin(0.5, 0);
+          tabContainer.add(badge);
+        }
+
+        const tabHit = this.add.rectangle(tx + tabW / 2, tabY + tabH / 2, tabW, tabH, 0x000000, 0)
+          .setInteractive({ useHandCursor: true });
+        tabHit.on('pointerdown', () => {
+          if (this.skillTreeActiveTab !== ti) {
+            this.skillTreeActiveTab = ti;
+            drawTabs();
+            renderTab(ti);
+          }
+        });
+        tabContainer.add(tabHit);
+      });
+    };
+
+    // Wheel scroll handler
+    this.skillTreeWheelHandler = (_pointer: Phaser.Input.Pointer, _gos: Phaser.GameObjects.GameObject[], _dx: number, dy: number) => {
+      if (!this.skillPanel) return;
+      const tabIndex = this.skillTreeActiveTab;
+      const treeSkills = treeSkillsMap.get(treeNames[tabIndex]) ?? [];
+      const totalContentH = treeSkills.length * (cardH + cardGap) + px(30);
+      const maxScrollY = Math.max(0, totalContentH - contentH);
+      const scroll = this.skillTreeScrollY[tabIndex] ?? 0;
+      const newScroll = Phaser.Math.Clamp(scroll + dy * 0.5, 0, maxScrollY);
+      if (newScroll !== scroll) {
+        this.skillTreeScrollY[tabIndex] = newScroll;
+        renderTab(tabIndex);
+      }
+    };
+    this.input.on('wheel', this.skillTreeWheelHandler);
+
+    drawTabs();
+    renderTab(this.skillTreeActiveTab);
 
     // Footer
-    this.skillPanel.add(this.add.text(pw / 2, ph - px(12), '按 K 关闭  ·  悬停查看详情', {
+    this.skillPanel.add(this.add.text(pw / 2, ph - px(14), '按 K 关闭  ·  悬停查看详情  ·  滚轮翻页', {
       fontSize: fs(10), color: '#3a3a4a', fontFamily: FONT,
     }).setOrigin(0.5));
+  }
+
+  /** Show skill tooltip — extracted helper method */
+  private showSkillTooltip(
+    skill: typeof this.player.classData.skills[0],
+    cardWorldX: number, cardWorldY: number, cardW: number,
+    DMG_NAMES: Record<string, string>, _TREE_NAMES: Record<string, string>,
+  ): void {
+    this.skillTooltip?.destroy();
+    const level = this.player.getSkillLevel(skill.id);
+    const scaledDmg = getSkillDamageMultiplier(skill, level);
+    const scaledMana = getSkillManaCost(skill, level);
+    const scaledCD = getSkillCooldown(skill, level);
+    const scaledAoe = getSkillAoeRadius(skill, level);
+    const dmgName = DMG_NAMES[skill.damageType] ?? skill.damageType;
+
+    const lines: string[] = [];
+    lines.push(skill.description);
+    lines.push('');
+    if (skill.damageMultiplier > 0) lines.push(`伤害: ${Math.round(scaledDmg * 100)}% ${dmgName}`);
+    lines.push(`消耗: ${scaledMana} MP`);
+    lines.push(`冷却: ${(scaledCD / 1000).toFixed(1)}s`);
+    lines.push(`范围: ${skill.range}格`);
+    if (skill.aoe && scaledAoe > 0) lines.push(`AOE半径: ${scaledAoe.toFixed(1)}格`);
+    if (skill.critBonus) lines.push(`暴击加成: +${skill.critBonus}%`);
+    if (skill.stunDuration) lines.push(`眩晕: ${(skill.stunDuration / 1000).toFixed(1)}s`);
+    if (skill.buff) {
+      const buffVal = getSkillBuffValue(skill, level);
+      const buffDur = getSkillBuffDuration(skill, level);
+      lines.push(`增益: ${skill.buff.stat} +${Math.round(buffVal * 100)}% (${(buffDur / 1000).toFixed(0)}s)`);
+    }
+
+    if (skill.synergies && skill.synergies.length > 0) {
+      lines.push('');
+      lines.push('─ 协同增益 ─');
+      for (const syn of skill.synergies) {
+        const synSkill = this.player.classData.skills.find(s => s.id === syn.skillId);
+        const synLv = this.player.getSkillLevel(syn.skillId);
+        if (synSkill) {
+          const bonus = Math.round(syn.damagePerLevel * synLv * 100);
+          lines.push(`${synSkill.name}: +${syn.damagePerLevel * 100}%/级 (当前+${bonus}%)`);
+        }
+      }
+    }
+
+    if (level < skill.maxLevel) {
+      lines.push('');
+      lines.push(`─ 下一级 (Lv${level + 1}) ─`);
+      const nextDmg = getSkillDamageMultiplier(skill, level + 1);
+      const nextMana = getSkillManaCost(skill, level + 1);
+      const nextCD = getSkillCooldown(skill, level + 1);
+      if (skill.damageMultiplier > 0) {
+        const delta = Math.round((nextDmg - scaledDmg) * 100);
+        lines.push(`伤害: ${Math.round(nextDmg * 100)}% (+${delta}%)`);
+      }
+      if (nextMana !== scaledMana) lines.push(`消耗: ${nextMana} MP`);
+      if (nextCD !== scaledCD) lines.push(`冷却: ${(nextCD / 1000).toFixed(1)}s`);
+    }
+
+    const tipW = px(280);
+    const tipPad = px(PANEL_STYLE.tooltip.padding);
+    const wrapW = tipW - tipPad * 2;
+    const tipText = lines.join('\n');
+
+    const tipHeader = this.add.text(0, 0, `${skill.name} (${skill.nameEn})`, {
+      fontSize: fs(PANEL_STYLE.tooltip.titleSize), color: '#f0e8d0', fontFamily: PANEL_STYLE.tooltip.font, fontStyle: 'bold',
+      wordWrap: { width: wrapW, useAdvancedWrap: true },
+    });
+    const headerHeight = tipHeader.height;
+    const headerBottom = tipPad + headerHeight + px(6);
+
+    const textObj = this.add.text(tipPad, headerBottom, tipText, {
+      fontSize: fs(PANEL_STYLE.tooltip.bodySize), color: '#ddd8cc', fontFamily: PANEL_STYLE.tooltip.font, lineSpacing: px(PANEL_STYLE.tooltip.lineSpacing),
+      wordWrap: { width: wrapW, useAdvancedWrap: true },
+    });
+
+    const finalH = textObj.y + textObj.height + tipPad;
+
+    let tipX = cardWorldX + cardW + px(8);
+    if (tipX + tipW > W) tipX = cardWorldX - tipW - px(8);
+    let tipY = cardWorldY;
+    if (tipY + finalH > H) tipY = H - finalH - px(4);
+    if (tipY < px(4)) tipY = px(4);
+
+    this.skillTooltip = this.add.container(tipX, tipY).setDepth(PANEL_STYLE.depth.tooltip);
+    const tipBg = this.add.rectangle(0, 0, tipW, finalH, PANEL_STYLE.tooltip.bg.color, PANEL_STYLE.tooltip.bg.alpha)
+      .setOrigin(0, 0)
+      .setStrokeStyle(PANEL_STYLE.tooltip.border.width * DPR, PANEL_STYLE.tooltip.border.color);
+    this.skillTooltip.add(tipBg);
+    tipHeader.setPosition(tipW / 2, tipPad).setOrigin(0.5, 0);
+    this.skillTooltip.add(tipHeader);
+    this.skillTooltip.add(textObj);
   }
 
   // --- Character Stats Panel (C) ---
@@ -1344,69 +1543,428 @@ export class UIScene extends Phaser.Scene {
   }
 
   // --- Homestead Panel (H) ---
+  /** Building icon drawing helpers keyed by building id */
+  private static readonly BUILDING_ICONS: Record<string, (g: Phaser.GameObjects.Graphics, cx: number, cy: number, s: number, level: number, maxLevel: number) => void> = {
+    herb_garden: (g, cx, cy, s, level, maxLevel) => {
+      // Pot/garden — evolves from bare pot to lush garden
+      const potW = s * 0.6, potH = s * 0.35;
+      g.fillStyle(0x8B4513, 0.9);
+      g.fillRoundedRect(cx - potW / 2, cy + s * 0.1, potW, potH, s * 0.06);
+      g.fillStyle(0x553311, 0.8);
+      g.fillRect(cx - potW * 0.55 / 2, cy + s * 0.06, potW * 0.55, s * 0.06);
+      // Plants grow with level
+      const plantCount = Math.max(1, Math.ceil(level / maxLevel * 5));
+      for (let i = 0; i < plantCount; i++) {
+        const px = cx - potW / 2 + (i + 0.5) * (potW / plantCount);
+        const ph = s * 0.15 + (level / maxLevel) * s * 0.25;
+        g.fillStyle(0x27ae60, 0.9);
+        g.fillTriangle(px, cy + s * 0.1 - ph, px - s * 0.06, cy + s * 0.1, px + s * 0.06, cy + s * 0.1);
+        if (level >= 3) {
+          g.fillStyle(0xff6b6b, 0.8);
+          g.fillCircle(px, cy + s * 0.1 - ph + s * 0.02, s * 0.03);
+        }
+      }
+    },
+    training_ground: (g, cx, cy, s, level, maxLevel) => {
+      // Training dummy — evolves from simple post to armored dummy
+      g.fillStyle(0x8B7355, 0.9);
+      g.fillRect(cx - s * 0.04, cy - s * 0.1, s * 0.08, s * 0.4);
+      // Cross arm
+      g.fillRect(cx - s * 0.2, cy - s * 0.05, s * 0.4, s * 0.06);
+      // Head
+      const headR = s * (0.08 + level / maxLevel * 0.04);
+      g.fillStyle(0xDEB887, 0.9);
+      g.fillCircle(cx, cy - s * 0.2, headR);
+      // Armor at higher levels
+      if (level >= 2) {
+        g.fillStyle(0x888888, 0.6);
+        g.fillRect(cx - s * 0.1, cy - s * 0.1, s * 0.2, s * 0.2);
+      }
+      if (level >= 4) {
+        g.lineStyle(2, 0xc0934a, 0.8);
+        g.strokeCircle(cx, cy - s * 0.2, headR + s * 0.03);
+      }
+    },
+    gem_workshop: (g, cx, cy, s, level, maxLevel) => {
+      // Gem/anvil — evolves from simple anvil to glowing gem station
+      g.fillStyle(0x555555, 0.9);
+      g.fillRect(cx - s * 0.2, cy + s * 0.05, s * 0.4, s * 0.15);
+      g.fillRect(cx - s * 0.15, cy - s * 0.1, s * 0.3, s * 0.15);
+      // Gems on top, count increases with level
+      const gemColors = [0xff4444, 0x4488ff, 0x44ff44, 0xffcc44];
+      const gemCount = Math.min(gemColors.length, Math.max(1, Math.ceil(level / maxLevel * 4)));
+      for (let i = 0; i < gemCount; i++) {
+        const gx = cx - s * 0.12 + i * s * 0.08;
+        g.fillStyle(gemColors[i], 0.9);
+        const gr = s * 0.04;
+        g.fillTriangle(gx, cy - s * 0.2, gx - gr, cy - s * 0.12, gx + gr, cy - s * 0.12);
+        g.fillRect(gx - gr, cy - s * 0.12, gr * 2, gr);
+      }
+      // Sparkle at high levels
+      if (level >= 3) {
+        g.fillStyle(0xffffff, 0.6);
+        g.fillCircle(cx + s * 0.15, cy - s * 0.22, s * 0.02);
+        g.fillCircle(cx - s * 0.1, cy - s * 0.18, s * 0.015);
+      }
+    },
+    pet_house: (g, cx, cy, s, level, maxLevel) => {
+      // Pet house — evolves from small hut to grand shelter
+      const houseW = s * (0.4 + level / maxLevel * 0.2);
+      const houseH = s * (0.25 + level / maxLevel * 0.1);
+      g.fillStyle(0x8B6914, 0.9);
+      g.fillRect(cx - houseW / 2, cy, houseW, houseH);
+      // Roof
+      g.fillStyle(0xA0522D, 0.9);
+      g.fillTriangle(cx, cy - s * 0.2, cx - houseW / 2 - s * 0.05, cy + s * 0.02, cx + houseW / 2 + s * 0.05, cy + s * 0.02);
+      // Door
+      g.fillStyle(0x553311, 0.9);
+      g.fillRect(cx - s * 0.04, cy + houseH * 0.3, s * 0.08, houseH * 0.7);
+      // Paw prints at higher levels
+      if (level >= 2) {
+        g.fillStyle(0xDEB887, 0.5);
+        g.fillCircle(cx + houseW / 2 + s * 0.08, cy + houseH - s * 0.02, s * 0.025);
+        g.fillCircle(cx + houseW / 2 + s * 0.12, cy + houseH - s * 0.06, s * 0.015);
+      }
+    },
+    warehouse: (g, cx, cy, s, level, maxLevel) => {
+      // Warehouse/crate — evolves from small crate to stacked warehouse
+      const crateCount = Math.max(1, Math.ceil(level / maxLevel * 3));
+      for (let i = 0; i < crateCount; i++) {
+        const crateW = s * 0.25;
+        const crateH = s * 0.2;
+        const ox = (i - (crateCount - 1) / 2) * s * 0.15;
+        const oy = -i * s * 0.12;
+        g.fillStyle(0x8B7355, 0.9);
+        g.fillRect(cx - crateW / 2 + ox, cy + oy, crateW, crateH);
+        g.lineStyle(1, 0x664422, 0.7);
+        g.strokeRect(cx - crateW / 2 + ox, cy + oy, crateW, crateH);
+        // Cross planks
+        g.lineStyle(1, 0x664422, 0.5);
+        g.beginPath();
+        g.moveTo(cx - crateW / 2 + ox, cy + oy);
+        g.lineTo(cx + crateW / 2 + ox, cy + oy + crateH);
+        g.moveTo(cx + crateW / 2 + ox, cy + oy);
+        g.lineTo(cx - crateW / 2 + ox, cy + oy + crateH);
+        g.strokePath();
+      }
+    },
+    altar: (g, cx, cy, s, level, maxLevel) => {
+      // Mystical altar — evolves with glow intensity
+      g.fillStyle(0x555566, 0.9);
+      g.fillRect(cx - s * 0.15, cy + s * 0.05, s * 0.3, s * 0.2);
+      g.fillRect(cx - s * 0.2, cy + s * 0.2, s * 0.4, s * 0.06);
+      // Crystal on top
+      const crystalH = s * (0.15 + level / maxLevel * 0.1);
+      g.fillStyle(0x8e44ad, 0.8);
+      g.fillTriangle(cx, cy + s * 0.05 - crystalH, cx - s * 0.06, cy + s * 0.05, cx + s * 0.06, cy + s * 0.05);
+      // Glow intensifies with level
+      const glowAlpha = 0.1 + (level / maxLevel) * 0.3;
+      g.fillStyle(0xbb77ff, glowAlpha);
+      g.fillCircle(cx, cy - s * 0.05, s * 0.15 + level * s * 0.02);
+      // Runes at higher levels
+      if (level >= 2) {
+        g.fillStyle(0xbb77ff, 0.5);
+        g.fillCircle(cx - s * 0.12, cy + s * 0.15, s * 0.02);
+        g.fillCircle(cx + s * 0.12, cy + s * 0.15, s * 0.02);
+      }
+    },
+  };
+
+  /** Pet rarity colors */
+  private static readonly PET_RARITY_COLORS: Record<string, number> = {
+    common: 0x888888,
+    rare: 0x2471a3,
+    epic: 0xd35400,
+  };
+
+  /** Pet bonus stat icon emojis (display text) */
+  private static readonly PET_STAT_LABELS: Record<string, string> = {
+    expBonus: '经验',
+    damage: '攻击',
+    magicFind: '掉宝',
+    critRate: '暴击',
+    hpRegen: '回血',
+    attackSpeed: '攻速',
+    defense: '防御',
+    manaRegen: '回蓝',
+  };
+
   private toggleHomestead(): void {
     if (this.homesteadPanel) { this.homesteadPanel.destroy(); this.homesteadPanel = null; return; }
     this.closeAllPanels();
-    const pw = px(420), ph = px(400), panelX = (W - pw) / 2, panelY = px(20);
+    const pw = px(480), ph = px(520), panelX = (W - pw) / 2, panelY = px(10);
     this.homesteadPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.homesteadPanel);
     this.homesteadPanel.add(this.createPanelBg(pw, ph));
-    this.homesteadPanel.add(this.createPanelTitle(pw, '家园'));
+    this.homesteadPanel.add(this.createPanelTitle(pw, '家 园'));
     this.homesteadPanel.add(this.createPanelCloseBtn(pw, () => this.toggleHomestead()));
 
     const hs = this.zone.homesteadSystem;
     const buildings = hs.getAllBuildings();
 
+    // === Buildings Section ===
+    const sectionHeaderY = px(38);
+    const divider1 = this.add.graphics();
+    divider1.fillStyle(0xc0934a, 0.3);
+    divider1.fillRect(px(14), sectionHeaderY, pw - px(28), px(1));
+    this.homesteadPanel.add(divider1);
+    this.homesteadPanel.add(this.add.text(px(14), sectionHeaderY + px(4), '── 建筑 ──', {
+      fontSize: fs(12), color: '#c0934a', fontFamily: FONT, fontStyle: 'bold',
+    }));
+
+    const buildingStartY = sectionHeaderY + px(22);
+    const buildingH = px(56);
+    const buildingGap = px(6);
+    const iconAreaSize = px(42);
+
     buildings.forEach((b, i) => {
-      const sy = px(36) + i * px(46);
+      const sy = buildingStartY + i * (buildingH + buildingGap);
       const lv = hs.getBuildingLevel(b.id);
       const maxed = lv >= b.maxLevel;
       const cost = maxed ? 0 : b.costPerLevel[lv]?.gold ?? 0;
       const canUpgrade = !maxed && this.player.gold >= cost;
 
-      this.homesteadPanel!.add(this.add.text(px(14), sy, `${b.name} Lv.${lv}/${b.maxLevel}`, {
-        fontSize: fs(13), color: '#e0d8cc', fontFamily: FONT,
+      // Building card background
+      const cardGfx = this.add.graphics();
+      cardGfx.fillStyle(maxed ? 0x1a1810 : 0x0e0e20, 0.7);
+      cardGfx.fillRoundedRect(px(10), sy, pw - px(20), buildingH, px(4));
+      cardGfx.lineStyle(Math.round(1 * DPR), maxed ? 0xc0934a : 0x2a2a3e, maxed ? 0.5 : 0.3);
+      cardGfx.strokeRoundedRect(px(10), sy, pw - px(20), buildingH, px(4));
+      this.homesteadPanel!.add(cardGfx);
+
+      // Building icon area
+      const iconX = px(16);
+      const iconY = sy + (buildingH - iconAreaSize) / 2;
+      const iconGfx = this.add.graphics();
+      iconGfx.fillStyle(0x0a0a18, 0.9);
+      iconGfx.fillRoundedRect(iconX, iconY, iconAreaSize, iconAreaSize, px(4));
+      iconGfx.lineStyle(Math.round(1 * DPR), maxed ? 0xc0934a : 0x333344, 0.5);
+      iconGfx.strokeRoundedRect(iconX, iconY, iconAreaSize, iconAreaSize, px(4));
+      this.homesteadPanel!.add(iconGfx);
+
+      // Draw building icon (procedural illustration)
+      const iconDrawer = UIScene.BUILDING_ICONS[b.id];
+      if (iconDrawer) {
+        const buildingIconGfx = this.add.graphics();
+        iconDrawer(buildingIconGfx, iconX + iconAreaSize / 2, iconY + iconAreaSize / 2, iconAreaSize, lv, b.maxLevel);
+        this.homesteadPanel!.add(buildingIconGfx);
+      }
+
+      // Text area
+      const textX = iconX + iconAreaSize + px(10);
+      this.homesteadPanel!.add(this.add.text(textX, sy + px(6), b.name, {
+        fontSize: fs(13), color: maxed ? '#c0934a' : '#e0d8cc', fontFamily: FONT, fontStyle: 'bold',
       }));
-      this.homesteadPanel!.add(this.add.text(px(14), sy + px(16), b.description, {
-        fontSize: fs(12), color: '#666', fontFamily: FONT,
+      this.homesteadPanel!.add(this.add.text(textX, sy + px(22), b.description, {
+        fontSize: fs(10), color: '#666680', fontFamily: FONT,
       }));
-      if (!maxed) {
-        const upBtn = this.add.text(pw - px(14), sy + px(6), `升级 ${cost}G`, {
-          fontSize: fs(12), color: canUpgrade ? '#27ae60' : '#555', fontFamily: FONT,
-        }).setOrigin(1, 0);
+
+      // Level progress pips
+      const pipY = sy + px(38);
+      const pipR = px(3);
+      const pipGapH = px(10);
+      for (let p = 0; p < b.maxLevel; p++) {
+        const pipX = textX + p * pipGapH;
+        const pipGfxB = this.add.graphics();
+        if (p < lv) {
+          pipGfxB.fillStyle(maxed ? 0xc0934a : 0x27ae60, 0.9);
+          pipGfxB.fillCircle(pipX, pipY, pipR);
+        } else {
+          pipGfxB.fillStyle(0x2a2a3e, 0.5);
+          pipGfxB.fillCircle(pipX, pipY, pipR);
+          pipGfxB.lineStyle(Math.round(0.5 * DPR), 0x3a3a4e, 0.4);
+          pipGfxB.strokeCircle(pipX, pipY, pipR);
+        }
+        this.homesteadPanel!.add(pipGfxB);
+      }
+      // Level text
+      this.homesteadPanel!.add(this.add.text(textX + b.maxLevel * pipGapH + px(4), pipY - px(4), `Lv.${lv}/${b.maxLevel}`, {
+        fontSize: fs(9), color: maxed ? '#c0934a' : '#666680', fontFamily: FONT,
+      }));
+
+      // Upgrade button (global style: bright green if affordable, grey if not, gold badge if maxed)
+      if (maxed) {
+        const badgeGfx = this.add.graphics();
+        const badgeX = pw - px(48);
+        const badgeY = sy + buildingH / 2;
+        badgeGfx.fillStyle(0xc0934a, 0.15);
+        badgeGfx.fillRoundedRect(badgeX - px(20), badgeY - px(10), px(40), px(20), px(4));
+        badgeGfx.lineStyle(Math.round(1 * DPR), 0xc0934a, 0.4);
+        badgeGfx.strokeRoundedRect(badgeX - px(20), badgeY - px(10), px(40), px(20), px(4));
+        this.homesteadPanel!.add(badgeGfx);
+        this.homesteadPanel!.add(this.add.text(badgeX, badgeY, '已满级', {
+          fontSize: fs(10), color: '#c0934a', fontFamily: FONT, fontStyle: 'bold',
+        }).setOrigin(0.5));
+      } else {
+        const btnW = px(70);
+        const btnH = px(24);
+        const btnX = pw - px(24) - btnW;
+        const btnY = sy + (buildingH - btnH) / 2;
+        const btnGfx = this.add.graphics();
+        const btnColor = canUpgrade ? 0x1a3a1a : 0x1a1a2e;
+        const btnBorder = canUpgrade ? 0x27ae60 : 0x333344;
+        btnGfx.fillStyle(btnColor, 0.9);
+        btnGfx.fillRoundedRect(btnX, btnY, btnW, btnH, px(4));
+        btnGfx.lineStyle(Math.round(1 * DPR), btnBorder, canUpgrade ? 0.8 : 0.4);
+        btnGfx.strokeRoundedRect(btnX, btnY, btnW, btnH, px(4));
+        this.homesteadPanel!.add(btnGfx);
+
+        const btnText = this.add.text(btnX + btnW / 2, btnY + btnH / 2, `升级 ${cost}G`, {
+          fontSize: fs(11), color: canUpgrade ? '#27ae60' : '#555566', fontFamily: FONT,
+        }).setOrigin(0.5);
+        this.homesteadPanel!.add(btnText);
+
         if (canUpgrade) {
-          upBtn.setInteractive({ useHandCursor: true });
-          upBtn.on('pointerdown', () => {
+          const hitArea = this.add.rectangle(btnX + btnW / 2, btnY + btnH / 2, btnW, btnH, 0x000000, 0)
+            .setInteractive({ useHandCursor: true });
+          hitArea.on('pointerover', () => {
+            btnGfx.clear();
+            btnGfx.fillStyle(0x225522, 1);
+            btnGfx.fillRoundedRect(btnX, btnY, btnW, btnH, px(4));
+            btnGfx.lineStyle(Math.round(2 * DPR), 0x44dd44, 1);
+            btnGfx.strokeRoundedRect(btnX, btnY, btnW, btnH, px(4));
+            btnText.setColor('#44dd44');
+          });
+          hitArea.on('pointerout', () => {
+            btnGfx.clear();
+            btnGfx.fillStyle(btnColor, 0.9);
+            btnGfx.fillRoundedRect(btnX, btnY, btnW, btnH, px(4));
+            btnGfx.lineStyle(Math.round(1 * DPR), btnBorder, 0.8);
+            btnGfx.strokeRoundedRect(btnX, btnY, btnW, btnH, px(4));
+            btnText.setColor('#27ae60');
+          });
+          hitArea.on('pointerdown', () => {
             const actualCost = hs.upgrade(b.id);
             this.player.gold -= actualCost;
             this.toggleHomestead(); this.toggleHomestead();
           });
+          this.homesteadPanel!.add(hitArea);
         }
-        this.homesteadPanel!.add(upBtn);
-      } else {
-        this.homesteadPanel!.add(this.add.text(pw - px(14), sy + px(6), '已满级', {
-          fontSize: fs(12), color: '#c0934a', fontFamily: FONT,
-        }).setOrigin(1, 0));
       }
     });
 
-    const petY = px(36) + buildings.length * px(46) + px(10);
-    this.homesteadPanel.add(this.add.text(px(14), petY, '── 宠物 ──', {
-      fontSize: fs(13), color: '#c0934a', fontFamily: FONT,
+    // === Pets Section ===
+    const petSectionY = buildingStartY + buildings.length * (buildingH + buildingGap) + px(8);
+    const divider2 = this.add.graphics();
+    divider2.fillStyle(0xc0934a, 0.3);
+    divider2.fillRect(px(14), petSectionY, pw - px(28), px(1));
+    this.homesteadPanel.add(divider2);
+
+    const petCapacity = 1 + hs.getBuildingLevel('pet_house');
+    this.homesteadPanel.add(this.add.text(px(14), petSectionY + px(4), `── 宠物 (${hs.pets.length}/${petCapacity}) ──`, {
+      fontSize: fs(12), color: '#c0934a', fontFamily: FONT, fontStyle: 'bold',
     }));
+
     const pets = hs.pets;
+    const petStartY = petSectionY + px(22);
+    const petCardH = px(48);
+    const petGap = px(6);
+    const petIconSize = px(34);
+
     if (pets.length === 0) {
-      this.homesteadPanel.add(this.add.text(px(14), petY + px(18), '暂无宠物 (击杀Boss有机会获得)', {
-        fontSize: fs(12), color: '#555', fontFamily: FONT,
-      }));
+      this.homesteadPanel.add(this.add.text(pw / 2, petStartY + px(10), '暂无宠物\n击杀Boss·完成任务·稀有刷新可获得', {
+        fontSize: fs(11), color: '#444458', fontFamily: FONT, align: 'center',
+      }).setOrigin(0.5, 0));
     }
+
     pets.forEach((p, i) => {
       const pd = hs.getAllPets().find(d => d.id === p.petId);
+      if (!pd) return;
       const isActive = hs.activePet === p.petId;
-      this.homesteadPanel!.add(this.add.text(px(14), petY + px(18) + i * px(18), `${pd?.name ?? p.petId} Lv.${p.level} ${isActive ? '[激活]' : ''}`, {
-        fontSize: fs(12), color: isActive ? '#27ae60' : '#888', fontFamily: FONT,
+      const py = petStartY + i * (petCardH + petGap);
+      const rarityColor = UIScene.PET_RARITY_COLORS[pd.rarity] ?? 0x888888;
+
+      // Pet card bg
+      const petCard = this.add.graphics();
+      petCard.fillStyle(isActive ? 0x0e1e0e : 0x0e0e20, 0.7);
+      petCard.fillRoundedRect(px(10), py, pw - px(20), petCardH, px(4));
+      petCard.lineStyle(Math.round(1.5 * DPR), isActive ? 0x27ae60 : rarityColor, isActive ? 0.7 : 0.3);
+      petCard.strokeRoundedRect(px(10), py, pw - px(20), petCardH, px(4));
+      // Active highlight glow
+      if (isActive) {
+        petCard.lineStyle(Math.round(1 * DPR), 0x27ae60, 0.1);
+        petCard.strokeRoundedRect(px(8), py - px(2), pw - px(16), petCardH + px(4), px(5));
+      }
+      this.homesteadPanel!.add(petCard);
+
+      // Pet icon area with rarity-colored border
+      const petIconX = px(16);
+      const petIconY = py + (petCardH - petIconSize) / 2;
+      const petIconGfx = this.add.graphics();
+      petIconGfx.fillStyle(0x0a0a18, 0.9);
+      petIconGfx.fillRoundedRect(petIconX, petIconY, petIconSize, petIconSize, px(4));
+      petIconGfx.lineStyle(Math.round(1.5 * DPR), rarityColor, 0.7);
+      petIconGfx.strokeRoundedRect(petIconX, petIconY, petIconSize, petIconSize, px(4));
+      // Simple procedural pet icon based on petId
+      const pcx = petIconX + petIconSize / 2;
+      const pcy = petIconY + petIconSize / 2;
+      petIconGfx.fillStyle(rarityColor, 0.5);
+      // Body
+      petIconGfx.fillCircle(pcx, pcy + petIconSize * 0.05, petIconSize * 0.25);
+      // Head
+      petIconGfx.fillCircle(pcx, pcy - petIconSize * 0.15, petIconSize * 0.18);
+      // Eyes
+      petIconGfx.fillStyle(0xffffff, 0.8);
+      petIconGfx.fillCircle(pcx - petIconSize * 0.06, pcy - petIconSize * 0.18, petIconSize * 0.04);
+      petIconGfx.fillCircle(pcx + petIconSize * 0.06, pcy - petIconSize * 0.18, petIconSize * 0.04);
+      this.homesteadPanel!.add(petIconGfx);
+
+      // Pet name + evolution suffix
+      const evolvedStages = hs.getEvolutionStages();
+      let displayName = pd.name;
+      if (p.evolved > 0 && evolvedStages[p.evolved - 1]) {
+        displayName += evolvedStages[p.evolved - 1].nameSuffix;
+      }
+      const rarityHex = '#' + rarityColor.toString(16).padStart(6, '0');
+
+      const petTextX = petIconX + petIconSize + px(8);
+      this.homesteadPanel!.add(this.add.text(petTextX, py + px(5), displayName, {
+        fontSize: fs(12), color: isActive ? '#44dd88' : rarityHex, fontFamily: FONT, fontStyle: 'bold',
       }));
+
+      // Bonus stat label
+      const statLabel = UIScene.PET_STAT_LABELS[pd.bonusStat] ?? pd.bonusStat;
+      const currentBonus = pd.bonusValue + pd.bonusPerLevel * p.level;
+      this.homesteadPanel!.add(this.add.text(petTextX, py + px(19), `${statLabel} +${currentBonus.toFixed(1)}`, {
+        fontSize: fs(9), color: '#888899', fontFamily: FONT,
+      }));
+
+      // Exp bar
+      const expBarX = petTextX;
+      const expBarY = py + px(33);
+      const expBarW = px(100);
+      const expBarH = px(5);
+      const expThreshold = p.level * 20;
+      const expRatio = expThreshold > 0 ? Math.min(1, p.exp / expThreshold) : 1;
+      const expBarGfx = this.add.graphics();
+      expBarGfx.fillStyle(0x1a1a2e, 1);
+      expBarGfx.fillRoundedRect(expBarX, expBarY, expBarW, expBarH, px(2));
+      if (expRatio > 0) {
+        expBarGfx.fillStyle(isActive ? 0x27ae60 : rarityColor, 0.7);
+        expBarGfx.fillRoundedRect(expBarX, expBarY, Math.round(expBarW * expRatio), expBarH, px(2));
+      }
+      expBarGfx.lineStyle(Math.round(0.5 * DPR), 0x333344, 0.5);
+      expBarGfx.strokeRoundedRect(expBarX, expBarY, expBarW, expBarH, px(2));
+      this.homesteadPanel!.add(expBarGfx);
+
+      // Level text
+      const isMaxLevel = p.level >= pd.maxLevel;
+      this.homesteadPanel!.add(this.add.text(expBarX + expBarW + px(4), expBarY - px(2), isMaxLevel ? `Lv.${p.level} MAX` : `Lv.${p.level} (${p.exp}/${expThreshold})`, {
+        fontSize: fs(8), color: isMaxLevel ? '#c0934a' : '#555566', fontFamily: FONT,
+      }));
+
+      // Active indicator badge
+      if (isActive) {
+        this.homesteadPanel!.add(this.add.text(pw - px(30), py + petCardH / 2, '✦', {
+          fontSize: fs(14), color: '#27ae60', fontFamily: FONT,
+        }).setOrigin(0.5));
+      }
     });
+
+    // Footer
+    this.homesteadPanel.add(this.add.text(pw / 2, ph - px(14), '按 H 关闭  ·  建筑提供家园加成', {
+      fontSize: fs(10), color: '#3a3a4a', fontFamily: FONT,
+    }).setOrigin(0.5));
   }
 
   // --- Minimap ---
@@ -3795,7 +4353,10 @@ export class UIScene extends Phaser.Scene {
     if (this.inventoryPanel) { this.inventoryPanel.destroy(); this.inventoryPanel = null; }
     if (this.shopPanel) { this.shopPanel.destroy(); this.shopPanel = null; }
     if (this.mapPanel) { this.mapPanel.destroy(); this.mapPanel = null; }
-    if (this.skillPanel) { this.skillPanel.destroy(); this.skillPanel = null; }
+    if (this.skillPanel) {
+      if (this.skillTreeWheelHandler) { this.input.off('wheel', this.skillTreeWheelHandler); this.skillTreeWheelHandler = null; }
+      this.skillPanel.destroy(); this.skillPanel = null;
+    }
     if (this.skillTooltip) { this.skillTooltip.destroy(); this.skillTooltip = null; }
     if (this.charPanel) { this.charPanel.destroy(); this.charPanel = null; }
     if (this.homesteadPanel) { this.homesteadPanel.destroy(); this.homesteadPanel = null; }
