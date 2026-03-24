@@ -39,5 +39,9 @@ export const ScorchingDesertMap: MapData = {
     { col: 0, row: 58, targetMap: 'anvil_mountains', targetCol: 118, targetRow: 118 },
     { col: 119, row: 119, targetMap: 'abyss_rift', targetCol: 2, targetRow: 58 },
   ],
+  petSpawns: [
+    { col: 55, row: 50, petId: 'pet_void_butterfly', chance: 0.08 },
+    { col: 100, row: 30, petId: 'pet_void_butterfly', chance: 0.08 },
+  ],
   levelRange: [28, 37] as [number, number],
 };

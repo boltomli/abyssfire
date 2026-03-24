@@ -222,6 +222,7 @@ export interface MapData {
   seed?: number;
   decorations?: { col: number; row: number; type: string }[];
   safeZoneRadius?: number;
+  petSpawns?: { col: number; row: number; petId: string; chance: number }[];
 }
 
 export interface CampTheme {

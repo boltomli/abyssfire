@@ -107,6 +107,7 @@ export class ZoneScene extends Phaser.Scene {
   private petNameLabel: Phaser.GameObjects.Text | null = null;
   private petTileCol = 0;
   private petTileRow = 0;
+  private petSpawnSprites: { sprite: Phaser.GameObjects.Container; col: number; row: number; petId: string }[] = [];
   private inCombat = false;
   private isTransitioning = false;
   private isPortaling = false;
@@ -204,6 +205,7 @@ export class ZoneScene extends Phaser.Scene {
 
     this.spawnMonsters();
     this.spawnNPCs();
+    this.spawnRarePets();
     this.spawnMercenarySprite();
     this.spawnPetSprite();
     this.buildCampDecorations();
@@ -561,6 +563,7 @@ export class ZoneScene extends Phaser.Scene {
     }
 
     this.checkExitProximity();
+    this.checkRarePetPickup();
 
     // Throttled viewport tile update
     if (time - this.lastTileUpdate > 100) {
@@ -2240,6 +2243,95 @@ export class ZoneScene extends Phaser.Scene {
     }
   }
 
+  /** Spawn rare pet encounter points defined in map data. Each has a low probability
+   *  of appearing; when present, a glowing visual indicator is rendered on the tile.
+   *  Walking near the indicator auto-captures the pet. */
+  private spawnRarePets(): void {
+    // Destroy any leftover sprites from a previous zone
+    for (const ps of this.petSpawnSprites) {
+      ps.sprite.destroy();
+    }
+    this.petSpawnSprites = [];
+    if (!this.mapData.petSpawns) return;
+
+    for (const spawn of this.mapData.petSpawns) {
+      // Low probability roll: skip if not spawned this session
+      if (Math.random() >= spawn.chance) continue;
+      // Already own this pet? skip
+      if (this.homesteadSystem.pets.some(p => p.petId === spawn.petId)) continue;
+
+      const { x: worldX, y: worldY } = cartToIso(spawn.col, spawn.row);
+      const container = this.add.container(worldX, worldY);
+      container.setDepth(worldY + 100);
+
+      // Glow circle indicator
+      const glow = this.add.ellipse(0, 0, 28 * DPR, 14 * DPR, 0xaa44ff, 0.5);
+      container.add(glow);
+
+      // Pulsing butterfly icon (small colored rectangle as a procedural sprite)
+      const wing = this.add.rectangle(0, -10 * DPR, 12 * DPR, 8 * DPR, 0xcc66ff);
+      container.add(wing);
+
+      // Floating label
+      const label = this.add.text(0, -22 * DPR, '✦ 虚空蝶', {
+        fontFamily: 'serif',
+        fontSize: fs(10),
+        color: '#cc88ff',
+        stroke: '#000000',
+        strokeThickness: 2 * DPR,
+      }).setOrigin(0.5, 1);
+      container.add(label);
+
+      // Pulsing animation on the glow
+      this.tweens.add({
+        targets: glow,
+        alpha: { from: 0.3, to: 0.7 },
+        scaleX: { from: 0.9, to: 1.1 },
+        scaleY: { from: 0.9, to: 1.1 },
+        duration: 1200,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+      // Gentle float on the wing
+      this.tweens.add({
+        targets: wing,
+        y: -14 * DPR,
+        duration: 800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+
+      this.petSpawnSprites.push({ sprite: container, col: spawn.col, row: spawn.row, petId: spawn.petId });
+    }
+  }
+
+  /** Check if the player is close enough to a rare pet spawn to capture it. */
+  private checkRarePetPickup(): void {
+    for (let i = this.petSpawnSprites.length - 1; i >= 0; i--) {
+      const ps = this.petSpawnSprites[i];
+      const dist = euclideanDistance(this.player.tileCol, this.player.tileRow, ps.col, ps.row);
+      if (dist <= 2) {
+        const success = this.homesteadSystem.addPet(ps.petId);
+        if (success) {
+          EventBus.emit(GameEvents.LOG_MESSAGE, {
+            text: `发现了稀有宠物: 虚空蝶! 已收入宠物小屋。`,
+            type: 'system',
+          });
+        }
+        // Fade-out and destroy the spawn sprite
+        this.tweens.add({
+          targets: ps.sprite,
+          alpha: 0,
+          duration: 400,
+          onComplete: () => { ps.sprite.destroy(); },
+        });
+        this.petSpawnSprites.splice(i, 1);
+      }
+    }
+  }
+
   private respawnMonster(dead: Monster): void {
     const idx = this.monsters.indexOf(dead);
     if (idx === -1) return;
@@ -3320,6 +3412,11 @@ export class ZoneScene extends Phaser.Scene {
     this.isPortaling = false;
     this.destroyMercenarySprite();
     this.destroyPetSprite();
+    // Clean up rare pet spawn sprites
+    for (const ps of this.petSpawnSprites) {
+      ps.sprite.destroy();
+    }
+    this.petSpawnSprites = [];
     this.input.off('pointerdown', this.handlePointerDown, this);
     EventBus.off(GameEvents.PLAYER_DIED, this.handlePlayerDied, this);
     EventBus.off(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp, this);

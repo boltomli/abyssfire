@@ -1,7 +1,8 @@
 import { EventBus, GameEvents } from '../utils/EventBus';
-import type { Stats, MercenaryType, MercenaryDefinition, MercenarySaveData, ItemInstance } from '../data/types';
+import type { Stats, MercenaryType, MercenaryDefinition, MercenarySaveData, ItemInstance, WeaponBase } from '../data/types';
 import type { CombatEntity, ActiveBuff, EquipStats } from './CombatSystem';
 import { emptyEquipStats } from './CombatSystem';
+import { getItemBase } from '../data/items/bases';
 
 /** Local euclidean distance to avoid importing IsometricUtils (which depends on Phaser config). */
 function euclideanDistance(x1: number, y1: number, x2: number, y2: number): number {
@@ -344,17 +345,19 @@ export class MercenarySystem {
   canEquipWeapon(item: ItemInstance): boolean {
     if (!this.activeMercenary) return false;
     const def = MERCENARY_DEFS[this.activeMercenary.type];
-    // weaponType is stored as a string on the item base, not in numeric stats
-    const base = item as any;
-    if (base.weaponType) {
-      return def.allowedWeaponTypes.includes(base.weaponType);
+    const base = getItemBase(item.baseId);
+    if (!base || base.type !== 'weapon') return false;
+    const weaponBase = base as WeaponBase;
+    if (weaponBase.weaponType) {
+      return def.allowedWeaponTypes.includes(weaponBase.weaponType);
     }
-    return base.type === 'weapon';
+    return true;
   }
 
   canEquipArmor(item: ItemInstance): boolean {
     if (!this.activeMercenary) return false;
-    if ((item as any).type !== 'armor') return false;
+    const base = getItemBase(item.baseId);
+    if (!base || base.type !== 'armor') return false;
     return true;
   }
 

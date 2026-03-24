@@ -40,5 +40,9 @@ export const TwilightForestMap: MapData = {
     { col: 0, row: 58, targetMap: 'emerald_plains', targetCol: 118, targetRow: 60 },
     { col: 119, row: 119, targetMap: 'anvil_mountains', targetCol: 2, targetRow: 58 },
   ],
+  petSpawns: [
+    { col: 70, row: 35, petId: 'pet_void_butterfly', chance: 0.08 },
+    { col: 45, row: 100, petId: 'pet_void_butterfly', chance: 0.08 },
+  ],
   levelRange: [8, 17] as [number, number],
 };
