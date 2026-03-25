@@ -21,10 +21,10 @@ const BUILDINGS: HomesteadBuilding[] = [
     bonusPerLevel: [{ stat: 'gemBonus', value: 2 }],
   },
   {
-    id: 'pet_house', name: '宠物小屋', description: '饲养宠物，等级决定宠物容量',
+    id: 'pet_house', name: '宠物小屋', description: '饲养宠物，提升宠物经验加成',
     maxLevel: 5,
     costPerLevel: [{ gold: 300 }, { gold: 600 }, { gold: 1200 }, { gold: 2000 }, { gold: 3500 }],
-    bonusPerLevel: [{ stat: 'petSlots', value: 1 }],
+    bonusPerLevel: [{ stat: 'petExpBonus', value: 10 }],
   },
   {
     id: 'warehouse', name: '仓库', description: '扩展存储空间',
@@ -119,9 +119,14 @@ export class HomesteadSystem {
     return this.buildings[id] ?? 0;
   }
 
-  /** Pet capacity = 1 + pet_house level. */
+  /** Pet EXP bonus from pet_house level (10% per level). */
+  getPetExpBonus(): number {
+    return 1 + (this.buildings['pet_house'] ?? 0) * 0.1;
+  }
+
+  /** @deprecated No capacity limit — returns Infinity for backwards compatibility. */
   getMaxPetSlots(): number {
-    return 1 + (this.buildings['pet_house'] ?? 0);
+    return Infinity;
   }
 
   /** Training ground mercenary exp bonus (percentage). */
@@ -200,11 +205,6 @@ export class HomesteadSystem {
       EventBus.emit(GameEvents.LOG_MESSAGE, { text: '你已经拥有这只宠物了!', type: 'system' });
       return false;
     }
-    const maxSlots = this.getMaxPetSlots();
-    if (this.pets.length >= maxSlots) {
-      EventBus.emit(GameEvents.LOG_MESSAGE, { text: '宠物小屋已满!', type: 'system' });
-      return false;
-    }
     this.pets.push({ petId, level: 1, exp: 0, evolved: 0 });
     const def = PETS.find(p => p.id === petId);
     EventBus.emit(GameEvents.LOG_MESSAGE, {
@@ -220,7 +220,8 @@ export class HomesteadSystem {
     if (!pet) return false;
     const def = PETS.find(p => p.id === petId);
     if (!def || pet.level >= def.maxLevel) return false;
-    pet.exp += 10;
+    const baseExp = 10;
+    pet.exp += Math.floor(baseExp * this.getPetExpBonus());
     const needed = pet.level * 20;
     if (pet.exp >= needed) {
       pet.exp -= needed;

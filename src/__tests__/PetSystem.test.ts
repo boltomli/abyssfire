@@ -111,33 +111,30 @@ describe('PetSystem', () => {
       expect(hs.pets.length).toBe(1);
     });
 
-    it('blocks when capacity is full (default 1 slot)', () => {
+    it('blocks duplicate pets', () => {
       hs.addPet('pet_sprite');
-      const result = hs.addPet('pet_dragon');
+      const result = hs.addPet('pet_sprite');
       expect(result).toBe(false);
       expect(hs.pets.length).toBe(1);
     });
 
-    it('allows more pets when pet_house is upgraded', () => {
-      hs.buildings['pet_house'] = 2;
-      expect(hs.getMaxPetSlots()).toBe(3);
-      hs.addPet('pet_sprite');
-      hs.addPet('pet_dragon');
-      hs.addPet('pet_owl');
-      expect(hs.pets.length).toBe(3);
-      // Now full — should reject
-      const result = hs.addPet('pet_cat');
-      expect(result).toBe(false);
+    it('allows all 8 unique pets without capacity limit', () => {
+      const allPetIds = hs.getAllPets().map(p => p.id);
+      expect(allPetIds.length).toBe(8);
+      for (const id of allPetIds) {
+        expect(hs.addPet(id)).toBe(true);
+      }
+      expect(hs.pets.length).toBe(8);
     });
 
-    it('pet capacity = 1 + pet_house level', () => {
-      expect(hs.getMaxPetSlots()).toBe(1);
+    it('pet_house provides pet EXP bonus instead of capacity', () => {
+      expect(hs.getPetExpBonus()).toBe(1); // no pet_house
       hs.buildings['pet_house'] = 1;
-      expect(hs.getMaxPetSlots()).toBe(2);
+      expect(hs.getPetExpBonus()).toBeCloseTo(1.1);
       hs.buildings['pet_house'] = 3;
-      expect(hs.getMaxPetSlots()).toBe(4);
+      expect(hs.getPetExpBonus()).toBeCloseTo(1.3);
       hs.buildings['pet_house'] = 5;
-      expect(hs.getMaxPetSlots()).toBe(6);
+      expect(hs.getPetExpBonus()).toBeCloseTo(1.5);
     });
   });
 
@@ -145,7 +142,6 @@ describe('PetSystem', () => {
 
   describe('Feeding and Leveling', () => {
     beforeEach(() => {
-      hs.buildings['pet_house'] = 5; // enough slots
       hs.addPet('pet_sprite');
     });
 
@@ -192,14 +188,13 @@ describe('PetSystem', () => {
 
   describe('Evolution', () => {
     beforeEach(() => {
-      hs.buildings['pet_house'] = 5;
       hs.addPet('pet_sprite');
     });
 
     it('pet evolves at level 10 (stage 1: 觉醒)', () => {
       hs.pets[0].level = 9;
-      hs.pets[0].exp = 9 * 20 - 10; // near level up
-      hs.feedPet('pet_sprite');
+      hs.pets[0].exp = 9 * 20 - 10; // near level up (need 180, have 170)
+      hs.feedPet('pet_sprite'); // +10 => 180 => level up to 10
       expect(hs.pets[0].level).toBe(10);
       expect(hs.pets[0].evolved).toBe(1);
     });
@@ -255,7 +250,6 @@ describe('PetSystem', () => {
 
   describe('Active Pet Bonuses', () => {
     beforeEach(() => {
-      hs.buildings['pet_house'] = 5;
       hs.addPet('pet_sprite');
     });
 
@@ -289,7 +283,6 @@ describe('PetSystem', () => {
 
   describe('Pet Combat Damage', () => {
     beforeEach(() => {
-      hs.buildings['pet_house'] = 5;
       hs.addPet('pet_sprite');
       hs.activePet = 'pet_sprite';
     });
@@ -345,10 +338,10 @@ describe('PetSystem', () => {
   // ═══ Homestead Integration ═════════════════════════════════════════
 
   describe('Homestead Integration', () => {
-    it('pet_house building affects capacity', () => {
-      expect(hs.getMaxPetSlots()).toBe(1);
+    it('pet_house building provides pet EXP bonus', () => {
+      expect(hs.getPetExpBonus()).toBe(1);
       hs.buildings['pet_house'] = 3;
-      expect(hs.getMaxPetSlots()).toBe(4);
+      expect(hs.getPetExpBonus()).toBeCloseTo(1.3);
     });
 
     it('training_ground provides mercenary exp bonus', () => {
@@ -405,7 +398,7 @@ describe('PetSystem', () => {
       expect(hs2.pets[0].level).toBe(10);
       expect(hs2.pets[0].evolved).toBe(1);
       expect(hs2.activePet).toBe('pet_dragon');
-      expect(hs2.getMaxPetSlots()).toBe(4);
+      expect(hs2.getPetExpBonus()).toBeCloseTo(1.3); // pet_house level 3
     });
 
     it('old saves without evolved field default to 0', () => {
@@ -441,7 +434,7 @@ describe('PetSystem', () => {
       const fresh = new HomesteadSystem();
       expect(fresh.pets).toEqual([]);
       expect(fresh.activePet).toBeNull();
-      expect(fresh.getMaxPetSlots()).toBe(1);
+      expect(fresh.getPetExpBonus()).toBe(1);
     });
   });
 
@@ -462,7 +455,6 @@ describe('PetSystem', () => {
     });
 
     it('calculating damage with 0 player damage returns 0', () => {
-      hs.buildings['pet_house'] = 5;
       hs.addPet('pet_sprite');
       hs.activePet = 'pet_sprite';
       // With 0 base damage but minimum 1
@@ -471,7 +463,6 @@ describe('PetSystem', () => {
     });
 
     it('multiple pets with different activation', () => {
-      hs.buildings['pet_house'] = 5;
       hs.addPet('pet_sprite');
       hs.addPet('pet_dragon');
       hs.addPet('pet_owl');
@@ -483,7 +474,6 @@ describe('PetSystem', () => {
     });
 
     it('feedPet at level 19 levels up and evolves to 20 (dual evolution)', () => {
-      hs.buildings['pet_house'] = 5;
       hs.addPet('pet_sprite');
       hs.pets[0].level = 9;
       hs.pets[0].exp = 9 * 20 - 10; // Will level up to 10 on feed

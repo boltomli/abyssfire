@@ -933,9 +933,9 @@ describe('VAL-CROSS-010: Homestead building effects propagate to all dependent s
     expect(bonuses['gemBonus']).toBe(8); // 4 * 2
   });
 
-  it('pet house determines max pet slots', () => {
+  it('pet house provides pet EXP bonus', () => {
     hs.buildings = { pet_house: 3 };
-    expect(hs.getMaxPetSlots()).toBe(4); // 1 + 3
+    expect(hs.getPetExpBonus()).toBeCloseTo(1.3); // 1 + 3*0.1
   });
 
   it('warehouse provides stash slots', () => {

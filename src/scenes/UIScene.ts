@@ -1851,7 +1851,7 @@ export class UIScene extends Phaser.Scene {
     this.homesteadPanel.add(divider2);
 
     const petCapacity = 1 + hs.getBuildingLevel('pet_house');
-    this.homesteadPanel.add(this.add.text(px(14), petSectionY + px(4), `── 宠物 (${hs.pets.length}/${petCapacity}) ──`, {
+    this.homesteadPanel.add(this.add.text(px(14), petSectionY + px(4), `── 宠物 (${hs.pets.length} 只) ──`, {
       fontSize: fs(12), color: '#c0934a', fontFamily: FONT, fontStyle: 'bold',
     }));
 
@@ -3565,7 +3565,7 @@ export class UIScene extends Phaser.Scene {
     const petStartY = px(82);
     const maxSlots = hs.getMaxPetSlots();
 
-    this.companionPanel.add(this.add.text(px(14), petStartY, `─ 宠物 (${hs.pets.length}/${maxSlots}) ─`, {
+    this.companionPanel.add(this.add.text(px(14), petStartY, `─ 宠物 (${hs.pets.length} 只) ─`, {
       fontSize: fs(13), color: '#c0934a', fontFamily: FONT,
     }));
 
