@@ -22,8 +22,6 @@ export const CrystalDrawer: EntityDrawer = {
     ctx.fillStyle = baseGlow;
     utils.fillEllipse(ctx, cx, h * 0.85, 5 * s, 2 * s);
 
-    // Soft outline glow (purple — crystal)
-    utils.softOutline(ctx, 'rgba(140,80,220,0.2)', 5);
 
     // Define crystal polygon facets
     const tip = { x: cx, y: h * 0.04 };
@@ -83,8 +81,6 @@ export const CrystalDrawer: EntityDrawer = {
     ctx.closePath();
     ctx.fill();
 
-    // End soft outline
-    utils.softOutlineEnd(ctx);
 
     // Facet edge lines (transparent outer strokes at low alpha)
     ctx.strokeStyle = 'rgba(180,120,255,0.25)';

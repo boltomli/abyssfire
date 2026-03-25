@@ -33,6 +33,13 @@ export interface EquipStats {
   expBonus: number;
   cooldownReduction: number;
   knockback: number;
+  // Primary stat bonuses (from gems, affixes)
+  str: number;
+  dex: number;
+  int: number;
+  vit: number;
+  spi: number;
+  lck: number;
   // Special effects (from set bonuses / legendaries)
   killHealPercent: number;
   deathSave: number;
@@ -58,6 +65,7 @@ export function emptyEquipStats(): EquipStats {
     fireDamage: 0, iceDamage: 0, lightningDamage: 0, poisonDamage: 0,
     fireResist: 0, iceResist: 0, lightningResist: 0, poisonResist: 0, allResist: 0,
     moveSpeed: 0, magicFind: 0, expBonus: 0, cooldownReduction: 0, knockback: 0,
+    str: 0, dex: 0, int: 0, vit: 0, spi: 0, lck: 0,
     killHealPercent: 0, deathSave: 0, critDoubleStrike: 0, doubleShot: 0,
     freeCast: 0, elementalDamagePercent: 0, ignoreDefense: 0, damageReduction: 0,
     thornsHeal: 0, dodgeCounter: 0,
@@ -86,6 +94,8 @@ export interface ActiveBuff {
   value: number;
   duration: number;
   startTime: number;
+  /** Optional tag for identifying special buff sources (e.g. 'curseAura'). */
+  tag?: string;
 }
 
 export interface DamageResult {
@@ -95,7 +105,20 @@ export interface DamageResult {
   damageType: 'physical' | 'fire' | 'ice' | 'lightning' | 'poison' | 'arcane';
   lifeStolen: number;
   manaStolen: number;
+  /** Damage redirected to mana by Mana Shield (caller should deduct from entity mana). */
+  manaDamage?: number;
 }
+
+/** Buff stacking caps. Values are the max total for additive stacking. */
+export const BUFF_CAPS: Record<string, number> = {
+  damageReduction: 0.9,   // 90% max damage reduction
+  defenseBonus: 2.0,       // 200% max defense bonus
+  damageBonus: 3.0,        // 300% max damage bonus
+  attackSpeed: 1.0,        // 100% max attack speed buff
+  poisonDamage: 5.0,       // 500% max poison bonus
+  stealthDamage: 5.0,      // 500% max stealth bonus
+  manaShield: 0.9,         // 90% max mana shield conversion
+};
 
 /**
  * D2-style tiered scaling: early levels give more value per point.
@@ -182,6 +205,24 @@ function getResistance(eq: EquipStats | undefined, dmgType: string): number {
   return clamp(res, 0, 75);
 }
 
+/**
+ * Get the aggregated value of a specific buff stat from an entity's active buffs,
+ * capped by the stacking limit defined in BUFF_CAPS.
+ */
+export function getBuffValue(entity: CombatEntity, stat: string): number {
+  let total = 0;
+  for (const buff of entity.buffs) {
+    if (buff.stat === stat) {
+      total += buff.value;
+    }
+  }
+  const cap = BUFF_CAPS[stat];
+  if (cap !== undefined) {
+    total = Math.min(total, cap);
+  }
+  return total;
+}
+
 export class CombatSystem {
   calculateDamage(
     attacker: CombatEntity,
@@ -189,27 +230,31 @@ export class CombatSystem {
     skill?: SkillDefinition,
     skillLevel = 1,
     skillLevels?: Map<string, number>,
+    forceCrit = false,
   ): DamageResult {
     const atkEq = attacker.equipStats;
     const defEq = defender.equipStats;
 
-    // Dodge check
-    const dodgeRate = clamp(defender.stats.dex * 0.3, 0, 30);
+    // Dodge check — include DEX from equipment/gems for effective dodge rate
+    const eqDex = defEq?.dex ?? 0;
+    const dodgeRate = clamp((defender.stats.dex + eqDex) * 0.3, 0, 30);
     if (chance(dodgeRate)) {
       return { damage: 0, isCrit: false, isDodged: true, damageType: 'physical', lifeStolen: 0, manaStolen: 0 };
     }
 
-    // Crit check
+    // Crit check — include DEX and LCK from equipment/gems for effective crit rate
     const skillCritBonus = skill?.critBonus ?? 0;
     const eqCritRate = atkEq?.critRate ?? 0;
+    const eqAtkDex = atkEq?.dex ?? 0;
+    const eqAtkLck = atkEq?.lck ?? 0;
     const critRate = clamp(
-      attacker.stats.dex * 0.2 + attacker.stats.lck * 0.5 + skillCritBonus + eqCritRate,
+      (attacker.stats.dex + eqAtkDex) * 0.2 + (attacker.stats.lck + eqAtkLck) * 0.5 + skillCritBonus + eqCritRate,
       0,
       75,
     );
-    const isCrit = chance(critRate);
+    const isCrit = forceCrit || chance(critRate);
     const eqCritDmg = atkEq?.critDamage ?? 0;
-    const critMultiplier = isCrit ? 1.5 + attacker.stats.lck * 0.01 + eqCritDmg / 100 : 1;
+    const critMultiplier = isCrit ? 1.5 + (attacker.stats.lck + eqAtkLck) * 0.01 + eqCritDmg / 100 : 1;
 
     const damageType = skill?.damageType ?? 'physical';
     let baseDmg: number;
@@ -246,22 +291,38 @@ export class CombatSystem {
       }
     }
 
-    // Damage reduction from buffs
-    let damageReduction = 0;
-    for (const buff of defender.buffs) {
-      if (buff.stat === 'damageReduction') {
-        damageReduction += buff.value;
-      }
+    // --- Buff: poisonDamage adds bonus poison flat damage ---
+    const poisonBuff = getBuffValue(attacker, 'poisonDamage');
+    if (poisonBuff > 0) {
+      elementalFlat += attacker.baseDamage * poisonBuff;
     }
+
+    // --- Buff: stealthDamage multiplies total damage (consumed on use) ---
+    const stealthBuff = getBuffValue(attacker, 'stealthDamage');
+
+    // --- Buff: damageBonus multiplies total damage ---
+    const damageBonusBuff = getBuffValue(attacker, 'damageBonus');
+
+    // Damage reduction from buffs (damageReduction stat)
+    let damageReduction = getBuffValue(defender, 'damageReduction');
     // Permanent damage reduction from gear
     if (defEq && defEq.damageReduction > 0) {
       damageReduction += defEq.damageReduction / 100;
     }
+    // Cap total damage reduction
+    damageReduction = Math.min(damageReduction, BUFF_CAPS.damageReduction);
+
+    // --- Buff: defenseBonus increases effective defense ---
+    const defenseBonusBuff = getBuffValue(defender, 'defenseBonus');
 
     // Defense with percent bonus
     let effectiveDefense = defender.defense;
     if (defEq && defEq.defense > 0) effectiveDefense += defEq.defense;
     if (defEq && defEq.defensePercent > 0) effectiveDefense *= 1 + defEq.defensePercent / 100;
+    // Apply defenseBonus buff (multiplicative on effective defense)
+    if (defenseBonusBuff > 0) {
+      effectiveDefense *= 1 + defenseBonusBuff;
+    }
 
     // Ignore defense from attacker gear
     const ignoreDefPct = atkEq?.ignoreDefense ?? 0;
@@ -273,13 +334,39 @@ export class CombatSystem {
     const afterDef = Math.max(1, rawDamage - effectiveDefense * 0.5);
     let finalDamage = afterDef * (1 - damageReduction);
 
-    // Elemental resistance reduces non-physical damage
-    if (damageType !== 'physical') {
+    // Apply damageBonus buff
+    if (damageBonusBuff > 0) {
+      finalDamage *= 1 + damageBonusBuff;
+    }
+
+    // Apply stealthDamage buff (consumed on use — caller should remove the buff after attack)
+    if (stealthBuff > 0) {
+      finalDamage *= 1 + stealthBuff;
+    }
+
+    // --- Buff: damageAmplify on defender increases damage taken ---
+    const damageAmplify = getBuffValue(defender, 'damageAmplify');
+    if (damageAmplify > 0) {
+      finalDamage *= 1 + damageAmplify;
+    }
+
+    // Elemental resistance reduces elemental damage only — physical/undefined are never reduced
+    if (damageType && damageType !== 'physical') {
       const resist = getResistance(defEq, damageType);
       finalDamage *= 1 - resist / 100;
     }
 
     finalDamage = Math.max(1, Math.floor(finalDamage));
+
+    // --- Mana Shield: redirect portion of damage to mana ---
+    let manaDamage: number | undefined;
+    const manaShieldValue = getBuffValue(defender, 'manaShield');
+    if (manaShieldValue > 0 && defender.mana > 0) {
+      const redirected = Math.floor(finalDamage * manaShieldValue);
+      const actualManaAbsorb = Math.min(redirected, defender.mana);
+      finalDamage = Math.max(1, finalDamage - actualManaAbsorb);
+      manaDamage = actualManaAbsorb;
+    }
 
     // Life steal / mana steal
     const lifeStealPct = atkEq?.lifeSteal ?? 0;
@@ -287,7 +374,7 @@ export class CombatSystem {
     const lifeStolen = lifeStealPct > 0 ? Math.floor(finalDamage * lifeStealPct / 100) : 0;
     const manaStolen = manaStealPct > 0 ? Math.floor(finalDamage * manaStealPct / 100) : 0;
 
-    return { damage: finalDamage, isCrit, isDodged: false, damageType, lifeStolen, manaStolen };
+    return { damage: finalDamage, isCrit, isDodged: false, damageType, lifeStolen, manaStolen, manaDamage };
   }
 
   applyDamage(target: CombatEntity, result: DamageResult): void {
@@ -299,6 +386,11 @@ export class CombatSystem {
         isCrit: false,
       });
       return;
+    }
+
+    // Deduct mana if Mana Shield redirected damage
+    if (result.manaDamage && result.manaDamage > 0) {
+      target.mana = Math.max(0, target.mana - result.manaDamage);
     }
 
     target.hp = Math.max(0, target.hp - result.damage);
@@ -328,5 +420,72 @@ export class CombatSystem {
 
   addBuff(entity: CombatEntity, buff: ActiveBuff): void {
     entity.buffs.push(buff);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Set bonus / legendary proc helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Check critDoubleStrike proc: on crit, X% chance for immediate extra attack.
+   * @param critDoubleStrikePercent - chance percentage (e.g. 25 for 25%)
+   * @param isCrit - whether the triggering attack was a crit
+   * @param rng - random number [0,1) for deterministic testing (defaults to Math.random)
+   * @returns true if the extra attack should trigger
+   */
+  checkCritDoubleStrike(critDoubleStrikePercent: number, isCrit: boolean, rng = Math.random()): boolean {
+    if (!isCrit || critDoubleStrikePercent <= 0) return false;
+    return rng * 100 < critDoubleStrikePercent;
+  }
+
+  /**
+   * Check doubleShot proc: X% chance to fire double projectile on ranged auto-attack.
+   * @param doubleShotPercent - chance percentage (e.g. 30 for 30%)
+   * @param attackRange - the attacker's attack range (must be ranged, > 2)
+   * @param rng - random number [0,1) for deterministic testing (defaults to Math.random)
+   * @returns true if double shot should trigger
+   */
+  checkDoubleShot(doubleShotPercent: number, attackRange: number, rng = Math.random()): boolean {
+    if (doubleShotPercent <= 0 || attackRange <= 2) return false;
+    return rng * 100 < doubleShotPercent;
+  }
+
+  /**
+   * Check freeCast proc: X% chance to not consume mana when casting a skill.
+   * @param freeCastPercent - chance percentage (e.g. 15 for 15%)
+   * @param rng - random number [0,1) for deterministic testing (defaults to Math.random)
+   * @returns true if mana should not be consumed
+   */
+  checkFreeCast(freeCastPercent: number, rng = Math.random()): boolean {
+    if (freeCastPercent <= 0) return false;
+    return rng * 100 < freeCastPercent;
+  }
+
+  /**
+   * Check deathSave proc: prevent lethal damage once (60s CD).
+   * Returns true if death should be prevented.
+   * @param deathSaveValue - the deathSave stat value (> 0 means active)
+   * @param alreadyUsed - whether it was already used within cooldown
+   */
+  checkDeathSave(deathSaveValue: number, alreadyUsed: boolean): boolean {
+    return deathSaveValue > 0 && !alreadyUsed;
+  }
+
+  /**
+   * Calculate killHealPercent healing on kill.
+   * @returns heal amount
+   */
+  calcKillHeal(killHealPercent: number, maxHp: number): number {
+    if (killHealPercent <= 0) return 0;
+    return Math.floor(maxHp * killHealPercent / 100);
+  }
+
+  /**
+   * Calculate thornsHeal: heal % of maxHp when taking damage.
+   * @returns heal amount
+   */
+  calcThornsHeal(thornsHealPercent: number, maxHp: number): number {
+    if (thornsHealPercent <= 0) return 0;
+    return Math.floor(maxHp * thornsHealPercent / 100);
   }
 }

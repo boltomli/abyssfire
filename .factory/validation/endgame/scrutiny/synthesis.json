@@ -1,0 +1,51 @@
+{
+  "milestone": "endgame",
+  "round": 3,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "npx vitest run",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "npx tsc --noEmit",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "npm run build",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Documented the MenuScene difficulty-selector persistence caveat for saves whose `difficulty` is set but whose `completedDifficulties` array is empty or missing.",
+      "sourceFeature": "difficulty-system"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills/ui-worker",
+      "suggestion": "Document Phaser canvas interaction limits and the need to use keyboard shortcuts or coordinate-based clicks when browser-validating in-game UI.",
+      "evidence": "The gem-socketing-ui worker transcript shows repeated failed browser interaction attempts against the canvas UI before ending the feature, while mission guidance already notes the coordinate-click caveat.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The immediate autosave rule for progression unlocks should be added again as new library guidance.",
+      "reason": "already-documented"
+    }
+  ],
+  "previousRound": ".factory/validation/endgame/scrutiny/synthesis.round2.json"
+}

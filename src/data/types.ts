@@ -84,6 +84,10 @@ export interface MonsterDefinition {
   goldReward: [number, number];
   spriteKey: string;
   elite?: boolean;
+  /** Indicates this monster is a mini-boss (guaranteed enhanced loot). */
+  isMiniBoss?: boolean;
+  /** For sub-dungeon mini-bosses, indicates they belong to a sub-dungeon (rare+ loot floor). */
+  isSubDungeonMiniBoss?: boolean;
   lootTable?: LootEntry[];
   bossSkills?: string[];
   animCategory?: MonsterAnimCategory;
@@ -222,6 +226,90 @@ export interface MapData {
   seed?: number;
   decorations?: { col: number; row: number; type: string }[];
   safeZoneRadius?: number;
+  petSpawns?: { col: number; row: number; petId: string; chance: number }[];
+  /** Hidden areas — not shown on minimap until the player enters the fog-revealed region. */
+  hiddenAreas?: HiddenArea[];
+  /** Sub-dungeon entrance tiles — interactable objects that load a separate sub-map. */
+  subDungeonEntrances?: SubDungeonEntrance[];
+  /** Environmental storytelling decorations (ruins, statues, skeletal remains, etc.). */
+  storyDecorations?: StoryDecoration[];
+  /** Field NPCs that are placed outside camps (standalone positions on the map). */
+  fieldNpcs?: { col: number; row: number; npcId: string }[];
+}
+
+/** A hidden area within a zone, not shown on minimap until discovered by fog-of-war. */
+export interface HiddenArea {
+  id: string;
+  /** Display name (Chinese). */
+  name: string;
+  /** Center tile position. */
+  col: number;
+  row: number;
+  /** Radius in tiles defining the hidden area region (legacy, used to derive bounds). */
+  radius: number;
+  /** Rectangular bounds for fog-of-war discovery check (if not set, derived from col/row ± radius). */
+  startCol?: number;
+  startRow?: number;
+  endCol?: number;
+  endRow?: number;
+  /** Reward spawns inside the hidden area. */
+  rewards: HiddenAreaReward[];
+  /** Flavour text shown when discovering the area (Chinese). */
+  discoveryText: string;
+}
+
+export interface HiddenAreaReward {
+  type: 'chest' | 'gold_pile' | 'rare_spawn' | 'lore';
+  /** For chest/gold_pile: item quality or gold amount description. */
+  value?: string;
+  col: number;
+  row: number;
+}
+
+/** Sub-dungeon entrance definition on the parent map. */
+export interface SubDungeonEntrance {
+  id: string;
+  /** Display name (Chinese). */
+  name: string;
+  /** Entrance tile position on parent map. */
+  col: number;
+  row: number;
+  /** ID of the sub-dungeon map data to load. */
+  targetSubDungeon: string;
+}
+
+/** Complete sub-dungeon map data (a mini-map with its own spawns, mini-boss, and exit). */
+export interface SubDungeonMapData {
+  id: string;
+  name: string;
+  /** Parent zone map ID. */
+  parentZone: string;
+  cols: number;
+  rows: number;
+  theme: MapTheme;
+  seed: number;
+  spawns: { col: number; row: number; monsterId: string; count: number }[];
+  /** The mini-boss of this sub-dungeon. */
+  miniBoss: { col: number; row: number; monsterId: string };
+  /** Position where the player enters the sub-dungeon. */
+  playerStart: { col: number; row: number };
+  /** Exit back to parent zone (returns player near the entrance). */
+  exit: { col: number; row: number; returnCol: number; returnRow: number };
+  levelRange: [number, number];
+  bgColor?: string;
+}
+
+/** Environmental storytelling decoration placed in a zone. */
+export interface StoryDecoration {
+  id: string;
+  /** Display name (Chinese). */
+  name: string;
+  /** Description shown on interaction or proximity (Chinese, ≥30 chars). */
+  description: string;
+  col: number;
+  row: number;
+  /** Visual sprite type. */
+  spriteType: 'ruins' | 'skeletal_remains' | 'ancient_statue' | 'broken_altar' | 'war_banner' | 'charred_tree' | 'collapsed_pillar' | 'ritual_circle' | 'frozen_corpse' | 'sand_buried_structure';
 }
 
 export interface CampTheme {
@@ -241,17 +329,31 @@ export interface QuestDefinition {
   name: string;
   description: string;
   zone: string;
-  type: 'kill' | 'collect' | 'explore' | 'talk';
+  type: 'kill' | 'collect' | 'explore' | 'talk' | 'escort' | 'defend' | 'investigate' | 'craft';
   category: 'main' | 'side';
   objectives: QuestObjective[];
   rewards: QuestReward;
   prereqQuests?: string[];
   level: number;
   questArea?: { col: number; row: number; radius: number };
+  /** Escort quest: NPC to follow player to destination. */
+  escortNpc?: { name: string; spriteKey: string; startCol: number; startRow: number; destCol: number; destRow: number };
+  /** Defend quest: location/object to protect and enemy wave config. */
+  defendTarget?: { name: string; col: number; row: number; totalWaves: number };
+  /** Investigate quest: clue objects to find. */
+  clues?: { id: string; name: string; col: number; row: number }[];
+  /** Craft quest phase definitions: collect → craft → deliver. */
+  craftPhases?: {
+    materials: { itemId: string; name: string; required: number }[];
+    craftNpc: string;
+    deliverNpc: string;
+  };
+  /** Whether this quest can be re-accepted after failure. */
+  reacceptable?: boolean;
 }
 
 export interface QuestObjective {
-  type: 'kill' | 'collect' | 'explore' | 'talk';
+  type: 'kill' | 'collect' | 'explore' | 'talk' | 'escort' | 'defend_wave' | 'investigate_clue' | 'craft_collect' | 'craft_craft' | 'craft_deliver';
   targetId: string;
   targetName: string;
   required: number;
@@ -263,12 +365,46 @@ export interface QuestReward {
   exp: number;
   gold: number;
   items?: string[];
+  petReward?: string;
 }
 
 export interface QuestProgress {
   questId: string;
-  status: 'available' | 'active' | 'completed' | 'turned_in';
+  status: 'available' | 'active' | 'completed' | 'turned_in' | 'failed';
   objectives: { current: number }[];
+}
+
+/** A single choice in a dialogue tree node. */
+export interface DialogueChoice {
+  text: string;
+  nextNodeId: string;
+  /** Quest ID to trigger (accept) when this choice is selected. */
+  questTrigger?: string;
+  /** Quest IDs that must be turned_in before this choice appears. */
+  prereqQuests?: string[];
+  /** Reward given immediately on choosing (e.g., gold, item). */
+  reward?: { gold?: number; items?: string[]; exp?: number };
+}
+
+/** A single node in a dialogue tree. */
+export interface DialogueNode {
+  id: string;
+  /** NPC text shown to the player. */
+  text: string;
+  /** Player-selectable choices. If empty/missing, a default "继续" or "离开" is shown. */
+  choices?: DialogueChoice[];
+  /** If set, auto-advance to this node after displaying text. */
+  nextNodeId?: string;
+  /** Flag this node as an ending node (closes dialogue). */
+  isEnd?: boolean;
+}
+
+/** Complete dialogue tree for an NPC. */
+export interface DialogueTree {
+  /** Root node ID to start the dialogue. */
+  startNodeId: string;
+  /** All nodes indexed by id. */
+  nodes: Record<string, DialogueNode>;
 }
 
 export interface NPCDefinition {
@@ -278,6 +414,8 @@ export interface NPCDefinition {
   dialogue: string[];
   shopItems?: string[];
   quests?: string[];
+  /** Branching dialogue tree (replaces linear dialogue[] when present). */
+  dialogueTree?: DialogueTree;
 }
 
 export interface AchievementDefinition {
@@ -312,6 +450,40 @@ export interface PetDefinition {
   feedItem: string;
 }
 
+export type MercenaryType = 'tank' | 'melee' | 'ranged' | 'healer' | 'mage';
+
+export interface MercenaryDefinition {
+  type: MercenaryType;
+  name: string;
+  description: string;
+  hireCost: number;
+  reviveCost: number;
+  baseStats: Stats;
+  statGrowth: Stats;
+  baseHp: number;
+  baseMana: number;
+  baseDamage: number;
+  baseDefense: number;
+  attackRange: number;
+  attackSpeed: number;
+  aiRole: 'tank' | 'melee_dps' | 'ranged_dps' | 'healer' | 'aoe_mage';
+  allowedWeaponTypes: string[];
+  allowedArmorSlots: string[];
+}
+
+export interface MercenarySaveData {
+  type: MercenaryType;
+  level: number;
+  exp: number;
+  hp: number;
+  mana: number;
+  equipment: {
+    weapon?: ItemInstance;
+    armor?: ItemInstance;
+  };
+  alive: boolean;
+}
+
 export interface SaveData {
   id: string;
   version: number;
@@ -340,7 +512,7 @@ export interface SaveData {
   exploration: Record<string, boolean[][]>;
   homestead: {
     buildings: Record<string, number>;
-    pets: { petId: string; level: number; exp: number }[];
+    pets: { petId: string; level: number; exp: number; evolved?: number }[];
     activePet?: string;
   };
   achievements: Record<string, number>;
@@ -348,8 +520,17 @@ export interface SaveData {
     autoCombat: boolean;
     musicVolume: number;
     sfxVolume: number;
-    autoLootMode: 'off' | 'all' | 'magic' | 'rare';
+    autoLootMode: 'off' | 'all' | 'magic' | 'rare' | 'legendary';
   };
   difficulty: 'normal' | 'nightmare' | 'hell';
   completedDifficulties: string[];
+  mercenary?: MercenarySaveData;
+  /** Tracks visited dialogue nodes and choices made per NPC. */
+  dialogueState?: Record<string, { visitedNodes: string[]; choicesMade: Record<string, string> }>;
+  /** Mini-boss IDs whose pre-fight dialogue has been seen (does not repeat). */
+  miniBossDialogueSeen?: string[];
+  /** Lore collectible IDs that have been discovered. */
+  loreCollected?: string[];
+  /** Hidden area IDs that have been discovered and had rewards collected. */
+  discoveredHiddenAreas?: string[];
 }

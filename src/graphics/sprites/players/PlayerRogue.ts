@@ -130,7 +130,7 @@ export const PlayerRogueDrawer: EntityDrawer = {
     const torsoY = baseY - 50 * s + bodyOffsetY;
 
     // Soft outline glow
-    utils.softOutline(ctx, 'rgba(200, 200, 220, 0.2)', 5);
+    utils.zonePlayerOutline(ctx, w, h);
 
     // Leather chest piece
     utils.drawLeatherTexture(ctx, torsoX - 9 * s, torsoY - 12 * s, 18 * s, 26 * s, LEATHER_BASE);
@@ -174,7 +174,7 @@ export const PlayerRogueDrawer: EntityDrawer = {
     utils.softOutlineEnd(ctx);
 
     // Rim light on head
-    utils.rimLight(ctx, cx + lunge * 2 * s, baseY - 50 * s + bodyOffsetY - 20 * s, 8 * s, 8.5 * s, 'rgba(180,190,200,0.1)');
+    utils.zonePlayerRimLight(ctx, cx + lunge * 2 * s, baseY - 50 * s + bodyOffsetY - 20 * s, 8 * s, 8.5 * s);
 
     // ── Asymmetric Cloak (draped over left shoulder) ───────────────────────
     const cloakOffsetY = act === 'walk' ? Math.sin(phase) * 2 * s : 0;

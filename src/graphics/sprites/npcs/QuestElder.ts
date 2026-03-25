@@ -101,7 +101,7 @@ export const QuestElderDrawer: EntityDrawer = {
     }
 
     // Soft outline glow (warm — NPC)
-    utils.softOutline(ctx, 'rgba(180,150,100,0.15)', 5);
+    utils.zoneNpcOutline(ctx, w, h);
 
     // ── Robe (full length) ──
     ctx.fillStyle = utils.rgb(ROBE);

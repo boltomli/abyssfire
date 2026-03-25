@@ -12,17 +12,17 @@ void main() {
   vec3 c = color.rgb;
   c = (c - 0.5) * 1.05 + 0.5;
 
-  // Warm midtones: boost red, slightly reduce blue
-  c.r = c.r * 1.04 + 0.01;
+  // Gentle warm midtones (reduced to preserve cool-hued zones)
+  c.r = c.r * 1.02 + 0.005;
   c.g = c.g * 1.01;
-  c.b = c.b * 0.96;
+  c.b = c.b * 0.98;
 
-  // Brown shadow tint: shift dark values toward warm brown
+  // Subtle brown shadow tint: only affects very dark values
   float luminance = dot(c, vec3(0.299, 0.587, 0.114));
-  float shadowMask = smoothstep(0.0, 0.35, 1.0 - luminance);
-  c.r += shadowMask * 0.02;
-  c.g += shadowMask * 0.005;
-  c.b -= shadowMask * 0.015;
+  float shadowMask = smoothstep(0.0, 0.25, 1.0 - luminance);
+  c.r += shadowMask * 0.012;
+  c.g += shadowMask * 0.003;
+  c.b -= shadowMask * 0.008;
 
   // Clamp
   c = clamp(c, 0.0, 1.0);

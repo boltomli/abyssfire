@@ -1,0 +1,15 @@
+{
+  "featureId": "random-dungeons",
+  "reviewedAt": "2026-03-24T18:19:54Z",
+  "commitId": "f7f32789cfc37b49c05ac0121273914990429466",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the original failing implementation and the follow-up fix. The original failure points are now addressed: dungeon-exclusive set content exists and is wired into loot/set handling, and dungeon exits/save-return paths now use the Abyss Rift entrance coordinates. The remaining random-dungeons implementation matches the feature requirements at code level.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/endgame/scrutiny/reviews/random-dungeons.json",
+  "summary": "Reviewed the handoff, transcript skeleton, original failure report, original feature diff, and follow-up fix diff for random-dungeons. The fix adequately resolves the prior blocking issues by adding dungeon-exclusive set support and correcting Abyss Rift entrance return/save behavior, so this review passes."
+}

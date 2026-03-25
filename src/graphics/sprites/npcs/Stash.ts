@@ -103,7 +103,7 @@ export const StashDrawer: EntityDrawer = {
     utils.drawPart(ctx, cx + 2 * s, by - 23 * s, 8 * s, 19 * s, ROBE, 3 * s);
 
     // Soft outline glow (warm — NPC)
-    utils.softOutline(ctx, 'rgba(180,150,100,0.15)', 5);
+    utils.zoneNpcOutline(ctx, w, h);
 
     // ── Robe body ──
     utils.drawPart(ctx, cx - 12 * s + bodyLean, by - 50 * s, 24 * s, 30 * s, ROBE, 5 * s);

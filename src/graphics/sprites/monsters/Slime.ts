@@ -66,7 +66,7 @@ export const SlimeDrawer: EntityDrawer = {
     const bodyCy = baseY - bodyRy * 0.6 + offsetY;
 
     // Soft green glow outline around body
-    utils.softOutline(ctx, 'rgba(30, 180, 60, 0.3)', 6);
+    utils.zoneEntityOutline(ctx, w, h);
 
     const grad = ctx.createRadialGradient(
       cx - bodyRx * 0.15, bodyCy - bodyRy * 0.2, 0,
@@ -91,7 +91,7 @@ export const SlimeDrawer: EntityDrawer = {
     utils.softOutlineEnd(ctx);
 
     // Rim light on body edge
-    utils.rimLight(ctx, cx, bodyCy, bodyRx, bodyRy, 'rgba(100,255,120,0.12)');
+    utils.zoneEntityRimLight(ctx, cx, bodyCy, bodyRx, bodyRy);
 
     // Internal particles
     ctx.fillStyle = 'rgba(7,63,18,0.4)';

@@ -1,0 +1,90 @@
+{
+  "surface": "browser",
+  "assertions": [
+    {
+      "id": "VAL-END-007",
+      "status": "blocked",
+      "reason": "Code-level evidence indicates the intended behavior is to send save/load back to the Abyss Rift entrance rather than persist an in-progress dungeon position, but there is no reliable browser execution evidence for an actual save/load cycle from floor 3+ through the user surface in this validation round.",
+      "evidence": [
+        "src/__tests__/endgame-scrutiny-fixes.test.ts",
+        "src/__tests__/endgame-scrutiny-fixes-2.test.ts",
+        "src/systems/SaveSystem.ts",
+        "src/data/maps/abyss_rift.ts",
+        ".factory/validation/endgame/user-testing/flows/dungeon-difficulty.json"
+      ]
+    },
+    {
+      "id": "VAL-END-008",
+      "status": "blocked",
+      "reason": "Local code and tests support that the final dungeon floor is configured to spawn a named Chinese boss with boss skills and elevated stats, but no trustworthy user-surface run reached the final floor to observe the encounter, HP presentation, or skill use in-browser.",
+      "evidence": [
+        "src/data/dungeonData.ts",
+        "src/systems/DungeonSystem.ts",
+        "src/__tests__/DungeonSystem.test.ts",
+        ".factory/validation/endgame/user-testing/flows/dungeon-difficulty.json"
+      ]
+    },
+    {
+      "id": "VAL-END-009",
+      "status": "blocked",
+      "reason": "The dungeon generation logic and tests indicate mid-boss floors on every third non-final floor in longer runs, but there is no real browser traversal evidence showing a 7+ floor run with a visible mid-boss encounter on a non-final floor.",
+      "evidence": [
+        "src/systems/DungeonSystem.ts",
+        "src/data/dungeonData.ts",
+        "src/__tests__/DungeonSystem.test.ts",
+        ".factory/validation/endgame/user-testing/flows/dungeon-difficulty.json"
+      ]
+    },
+    {
+      "id": "VAL-END-010",
+      "status": "blocked",
+      "reason": "Boss and mid-boss loot guarantees are strongly supported by code and automated tests, including rare+ and magic+ quality floors, but no browser-based kill-and-loot collection evidence was produced from the user surface, so this assertion remains blocked for user-testing synthesis.",
+      "evidence": [
+        "src/data/dungeonData.ts",
+        "src/systems/DungeonSystem.ts",
+        "src/__tests__/DungeonSystem.test.ts",
+        "src/__tests__/endgame-scrutiny-fixes.test.ts",
+        ".factory/validation/endgame/user-testing/flows/dungeon-difficulty.json"
+      ]
+    },
+    {
+      "id": "VAL-END-011",
+      "status": "pass",
+      "reason": "Code inspection and tests provide sufficient non-browser evidence that dungeon-exclusive unique loot exists: the dungeon data defines at least two legendary items tied to the dungeon and a dungeon-exclusive set, and boss loot tables reference those items rather than overworld loot sources.",
+      "evidence": [
+        "src/data/dungeonData.ts",
+        "src/systems/DungeonSystem.ts",
+        "src/__tests__/DungeonSystem.test.ts",
+        "src/__tests__/endgame-scrutiny-fixes-2.test.ts"
+      ]
+    },
+    {
+      "id": "VAL-END-012",
+      "status": "blocked",
+      "reason": "MenuScene, DifficultySystem, and tests support a Chinese difficulty selector that appears after Normal completion or for migrated non-normal saves, but there is no reliable user-surface evidence of actually clearing Normal and then seeing the Nightmare option appear in the browser flow during this validation round.",
+      "evidence": [
+        "src/scenes/MenuScene.ts",
+        "src/systems/DifficultySystem.ts",
+        "src/__tests__/difficulty-selector-fix.test.ts",
+        "src/__tests__/endgame-scrutiny-fixes.test.ts",
+        ".factory/validation/endgame/user-testing/flows/dungeon-difficulty.json"
+      ]
+    }
+  ],
+  "frictions": [
+    "The available prior browser flow was already blocked before reaching stable gameplay, so none of the assigned dungeon boss or difficulty-unlock assertions could be exercised through the real user surface.",
+    "Phaser canvas UI remains opaque to DOM/a11y tooling, making user-surface proof dependent on fragile coordinate interaction that was unavailable for this synthesis pass.",
+    "Gem socketing and achievement features have code-review and unit-test evidence, but no trustworthy browser execution artifacts were available here to elevate user-surface assertions beyond blocked status where interaction was required."
+  ],
+  "blockers": [
+    "Primary blocker: no reliable browser execution evidence for the assigned gem/achievement-adjacent endgame flow; the existing dungeon-difficulty user-testing attempt never established a dependable menu-to-game path, so browser-only assertions remain blocked.",
+    "For VAL-END-008/009/010/012 especially, there is no fresh screenshot, console trace, or save/load user-flow artifact proving the behavior on the live browser surface."
+  ],
+  "toolsUsed": [
+    "Read",
+    "Grep",
+    "Glob",
+    "LS"
+  ],
+  "summary": "Synthesized a conservative browser-surface flow report for VAL-END-007 through VAL-END-012 from local repository evidence only. Marked VAL-END-011 as pass because code and tests directly establish dungeon-exclusive unique loot, and marked the remaining assertions blocked due to lack of reliable user-surface execution evidence after the prerequisite browser flow failure."
+}

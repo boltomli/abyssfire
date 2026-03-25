@@ -1,0 +1,26 @@
+{
+  "featureId": "new-quest-types",
+  "reviewedAt": "2026-03-24T16:04:39Z",
+  "commitId": "4fef750b2c15be0c8de7a44495a1ddfb55424f2b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The original `new-quest-types` commit was rightly blocked for missing escort/defend/craft runtime behavior, but the later fix feature `story-scrutiny-fix-quest-dialogue` now supplies the missing ZoneScene and UIScene wiring. Escort quests now spawn a tracked escort NPC that follows the player, can die, and fails the quest on death; defend quests now spawn a defend target, run enemy waves, and fail on target destruction; craft quests now advance from NPC interactions; and dialogue trees now include reachable reward payloads processed by UIScene. The prior blocking runtime gaps called out in synthesis are resolved in the current codebase.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The original `new-quest-types` implementation was delivered under `content-worker`, but the required behavior depended on substantial runtime scene wiring in `ZoneScene`/`UIScene`. Story-content features that mix authored data with gameplay hooks still blur the boundary between `content-worker` and `systems-worker`.",
+      "evidence": "`features.json` defines `new-quest-types` with `skillName: content-worker`, while the fix had to add runtime methods such as `spawnEscortNpc`, `updateDefendQuest`, and `advanceCraftQuestFromNpc` in `src/scenes/ZoneScene.ts:4748-5150` and reward handling in `src/scenes/UIScene.ts:1788-1807`."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The shared architecture notes still do not capture the newer quest-runtime pattern that active quest content can own temporary world actors/objects inside `ZoneScene` (escort NPCs, defend targets, wave state) and that dialogue rewards are granted directly in `UIScene` choice handling.",
+      "evidence": "`.factory/library/architecture.md` documents companion cross-scene methods and persistent systems but does not mention quest runtime actors or dialogue reward flow, while current implementations live in `src/scenes/ZoneScene.ts:4748-5150` and `src/scenes/UIScene.ts:1788-1807`."
+    }
+  ],
+  "addressesFailureFrom": "/Users/feuvan/src/abyssfire/.factory/validation/story-content/scrutiny/synthesis.json",
+  "summary": "Pass on fix review: the later `story-scrutiny-fix-quest-dialogue` work resolves the original `new-quest-types` blocking issues by wiring escort NPC follow/death, defend target waves/failure, craft NPC progression, and dialogue rewards into runtime code. No remaining blocking issues were found for this feature in the current codebase."
+}

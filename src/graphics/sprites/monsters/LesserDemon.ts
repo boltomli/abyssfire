@@ -105,7 +105,7 @@ export const LesserDemonDrawer: EntityDrawer = {
     const torsoY = baseY - 34 * s + bodyOffsetY;
 
     // Soft outline glow (red/orange — demonic)
-    utils.softOutline(ctx, 'rgba(200,50,30,0.25)', 5);
+    utils.zoneEntityOutline(ctx, w, h);
 
     const torsoGrad = ctx.createLinearGradient(torsoX - 12 * s, torsoY - 14 * s, torsoX + 12 * s, torsoY + 12 * s);
     torsoGrad.addColorStop(0, utils.rgb(SKIN_LIGHT));
@@ -118,7 +118,7 @@ export const LesserDemonDrawer: EntityDrawer = {
     utils.softOutlineEnd(ctx);
 
     // Rim light on torso
-    utils.rimLight(ctx, torsoX, torsoY, 12 * s, 15 * s, 'rgba(180,40,20,0.12)');
+    utils.zoneEntityRimLight(ctx, torsoX, torsoY, 12 * s, 15 * s);
 
     // Pectoral line
     ctx.strokeStyle = utils.rgb(SKIN_DARK, 0.55);

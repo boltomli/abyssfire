@@ -91,7 +91,7 @@ export const SkeletonDrawer: EntityDrawer = {
     utils.fillEllipse(ctx, cx, baseY + 1 * s, 14 * s, 3 * s);
 
     // Soft outline glow (cold blue — undead)
-    utils.softOutline(ctx, 'rgba(100,140,180,0.2)', 5);
+    utils.zoneEntityOutline(ctx, w, h);
 
     // ── Legs: femur + tibia ──────────────────────────────────────────────────
     for (const side of [-1, 1]) {
@@ -256,7 +256,7 @@ export const SkeletonDrawer: EntityDrawer = {
     utils.softOutlineEnd(ctx);
 
     // Rim light on cranium
-    utils.rimLight(ctx, skullCX, skullBaseY, 8 * s, 9 * s, 'rgba(80,120,160,0.1)');
+    utils.zoneEntityRimLight(ctx, skullCX, skullBaseY, 8 * s, 9 * s);
 
     // Deep eye sockets
     for (const side of [-1, 1]) {

@@ -1,0 +1,15 @@
+{
+  "featureId": "achievement-panel",
+  "reviewedAt": "2026-03-24T18:19:33Z",
+  "commitId": "7373165c289d44cbf6b961d992b564fecb105b17",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the original achievement-panel implementation and the later fix commit that addressed its two prior blockers. The feature now satisfies the requested panel UI, unlock toast, reward/idempotency behavior, and real-time level-achievement tracking path without the prior wheel-listener leak.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/endgame/scrutiny/reviews/achievement-panel.json",
+  "summary": "Reviewed the worker handoff, transcript skeleton, ui-worker skill, original feature diff (7373165), and fix diff (f83b1f2). The original review's two blockers are adequately addressed: level achievements are now checked from the dedicated level-up handler for all sources, and the achievement panel wheel handler is cleaned up on destroy following the documented UIScene pattern. Report written to the requested review path."
+}

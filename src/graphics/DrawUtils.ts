@@ -1,3 +1,5 @@
+import { getCurrentZonePalette, standardOutlineBlur } from './ZonePalette';
+
 /** Shared drawing primitives for entity sprite generation. */
 export class DrawUtils {
 
@@ -364,5 +366,68 @@ export class DrawUtils {
     hlGrad.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = hlGrad;
     ctx.fillRect(x, y, w, h);
+  }
+
+  // ── Zone-Aware Outline & Rim Helpers ──
+
+  /**
+   * Zone-harmonized soft outline for entity sprites (monsters).
+   * Uses the current zone palette's entity outline color and a standardized blur
+   * proportional to sprite size.
+   * @param w - scaled frame width
+   * @param h - scaled frame height
+   */
+  zoneEntityOutline(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const palette = getCurrentZonePalette();
+    this.softOutline(ctx, palette.entityOutlineColor, standardOutlineBlur(w, h));
+  }
+
+  /**
+   * Zone-harmonized rim light for entity sprites (monsters).
+   * Uses the current zone palette's entity rim color.
+   */
+  zoneEntityRimLight(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+    const palette = getCurrentZonePalette();
+    this.rimLight(ctx, cx, cy, rx, ry, palette.entityRimColor);
+  }
+
+  /**
+   * Zone-harmonized soft outline for NPC sprites.
+   * Uses the current zone palette's NPC outline color.
+   * @param w - scaled frame width
+   * @param h - scaled frame height
+   */
+  zoneNpcOutline(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const palette = getCurrentZonePalette();
+    this.softOutline(ctx, palette.npcOutlineColor, standardOutlineBlur(w, h));
+  }
+
+  /**
+   * Zone-harmonized rim light for NPC sprites.
+   * Uses the current zone palette's NPC rim color.
+   */
+  zoneNpcRimLight(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+    const palette = getCurrentZonePalette();
+    this.rimLight(ctx, cx, cy, rx, ry, palette.npcRimColor);
+  }
+
+  /**
+   * Zone-harmonized soft outline for player sprites.
+   * Uses the current zone palette's player outline color — neutral with slight zone tint.
+   * @param w - scaled frame width
+   * @param h - scaled frame height
+   */
+  zonePlayerOutline(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const palette = getCurrentZonePalette();
+    this.softOutline(ctx, palette.playerOutlineColor, standardOutlineBlur(w, h));
+  }
+
+  /**
+   * Zone-harmonized rim light for player sprites.
+   * Uses the current zone palette's player rim color.
+   */
+  zonePlayerRimLight(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+    const palette = getCurrentZonePalette();
+    this.rimLight(ctx, cx, cy, rx, ry, palette.playerRimColor);
   }
 }

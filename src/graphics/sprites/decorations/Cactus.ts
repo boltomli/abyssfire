@@ -15,8 +15,6 @@ export const CactusDrawer: EntityDrawer = {
     ctx.fillStyle = 'rgba(0,0,0,0.28)';
     utils.fillEllipse(ctx, cx, h - s, 5 * s, 1.5 * s);
 
-    // Soft outline glow (green/desert — cactus)
-    utils.softOutline(ctx, 'rgba(80,120,40,0.15)', 4);
 
     // Left arm (greens darkened 30%: 0x1e5a1a → 0x153f12)
     utils.drawPart(ctx, cx - 5 * s, h * 0.35, 3.5 * s, h * 0.14, 0x153f12, 2 * s);
@@ -40,8 +38,6 @@ export const CactusDrawer: EntityDrawer = {
       ctx.stroke();
     }
 
-    // End soft outline
-    utils.softOutlineEnd(ctx);
 
     // Needle clusters (tiny cross-hatch marks along edges)
     const needleRows = [0.15, 0.28, 0.42, 0.58, 0.72, 0.84];

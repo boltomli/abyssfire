@@ -198,7 +198,7 @@ export const DemonLordDrawer: EntityDrawer = {
     const torsoY = baseY - 44 * s + bodyOffsetY;
 
     // Soft outline glow (red/orange — demonic)
-    utils.softOutline(ctx, 'rgba(200,50,30,0.25)', 6);
+    utils.zoneEntityOutline(ctx, w, h);
 
     const torsoGrad = ctx.createLinearGradient(torsoX - 18 * s, torsoY - 18 * s, torsoX + 18 * s, torsoY + 20 * s);
     torsoGrad.addColorStop(0, utils.rgb(SKIN_LIGHT));
@@ -211,7 +211,7 @@ export const DemonLordDrawer: EntityDrawer = {
     utils.softOutlineEnd(ctx);
 
     // Rim light on torso
-    utils.rimLight(ctx, torsoX, torsoY, 18 * s, 22 * s, 'rgba(180,40,20,0.12)');
+    utils.zoneEntityRimLight(ctx, torsoX, torsoY, 18 * s, 22 * s);
 
     // Chest arcane rune (diamond + inner glow)
     const runeX = torsoX;

@@ -115,7 +115,7 @@ export const WerewolfDrawer: EntityDrawer = {
     const torsoH = 16 * s * squishY;
 
     // Soft outline glow (brown — beast)
-    utils.softOutline(ctx, 'rgba(120,80,40,0.2)', 5);
+    utils.zoneEntityOutline(ctx, w, h);
 
     const torsoGrad = ctx.createRadialGradient(
       torsoX - 3 * s, torsoY - 4 * s, 0,
@@ -143,7 +143,7 @@ export const WerewolfDrawer: EntityDrawer = {
     utils.softOutlineEnd(ctx);
 
     // Rim light on torso
-    utils.rimLight(ctx, torsoX, torsoY, torsoW, torsoH, 'rgba(100,70,30,0.1)');
+    utils.zoneEntityRimLight(ctx, torsoX, torsoY, torsoW, torsoH);
 
     // ── Arms ────────────────────────────────────────────────────────────────
     for (const side of [-1, 1]) {

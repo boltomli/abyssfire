@@ -1,0 +1,79 @@
+{
+  "milestone": "story-content",
+  "round": 2,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "npx vitest run",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "npx tsc --noEmit",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "npm run build",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Cross-scene persistence via UIScene proxy methods is now used for dialogue state, but the shared architecture notes still only document the companion proxy methods.",
+      "sourceFeature": "dialogue-trees"
+    },
+    {
+      "target": "library",
+      "description": "The project library still documents stale exit behavior ('changeZone() ignores target coordinates') even though the scrutiny fix now relies on targetCol/targetRow-driven spawning for both normal exits and sub-dungeon returns. This is actionable shared knowledge that should be updated so future workers do not design around outdated semantics.",
+      "sourceFeature": "zone-content-expansion"
+    },
+    {
+      "target": "library",
+      "description": "The architectural note in `.factory/library/architecture.md` that `changeZone()` ignores target coordinates is stale after the scrutiny fix. Current ZoneScene create/restart flow now honors `targetCol`/`targetRow` for zone transitions and sub-dungeon returns.",
+      "sourceFeature": "zone-content-runtime-wiring"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skill",
+      "suggestion": "The `content-worker` skill still does not explicitly tell workers to first check whether previous workers already created partial data/runtime pieces for the same feature before implementing or validating the remainder.",
+      "evidence": "`src/abyssfire/.factory/skills/content-worker/SKILL.md` focuses on studying existing content patterns, while the transcript skeleton for worker session `e4a2bf6d-07e8-4bfe-b321-b412d6365ec0` shows the worker had to discover pre-existing `src/data/miniBosses.ts` and `src/data/loreCollectibles.ts` before determining the remaining work. The original handoff's `skillFeedback.suggestedChanges` calls this out directly.",
+      "isSystemic": true
+    },
+    {
+      "target": "skill",
+      "suggestion": "The fix worker had to spend time disproving the feature brief's claim that the collision check was inverted. The real issue was missing fallback tile search, not an inverted walkability convention.",
+      "evidence": "Fix transcript skeleton for worker session 037b263d-8ba6-44f1-bfd3-21e2a201976f shows explicit investigation of MapGenerator/ZoneScene collision semantics before implementation; handoff.skillFeedback also suggests verifying scrutiny findings before encoding them into fix feature descriptions. Runtime helper `RandomEventSystem.findWalkableTile()` in src/systems/RandomEventSystem.ts documents the actual convention: `collisions[r][c] === true` means walkable.",
+      "isSystemic": true
+    },
+    {
+      "target": "skill",
+      "suggestion": "The original `new-quest-types` implementation was delivered under `content-worker`, but the required behavior depended on substantial runtime scene wiring in `ZoneScene`/`UIScene`. Story-content features that mix authored data with gameplay hooks still blur the boundary between `content-worker` and `systems-worker`.",
+      "evidence": "`features.json` defines `new-quest-types` with `skillName: content-worker`, while the fix had to add runtime methods such as `spawnEscortNpc`, `updateDefendQuest`, and `advanceCraftQuestFromNpc` in `src/scenes/ZoneScene.ts:4748-5150` and reward handling in `src/scenes/UIScene.ts:1788-1807`.",
+      "isSystemic": true
+    },
+    {
+      "target": "skill",
+      "suggestion": "The content-worker skill still frames map/NPC work primarily as data creation and only says to ensure content is loadable, which did not match this feature's required in-game interaction scope. The original worker handoff explicitly marked runtime wiring undone despite the feature description requiring interactable entrances, discoverable hidden areas, and companion transfer.",
+      "evidence": ".factory/skills/content-worker/SKILL.md step 5 says only 'Ensure content integrates correctly'; feature description in features.json:1188 requires hidden areas not on minimap until discovered, interactable sub-dungeon entrances, and companion transfer; handoff 2026-03-24T14-45-23-947Z__zone-content-expansion__8052722f-883c-4b4d-9650-8afc2b36808c.json says runtime wiring in ZoneScene was left undone.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The shared architecture notes still do not capture the newer quest-runtime pattern that active quest content can own temporary world actors/objects inside `ZoneScene` (escort NPCs, defend targets, wave state) and that dialogue rewards are granted directly in `UIScene` choice handling.",
+      "reason": "already-documented"
+    }
+  ],
+  "previousRound": ".factory/validation/story-content/scrutiny/synthesis.json"
+}
