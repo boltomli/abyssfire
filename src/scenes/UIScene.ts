@@ -15,6 +15,8 @@ import type { ItemInstance, WeaponBase, ArmorBase, DialogueTree, DialogueNode, D
 import { MercenarySystem, MERCENARY_DEFS, MERCENARY_TYPES } from '../systems/MercenarySystem';
 import { QUEST_TYPE_LABELS } from '../systems/QuestSystem';
 import { gatherNpcQuests, buildQuestCardData, formatRewardSummary, buildToastMessage } from '../ui/QuestCardUI';
+import { buildTrackerState, buildTrackerSignature, MAX_VISIBLE_QUESTS } from '../ui/QuestTrackerHUD';
+import type { TrackerQuestEntry, TrackerState } from '../ui/QuestTrackerHUD';
 import type { NpcQuestEntry, QuestCardData } from '../ui/QuestCardUI';
 import type { MercenaryState } from '../systems/MercenarySystem';
 import { LoreByZone, AllLoreEntries, getLoreCountByZone } from '../data/loreCollectibles';
@@ -106,6 +108,16 @@ export class UIScene extends Phaser.Scene {
   private logMessages: { text: string; type: string }[] = [];
   private questTracker!: Phaser.GameObjects.Container;
   private questTrackerTexts: Phaser.GameObjects.Text[] = [];
+  /** Set of quest IDs that the player has expanded in the tracker. */
+  private questTrackerExpanded: Set<string> = new Set();
+  /** Scroll offset for the tracker (when > MAX_VISIBLE_QUESTS). */
+  private questTrackerScrollOffset = 0;
+  /** Cached tracker state for scroll-indicator rendering. */
+  private questTrackerState: TrackerState | null = null;
+  /** Background rectangle for the tracker panel. */
+  private questTrackerBg: Phaser.GameObjects.Rectangle | null = null;
+  /** Scroll indicator text (e.g. "▼ 还有 3 个任务"). */
+  private questTrackerScrollText: Phaser.GameObjects.Text | null = null;
   private zoneLabel!: Phaser.GameObjects.Text;
 
   private inventoryPanel: Phaser.GameObjects.Container | null = null;
@@ -168,6 +180,11 @@ export class UIScene extends Phaser.Scene {
     this.logTexts = [];
     this.logMessages = [];
     this.questTrackerTexts = [];
+    this.questTrackerExpanded = new Set();
+    this.questTrackerScrollOffset = 0;
+    this.questTrackerState = null;
+    this.questTrackerBg = null;
+    this.questTrackerScrollText = null;
     this.nextMinimapRefreshAt = 0;
     this.nextQuestTrackerRefreshAt = 0;
     this.lastQuestTrackerSignature = '';
@@ -397,7 +414,27 @@ export class UIScene extends Phaser.Scene {
   private createQuestTracker(): void {
     this.questTrackerTexts = [];
     this.lastQuestTrackerSignature = '';
-    this.questTracker = this.add.container(px(16), px(52)).setDepth(3000);
+    // Position on right side, below minimap (minimap: x=W-px(110), y=px(70), size=px(100))
+    const trackerX = W - px(220);
+    const trackerY = px(10) + px(60) + px(100) + px(14); // below minimap + gap
+    this.questTracker = this.add.container(trackerX, trackerY).setDepth(3000);
+
+    // Semi-transparent background for readability
+    this.questTrackerBg = this.add.rectangle(0, 0, px(210), px(20), 0x0a0a14, 0.7)
+      .setOrigin(0, 0).setDepth(2999);
+    this.questTrackerBg.setVisible(false);
+
+    // Header text "任务追踪"
+    const header = this.add.text(0, 0, '任务追踪', {
+      fontFamily: FONT, fontSize: fs(12), color: '#c0934a', fontStyle: 'bold',
+    }).setOrigin(0, 0);
+    this.questTracker.add(header);
+
+    // Scroll indicator text (hidden by default)
+    this.questTrackerScrollText = this.add.text(0, 0, '', {
+      fontFamily: FONT, fontSize: fs(10), color: '#888888',
+    }).setOrigin(0, 0).setVisible(false);
+    this.questTracker.add(this.questTrackerScrollText);
   }
 
   private setupEventListeners(): void {
@@ -409,6 +446,11 @@ export class UIScene extends Phaser.Scene {
     EventBus.on(GameEvents.LORE_COLLECTED, this.handleLoreCollected, this);
     EventBus.on(GameEvents.ACHIEVEMENT_UNLOCKED, this.handleAchievementUnlocked, this);
     EventBus.on('ui:refresh', this.handleUiRefresh, this);
+    // Quest events — force immediate tracker refresh
+    EventBus.on(GameEvents.QUEST_ACCEPTED, this.handleQuestTrackerDirty, this);
+    EventBus.on(GameEvents.QUEST_COMPLETED, this.handleQuestTrackerDirty, this);
+    EventBus.on(GameEvents.QUEST_TURNED_IN, this.handleQuestTrackerDirty, this);
+    EventBus.on(GameEvents.QUEST_FAILED, this.handleQuestTrackerDirty, this);
   }
 
   private handleLogMessage(data: { text: string; type: string }): void {
@@ -465,6 +507,12 @@ export class UIScene extends Phaser.Scene {
     this.player = data.player;
     this.zone = data.zone;
     this.nextMinimapRefreshAt = 0;
+    this.nextQuestTrackerRefreshAt = 0;
+    this.lastQuestTrackerSignature = '';
+  }
+
+  /** Force an immediate tracker refresh on next update tick. */
+  private handleQuestTrackerDirty(): void {
     this.nextQuestTrackerRefreshAt = 0;
     this.lastQuestTrackerSignature = '';
   }
@@ -4855,11 +4903,20 @@ export class UIScene extends Phaser.Scene {
     EventBus.off(GameEvents.LORE_COLLECTED, this.handleLoreCollected, this);
     EventBus.off(GameEvents.ACHIEVEMENT_UNLOCKED, this.handleAchievementUnlocked, this);
     EventBus.off('ui:refresh', this.handleUiRefresh, this);
+    EventBus.off(GameEvents.QUEST_ACCEPTED, this.handleQuestTrackerDirty, this);
+    EventBus.off(GameEvents.QUEST_COMPLETED, this.handleQuestTrackerDirty, this);
+    EventBus.off(GameEvents.QUEST_TURNED_IN, this.handleQuestTrackerDirty, this);
+    EventBus.off(GameEvents.QUEST_FAILED, this.handleQuestTrackerDirty, this);
     this.skillSlots = [];
     this.skillCooldownOverlays = [];
     this.skillCooldownTexts = [];
     this.logTexts = [];
     this.questTrackerTexts = [];
+    this.questTrackerExpanded = new Set();
+    this.questTrackerScrollOffset = 0;
+    this.questTrackerState = null;
+    this.questTrackerBg = null;
+    this.questTrackerScrollText = null;
     this.nextMinimapRefreshAt = 0;
     this.nextQuestTrackerRefreshAt = 0;
     this.lastQuestTrackerSignature = '';
@@ -4954,92 +5011,128 @@ export class UIScene extends Phaser.Scene {
     if (!this.zone?.questSystem) return;
 
     const active = this.zone.questSystem.getActiveQuests();
-    const sorted = [...active].sort((a, b) => {
-      if (a.quest.category === 'main' && b.quest.category !== 'main') return -1;
-      if (a.quest.category !== 'main' && b.quest.category === 'main') return 1;
-      return 0;
-    });
+    const state = buildTrackerState(active);
+    this.questTrackerState = state;
 
-    const entries: { text: string; isTitle: boolean; isMain: boolean; isDone: boolean }[] = [];
-    const playerCol = this.zone?.player ? Math.round(this.zone.player.tileCol) : 0;
-    const playerRow = this.zone?.player ? Math.round(this.zone.player.tileRow) : 0;
-    for (const { quest, progress } of sorted) {
-      const tag = quest.category === 'main' ? '[主线]' : '[支线]';
-      const statusTag = progress.status === 'completed' ? ' \u2713' : '';
-      // Add type tag for new quest types
-      const typeTag = ['escort', 'defend', 'investigate', 'craft'].includes(quest.type)
-        ? ` [${QUEST_TYPE_LABELS[quest.type] ?? ''}]` : '';
-      entries.push({ text: `${tag} ${quest.name}${typeTag}${statusTag}`, isTitle: true, isMain: quest.category === 'main', isDone: progress.status === 'completed' });
-
-      // For investigate quests, show aggregate clue count
-      if (quest.type === 'investigate') {
-        const totalClues = quest.objectives.filter(o => o.type === 'investigate_clue').length;
-        const foundClues = quest.objectives
-          .map((o, idx) => o.type === 'investigate_clue' && (progress.objectives[idx]?.current ?? 0) >= o.required ? 1 : 0)
-          .reduce((a: number, b: number) => a + b, 0);
-        entries.push({ text: `  线索 ${foundClues}/${totalClues}`, isTitle: false, isMain: quest.category === 'main', isDone: foundClues >= totalClues });
-      }
-
-      // For defend quests, show wave counter
-      if (quest.type === 'defend' && quest.defendTarget) {
-        const waveObj = quest.objectives.find(o => o.type === 'defend_wave');
-        const waveIdx = waveObj ? quest.objectives.indexOf(waveObj) : -1;
-        const curWave = waveIdx >= 0 ? (progress.objectives[waveIdx]?.current ?? 0) : 0;
-        entries.push({ text: `  浪潮 ${curWave}/${quest.defendTarget.totalWaves}`, isTitle: false, isMain: quest.category === 'main', isDone: curWave >= quest.defendTarget.totalWaves });
-      }
-
-      // For other quest types and non-aggregate objectives, show individual entries
-      if (quest.type !== 'investigate' && quest.type !== 'defend') {
-        for (let i = 0; i < quest.objectives.length; i++) {
-          const obj = quest.objectives[i];
-          const cur = progress.objectives[i]?.current ?? 0;
-          const done = cur >= obj.required;
-          const mark = done ? '\u2713' : `${cur}/${obj.required}`;
-          let locHint = '';
-          if ((obj.type === 'explore' || obj.type === 'investigate_clue' || obj.type === 'escort') && !done && obj.location) {
-            const dc = obj.location.col - playerCol;
-            const dr = obj.location.row - playerRow;
-            const dist = Math.sqrt(dc * dc + dr * dr);
-            if (dist > 3) {
-              const dir = getDirection(dc, dr);
-              const distLabel = dist > 30 ? '很远' : dist > 15 ? '较远' : '附近';
-              locHint = ` (${dir} ${distLabel})`;
-            }
-          }
-          entries.push({ text: `  ${obj.targetName} ${mark}${locHint}`, isTitle: false, isMain: quest.category === 'main', isDone: done });
-        }
-      }
-    }
-
-    const signature = entries.map(entry => `${entry.text}|${entry.isTitle ? 1 : 0}|${entry.isMain ? 1 : 0}|${entry.isDone ? 1 : 0}`).join('\n');
+    // Build signature including expanded state for change detection
+    const expandedSig = [...this.questTrackerExpanded].sort().join(',');
+    const signature = buildTrackerSignature(state) + '|E:' + expandedSig;
     if (signature === this.lastQuestTrackerSignature) return;
     this.lastQuestTrackerSignature = signature;
 
-    let y = 0;
-    for (let i = 0; i < entries.length; i++) {
-      const e = entries[i];
-      let t = this.questTrackerTexts[i];
-      if (!t) {
-        t = this.add.text(0, 0, '', { fontFamily: FONT }).setOrigin(0, 0);
-        this.questTracker.add(t);
-        this.questTrackerTexts.push(t);
+    // --- Render tracker entries ---
+    let textIdx = 0;
+    let y = px(18); // Start below header
+
+    for (let qi = 0; qi < state.entries.length; qi++) {
+      const entry = state.entries[qi];
+      const isExpanded = this.questTrackerExpanded.has(entry.questId);
+
+      // Quest title line
+      const tag = entry.category === 'main' ? '[主线]' : '[支线]';
+      const completionMark = entry.isCompleted ? ' ✓' : '';
+      const titleText = `${tag} ${entry.name}${completionMark}`;
+
+      let titleObj = this.questTrackerTexts[textIdx];
+      if (!titleObj) {
+        titleObj = this.add.text(0, 0, '', { fontFamily: FONT }).setOrigin(0, 0);
+        titleObj.setInteractive({ useHandCursor: true });
+        const idx = textIdx;
+        titleObj.on('pointerdown', () => {
+          // Find the quest ID from the text's data
+          const qid = titleObj.getData('questId') as string;
+          if (qid) {
+            if (this.questTrackerExpanded.has(qid)) {
+              this.questTrackerExpanded.delete(qid);
+            } else {
+              this.questTrackerExpanded.add(qid);
+            }
+            this.lastQuestTrackerSignature = ''; // force refresh
+          }
+        });
+        this.questTracker.add(titleObj);
+        this.questTrackerTexts.push(titleObj);
       }
-      t.setVisible(true);
-      t.setText(e.text);
-      t.setY(y);
-      if (e.isTitle) {
-        t.setFontSize(fs(13));
-        t.setColor(e.isMain ? '#e8c252' : '#a89060');
-        t.setFontStyle('bold');
+      titleObj.setVisible(true);
+      titleObj.setText(titleText);
+      titleObj.setY(y);
+      titleObj.setData('questId', entry.questId);
+      titleObj.setFontSize(fs(12));
+      titleObj.setFontStyle('bold');
+      // Gold text for completed, gold for main, muted for side
+      if (entry.isCompleted) {
+        titleObj.setColor('#f1c40f');
       } else {
-        t.setFontSize(fs(10));
-        t.setColor(e.isDone ? '#66aa66' : '#aaaaaa');
-        t.setFontStyle('');
+        titleObj.setColor(entry.category === 'main' ? '#e8c252' : '#a89060');
       }
-      y += e.isTitle ? px(18) : px(14);
+      textIdx++;
+      y += px(17);
+
+      // Compact progress summary (always shown below title)
+      let summaryObj = this.questTrackerTexts[textIdx];
+      if (!summaryObj) {
+        summaryObj = this.add.text(0, 0, '', { fontFamily: FONT }).setOrigin(0, 0);
+        this.questTracker.add(summaryObj);
+        this.questTrackerTexts.push(summaryObj);
+      }
+      summaryObj.setVisible(true);
+      summaryObj.setText(`  ${entry.progressSummary}`);
+      summaryObj.setY(y);
+      summaryObj.setFontSize(fs(10));
+      summaryObj.setFontStyle('');
+      summaryObj.setColor(entry.isCompleted ? '#f1c40f' : '#aaaaaa');
+      textIdx++;
+      y += px(14);
+
+      // Expanded: show individual objective lines
+      if (isExpanded && entry.objectiveLines.length > 0) {
+        for (const objLine of entry.objectiveLines) {
+          let objObj = this.questTrackerTexts[textIdx];
+          if (!objObj) {
+            objObj = this.add.text(0, 0, '', { fontFamily: FONT }).setOrigin(0, 0);
+            this.questTracker.add(objObj);
+            this.questTrackerTexts.push(objObj);
+          }
+          objObj.setVisible(true);
+          objObj.setText(`    ${objLine.label} ${objLine.progress}`);
+          objObj.setY(y);
+          objObj.setFontSize(fs(9));
+          objObj.setFontStyle('');
+          objObj.setColor(objLine.done ? '#66aa66' : '#888888');
+          textIdx++;
+          y += px(13);
+        }
+      }
+
+      // Small gap between quests
+      y += px(3);
     }
-    for (let i = entries.length; i < this.questTrackerTexts.length; i++) {
+
+    // Scroll indicator
+    if (state.hasMore && this.questTrackerScrollText) {
+      const remaining = state.totalCount - state.visibleCount;
+      this.questTrackerScrollText.setText(`▼ 还有 ${remaining} 个任务`);
+      this.questTrackerScrollText.setY(y);
+      this.questTrackerScrollText.setVisible(true);
+      y += px(14);
+    } else if (this.questTrackerScrollText) {
+      this.questTrackerScrollText.setVisible(false);
+    }
+
+    // Hide unused text objects
+    for (let i = textIdx; i < this.questTrackerTexts.length; i++) {
       if (this.questTrackerTexts[i].visible) this.questTrackerTexts[i].setVisible(false);
+    }
+
+    // Update background size
+    if (this.questTrackerBg) {
+      if (state.entries.length > 0) {
+        this.questTrackerBg.setVisible(true);
+        this.questTrackerBg.setSize(px(210), y + px(4));
+        this.questTrackerBg.setPosition(this.questTracker.x - px(4), this.questTracker.y - px(4));
+      } else {
+        this.questTrackerBg.setVisible(false);
+      }
     }
   }
 }
