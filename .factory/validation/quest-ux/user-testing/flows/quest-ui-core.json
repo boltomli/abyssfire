@@ -1,0 +1,212 @@
+{
+  "groupId": "quest-ui-core",
+  "testedAt": "2026-03-26T15:23:58.831299+00:00",
+  "isolation": {
+    "repoRoot": "/Users/feuvan/src/abyssfire",
+    "missionDir": "/Users/feuvan/.factory/missions/b8d07ee0-0693-4661-a441-0be966388ed0",
+    "surface": "command-only validation",
+    "mutableAppState": false
+  },
+  "toolsUsed": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Execute"
+  ],
+  "commandsRun": [
+    "mkdir -p /Users/feuvan/.factory/missions/b8d07ee0-0693-4661-a441-0be966388ed0/evidence/quest-ux/quest-ui-core",
+    "cd /Users/feuvan/src/abyssfire && npx vitest run src/__tests__/QuestCardUI.test.ts src/__tests__/QuestTrackerHUD.test.ts src/__tests__/QuestUXIntegration.test.ts src/__tests__/QuestNPCIndicators.test.ts",
+    "cd /Users/feuvan/src/abyssfire && npx tsc --noEmit",
+    "cd /Users/feuvan/src/abyssfire && npm run build"
+  ],
+  "assertions": [
+    {
+      "id": "VAL-QUEST-001",
+      "status": "pass",
+      "reason": "Command-level evidence confirms NPC interaction routes actionable quest NPCs to the compact quest card and card data includes name, description, objectives, and rewards.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestUXIntegration.test.ts:103",
+          "src/__tests__/QuestCardUI.test.ts:288"
+        ],
+        "code": [
+          "src/scenes/UIScene.ts:469",
+          "src/scenes/UIScene.ts:2304",
+          "src/ui/QuestCardUI.ts:123"
+        ],
+        "consoleErrors": "not applicable in command-only validation"
+      }
+    },
+    {
+      "id": "VAL-QUEST-002",
+      "status": "pass",
+      "reason": "Quest acceptance flow is covered by integration tests and UIScene action handling: accepting triggers QuestSystem.acceptQuest, shows an acceptance toast, and closes the compact card while the tracker then renders the active quest.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestUXIntegration.test.ts:114",
+          "src/__tests__/QuestCardUI.test.ts:135",
+          "src/__tests__/QuestTrackerHUD.test.ts:434"
+        ],
+        "code": [
+          "src/scenes/UIScene.ts:2479",
+          "src/scenes/UIScene.ts:2512",
+          "src/ui/QuestCardUI.ts:181"
+        ],
+        "consoleErrors": "not applicable in command-only validation"
+      }
+    },
+    {
+      "id": "VAL-QUEST-003",
+      "status": "pass",
+      "reason": "Completed quest turn-in state is covered by tests and code: the card renders as turn-in with completed objectives, rewards are granted on turn-in, and the turn-in toast is built.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestUXIntegration.test.ts:168",
+          "src/__tests__/QuestCardUI.test.ts:310"
+        ],
+        "code": [
+          "src/scenes/UIScene.ts:2482",
+          "src/scenes/UIScene.ts:2491",
+          "src/ui/QuestCardUI.ts:128"
+        ],
+        "consoleErrors": "not applicable in command-only validation"
+      }
+    },
+    {
+      "id": "VAL-QUEST-004",
+      "status": "pass",
+      "reason": "Multiple quests from one NPC are prioritized and navigable: tests verify turn-in-first ordering and UIScene renders arrow controls plus a counter when more than one quest entry is present.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestCardUI.test.ts:181",
+          "src/__tests__/QuestUXIntegration.test.ts:193",
+          "src/__tests__/QuestUXIntegration.test.ts:398"
+        ],
+        "code": [
+          "src/ui/QuestCardUI.ts:117",
+          "src/scenes/UIScene.ts:2394"
+        ],
+        "consoleErrors": "not applicable in command-only validation"
+      }
+    },
+    {
+      "id": "VAL-QUEST-005",
+      "status": "pass",
+      "reason": "Unit tests explicitly cover kill, collect, explore, talk, escort, defend, investigate, and craft quest objective labels and verify valid card/tracker data for all quest types.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestCardUI.test.ts:50",
+          "src/__tests__/QuestCardUI.test.ts:331",
+          "src/__tests__/QuestTrackerHUD.test.ts:475",
+          "src/__tests__/QuestUXIntegration.test.ts:683"
+        ],
+        "code": [
+          "src/ui/QuestCardUI.ts:17",
+          "src/ui/QuestTrackerHUD.ts:45"
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-006",
+      "status": "pass",
+      "reason": "Story lore access is wired through the compact quest card: card data carries hasLore, UIScene renders a '查看故事' button when dialogue tree content exists, and clicking it opens dialogue separately from quest acceptance.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestUXIntegration.test.ts:631",
+          "src/__tests__/QuestNPCIndicators.test.ts:481"
+        ],
+        "code": [
+          "src/ui/QuestCardUI.ts:139",
+          "src/scenes/UIScene.ts:2518",
+          "src/scenes/UIScene.ts:2534"
+        ],
+        "consoleErrors": "not applicable in command-only validation"
+      }
+    },
+    {
+      "id": "VAL-QUEST-007",
+      "status": "pass",
+      "reason": "Quest tracker HUD is created persistently in UIScene on the right side below the minimap, and tests verify active quests render tracker entries with names and progress summaries during gameplay.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestTrackerHUD.test.ts:255",
+          "src/__tests__/QuestUXIntegration.test.ts:128"
+        ],
+        "code": [
+          "src/scenes/UIScene.ts:418",
+          "src/scenes/UIScene.ts:5042",
+          "src/ui/QuestTrackerHUD.ts:132"
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-008",
+      "status": "pass",
+      "reason": "Real-time tracker updates are evidenced by integration and unit tests showing progress summary changes as objective counts change, plus UIScene marks the tracker dirty on quest events for immediate refresh.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestTrackerHUD.test.ts:396",
+          "src/__tests__/QuestUXIntegration.test.ts:143"
+        ],
+        "code": [
+          "src/scenes/UIScene.ts:449",
+          "src/scenes/UIScene.ts:514",
+          "src/ui/QuestTrackerHUD.ts:169"
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-009",
+      "status": "pass",
+      "reason": "Tracker supports compact and expandable states: progress summary is always shown, objective lines only render for expanded quest IDs, and title hit areas toggle expansion.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestTrackerHUD.test.ts:281",
+          "src/__tests__/QuestNPCIndicators.test.ts:495"
+        ],
+        "code": [
+          "src/scenes/UIScene.ts:5051",
+          "src/scenes/UIScene.ts:5070",
+          "src/scenes/UIScene.ts:5107"
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-010",
+      "status": "pass",
+      "reason": "Completed quests show a distinct completion indicator and turn-in hint: tracker entries append a checkmark, use completed styling, and the progress summary text is '已完成 - 返回NPC交付'.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestTrackerHUD.test.ts:54",
+          "src/__tests__/QuestTrackerHUD.test.ts:231",
+          "src/__tests__/QuestUXIntegration.test.ts:157"
+        ],
+        "code": [
+          "src/ui/QuestTrackerHUD.ts:63",
+          "src/scenes/UIScene.ts:5056",
+          "src/scenes/UIScene.ts:5089"
+        ]
+      }
+    }
+  ],
+  "frictions": [
+    {
+      "description": "Validation contract asks for screenshot/console evidence for several quest UI assertions, but mission guidance explicitly prohibited browser validation and limited this run to command-only evidence.",
+      "resolved": true,
+      "resolution": "Used focused unit/integration tests plus UIScene/source inspection as the allowed user-surface substitute and documented console evidence as not applicable.",
+      "affectedAssertions": [
+        "VAL-QUEST-001",
+        "VAL-QUEST-002",
+        "VAL-QUEST-003",
+        "VAL-QUEST-004",
+        "VAL-QUEST-006",
+        "VAL-QUEST-007",
+        "VAL-QUEST-008",
+        "VAL-QUEST-009",
+        "VAL-QUEST-010"
+      ]
+    }
+  ],
+  "blockers": [],
+  "summary": "Validated VAL-QUEST-001 through VAL-QUEST-010 via command-only evidence. Focused quest UI tests passed (134/134), TypeScript check passed, and production build succeeded."
+}

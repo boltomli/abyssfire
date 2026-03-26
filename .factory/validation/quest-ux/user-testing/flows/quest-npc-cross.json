@@ -1,0 +1,222 @@
+{
+  "groupId": "quest-npc-cross",
+  "testedAt": "2026-03-26T15:23:36Z",
+  "isolation": {
+    "mode": "command-only",
+    "repoRoot": "/Users/feuvan/src/abyssfire",
+    "missionDir": "/Users/feuvan/.factory/missions/b8d07ee0-0693-4661-a441-0be966388ed0",
+    "sharedRepo": true,
+    "browserAutomation": false
+  },
+  "toolsUsed": [
+    "Read",
+    "Grep",
+    "Execute"
+  ],
+  "commandsRun": [
+    "cd /Users/feuvan/src/abyssfire && npm run test -- src/__tests__/QuestNPCIndicators.test.ts src/__tests__/QuestTrackerHUD.test.ts src/__tests__/QuestUXIntegration.test.ts src/__tests__/cross-area-integration.test.ts",
+    "cd /Users/feuvan/src/abyssfire && ./node_modules/.bin/tsc --noEmit",
+    "cd /Users/feuvan/src/abyssfire && npm run build",
+    "cd /Users/feuvan/src/abyssfire && npm run test"
+  ],
+  "assertions": [
+    {
+      "id": "VAL-QUEST-011",
+      "status": "pass",
+      "reason": "Quest NPC indicator unit tests and real-data integration cover yellow '!' for available quests and yellow '?' for ready-to-turn-in quests.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestNPCIndicators.test.ts",
+          "src/__tests__/QuestUXIntegration.test.ts"
+        ],
+        "code": [
+          "src/ui/QuestNPCIndicators.ts"
+        ],
+        "details": [
+          "QuestNPCIndicators.test.ts verifies yellow '!' for available quests and yellow '?' for completed quests.",
+          "QuestUXIntegration.test.ts real-data elder lifecycle confirms quest_elder starts with '!'."
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-012",
+      "status": "pass",
+      "reason": "State-transition tests confirm indicators update from available to active to completed/turn-in states after quest acceptance and objective completion.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestNPCIndicators.test.ts",
+          "src/__tests__/QuestUXIntegration.test.ts"
+        ],
+        "details": [
+          "QuestNPCIndicators state transition coverage asserts ! -> dim ? after accept and dim ? -> yellow ? after completion.",
+          "QuestUXIntegration full lifecycle repeats the same transitions in integration flow."
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-013",
+      "status": "pass",
+      "reason": "Mobile-readiness tests validate DPR-scaled quest UI controls meet or exceed the 44px minimum tap target guidance.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestNPCIndicators.test.ts"
+        ],
+        "details": [
+          "Tests assert px(22) >= 44 for indicator/navigation/tracker title targets, px(32) >= 44 for action buttons, and px(24) >= 44 for lore button height."
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-014",
+      "status": "pass",
+      "reason": "Command-only code inspection and tests show quest tracker/card logic is exposed via explicit buttons and computed state, with no scroll-wheel dependency in the validated surfaces.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestUXIntegration.test.ts",
+          "src/__tests__/QuestTrackerHUD.test.ts"
+        ],
+        "code": [
+          "src/ui/QuestTrackerHUD.ts",
+          "src/ui/QuestNPCIndicators.ts"
+        ],
+        "details": [
+          "Quest tracker and NPC indicator modules are pure state builders with no mouse-wheel or scroll event handling.",
+          "QuestUXIntegration validates navigation through card actions and tracker state transitions without any scroll-only access path."
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-015",
+      "status": "pass",
+      "reason": "End-to-end quest lifecycle integration test covers discovery, acceptance, tracking, progress updates, completion, turn-in, and post-turn-in cleanup.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestUXIntegration.test.ts"
+        ],
+        "details": [
+          "The 'complete lifecycle' test verifies indicator !, accept card, toast, tracker progress updates, completed tracker state, turn-in card, reward data, and indicator removal."
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-016",
+      "status": "pass",
+      "reason": "Save/load integration tests preserve serialized quest progress, tracker signatures, card actions, and NPC indicator states across restore.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestUXIntegration.test.ts"
+        ],
+        "details": [
+          "Save/load tests cover active quests, multi-quest prerequisite chains, and completed ready-to-turn-in state after JSON round-trip."
+        ]
+      }
+    },
+    {
+      "id": "VAL-QUEST-017",
+      "status": "pass",
+      "reason": "The full repository test suite passed with zero failures.",
+      "evidence": {
+        "command": "npm run test",
+        "result": "45 test files passed; 2953 tests passed; 0 failures"
+      }
+    },
+    {
+      "id": "VAL-QUEST-018",
+      "status": "pass",
+      "reason": "Both TypeScript typecheck and production build completed successfully.",
+      "evidence": {
+        "commands": [
+          "./node_modules/.bin/tsc --noEmit",
+          "npm run build"
+        ],
+        "result": [
+          "tsc --noEmit exited 0",
+          "vite build succeeded; only existing chunk-size warning reported"
+        ]
+      }
+    },
+    {
+      "id": "VAL-CROSS-001",
+      "status": "pass",
+      "reason": "Cross-area and quest integration tests jointly confirm quest UI state works alongside broader system persistence and integration behavior.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestUXIntegration.test.ts",
+          "src/__tests__/cross-area-integration.test.ts",
+          "src/__tests__/PerformanceIntegration.test.ts"
+        ],
+        "details": [
+          "QuestUXIntegration is annotated to fulfill VAL-CROSS-001 and validates card/tracker/indicator cooperation.",
+          "cross-area-integration.test.ts validates save/load round-trip and broader system interactions without quest regressions."
+        ]
+      }
+    },
+    {
+      "id": "VAL-CROSS-002",
+      "status": "pass",
+      "reason": "Zone-transition integration coverage verifies tracker signatures and visible quest entries persist when the same quest data is carried across areas.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/QuestUXIntegration.test.ts"
+        ],
+        "details": [
+          "The zone transition tracker persistence test confirms two quests remain visible and tracker signatures match before/after simulated zone change."
+        ]
+      }
+    },
+    {
+      "id": "VAL-CROSS-003",
+      "status": "pass",
+      "reason": "Full regression signals are green: cross-area integration tests passed and the entire suite passed with no failures.",
+      "evidence": {
+        "tests": [
+          "src/__tests__/cross-area-integration.test.ts"
+        ],
+        "commands": [
+          "npm run test"
+        ],
+        "details": [
+          "cross-area-integration.test.ts includes regression coverage for inventory, equipment, combat, companions, achievements, gem socketing, and save/migration flows.",
+          "Full-suite pass indicates no detected regressions in existing features under command-only validation."
+        ]
+      }
+    }
+  ],
+  "frictions": [
+    {
+      "description": "The mission referenced .factory/library/user-testing.md, but that file was absent at the provided path.",
+      "resolved": true,
+      "resolution": "Used mission AGENTS.md testing guidance plus the explicit parent-task constraints for command-only validation.",
+      "affectedAssertions": [
+        "VAL-QUEST-011",
+        "VAL-QUEST-012",
+        "VAL-QUEST-013",
+        "VAL-QUEST-014",
+        "VAL-QUEST-015",
+        "VAL-QUEST-016",
+        "VAL-QUEST-017",
+        "VAL-QUEST-018",
+        "VAL-CROSS-001",
+        "VAL-CROSS-002",
+        "VAL-CROSS-003"
+      ]
+    },
+    {
+      "description": "Several assigned assertions specify screenshot/console evidence, but task constraints explicitly forbade browser automation and required command-only validation.",
+      "resolved": true,
+      "resolution": "Mapped those assertions to unit/integration tests, source inspection, typecheck, and build evidence only.",
+      "affectedAssertions": [
+        "VAL-QUEST-011",
+        "VAL-QUEST-012",
+        "VAL-QUEST-013",
+        "VAL-QUEST-014",
+        "VAL-QUEST-015",
+        "VAL-CROSS-001",
+        "VAL-CROSS-002",
+        "VAL-CROSS-003"
+      ]
+    }
+  ],
+  "blockers": [],
+  "summary": "Validated 11 assigned assertions by command-only evidence. Focused quest/cross integration tests, full test suite, typecheck, and production build all passed; no blockers encountered."
+}

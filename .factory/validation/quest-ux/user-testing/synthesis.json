@@ -1,0 +1,49 @@
+{
+  "milestone": "quest-ux",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 21,
+    "passed": 21,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-QUEST-001",
+    "VAL-QUEST-002",
+    "VAL-QUEST-003",
+    "VAL-QUEST-004",
+    "VAL-QUEST-005",
+    "VAL-QUEST-006",
+    "VAL-QUEST-007",
+    "VAL-QUEST-008",
+    "VAL-QUEST-009",
+    "VAL-QUEST-010",
+    "VAL-QUEST-011",
+    "VAL-QUEST-012",
+    "VAL-QUEST-013",
+    "VAL-QUEST-014",
+    "VAL-QUEST-015",
+    "VAL-QUEST-016",
+    "VAL-QUEST-017",
+    "VAL-QUEST-018",
+    "VAL-CROSS-001",
+    "VAL-CROSS-002",
+    "VAL-CROSS-003"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Used mission AGENTS.md testing guidance plus the explicit parent-task constraints for command-only validation.",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null,
+  "generatedAt": "2026-03-26T15:25:02.259882+00:00",
+  "flowReports": [
+    "/Users/feuvan/src/abyssfire/.factory/validation/quest-ux/user-testing/flows/quest-ui-core.json",
+    "/Users/feuvan/src/abyssfire/.factory/validation/quest-ux/user-testing/flows/quest-npc-cross.json"
+  ]
+}
