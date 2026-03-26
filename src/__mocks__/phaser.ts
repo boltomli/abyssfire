@@ -46,6 +46,18 @@ class EventEmitter {
 
 const Phaser = {
   Events: { EventEmitter },
+  AUTO: 0,
+  Scale: {
+    FIT: 1,
+    CENTER_BOTH: 1,
+  },
+  Geom: {
+    Point: class {
+      x: number;
+      y: number;
+      constructor(x: number, y: number) { this.x = x; this.y = y; }
+    },
+  },
 };
 
 export default Phaser;

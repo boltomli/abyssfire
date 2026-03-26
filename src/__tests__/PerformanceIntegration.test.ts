@@ -1,13 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SpatialGrid, type SpatialEntity } from '../systems/SpatialGrid';
 import { FogOfWarCore } from '../systems/FogOfWarCore';
-
-// Local distanceSq mirror — avoids importing Phaser-dependent IsometricUtils.
-function distanceSq(x1: number, y1: number, x2: number, y2: number): number {
-  const dx = x1 - x2;
-  const dy = y1 - y2;
-  return dx * dx + dy * dy;
-}
+import { distanceSq } from '../utils/IsometricUtils';
 
 // ---------------------------------------------------------------------------
 // Performance Integration Tests
@@ -538,56 +532,141 @@ describe('Cross-system: all three optimizations work together', () => {
     expect(fog.isExplored(60, 60)).toBe(true);
   });
 
-  it('zone transition scenario: fog save/load + spatial grid rebuild + buff preservation', () => {
-    // --- Zone 1 ---
-    const fog1 = new FogOfWarCore(120, 120, 10);
-    fog1.update(60, 60);
-    const fogData = fog1.getExploredData();
+  it('FogOfWarCore save/load round-trip preserves explored state across zone transitions', () => {
+    // --- Zone 1: explore multiple regions ---
+    const zone1Fog = new FogOfWarCore(120, 120, 10);
+    zone1Fog.update(20, 20);
+    zone1Fog.update(60, 60);
+    zone1Fog.update(100, 100);
 
-    const grid1 = new SpatialGrid(120, 120, 16);
-    grid1.insert({ id: 'm1', tileCol: 65, tileRow: 60 });
-    grid1.insert({ id: 'm2', tileCol: 70, tileRow: 70 });
+    // Record which tiles are explored before save
+    const zone1Explored = zone1Fog.getExploredData();
 
-    // Buffs persist across zone transitions (they're on the player)
-    interface Buff {
-      stat: string;
-      value: number;
-      duration: number;
-      startTime: number;
+    // Verify tiles near all three explored positions are marked
+    expect(zone1Fog.isExplored(20, 20)).toBe(true);
+    expect(zone1Fog.isExplored(60, 60)).toBe(true);
+    expect(zone1Fog.isExplored(100, 100)).toBe(true);
+    // Far-away tile should NOT be explored
+    expect(zone1Fog.isExplored(0, 119)).toBe(false);
+
+    // --- Save zone 1 fog data, transition to zone 2, then return ---
+    const restoredFog = new FogOfWarCore(120, 120, 10);
+    restoredFog.loadExploredData(zone1Explored);
+
+    // Verify every tile matches the original
+    for (let r = 0; r < 120; r++) {
+      for (let c = 0; c < 120; c++) {
+        expect(restoredFog.isExplored(c, r)).toBe(zone1Fog.isExplored(c, r));
+      }
     }
-    const playerBuffs: Buff[] = [
-      { stat: 'speed', value: 10, duration: 30000, startTime: 0 },
+
+    // After load, update triggers dirty tiles for a full re-render
+    const changed = restoredFog.update(60, 60);
+    expect(changed).toBe(true);
+    expect(restoredFog.dirty.size).toBeGreaterThan(0);
+
+    // Previously explored but now out-of-view tiles stay explored
+    expect(restoredFog.isExplored(20, 20)).toBe(true);
+    expect(restoredFog.isExplored(100, 100)).toBe(true);
+  });
+
+  it('SpatialGrid clear + rebuild produces correct results after zone transition', () => {
+    const grid = new SpatialGrid(120, 120, 16);
+
+    // --- Zone 1: populate with monsters ---
+    const zone1Monsters: SpatialEntity[] = [
+      { id: 'z1m1', tileCol: 10, tileRow: 10 },
+      { id: 'z1m2', tileCol: 15, tileRow: 12 },
+      { id: 'z1m3', tileCol: 60, tileRow: 60 },
     ];
+    for (const m of zone1Monsters) grid.insert(m);
+    expect(grid.size).toBe(3);
+    expect(grid.queryRadius(10, 10, 10).map(e => e.id)).toContain('z1m1');
+    expect(grid.queryRadius(10, 10, 10).map(e => e.id)).toContain('z1m2');
 
-    // --- Simulate zone transition ---
+    // --- Simulate zone transition: clear and rebuild ---
+    grid.clear();
+    expect(grid.size).toBe(0);
 
-    // Zone 2: new fog, loaded from save data for this zone
-    const fog2 = new FogOfWarCore(80, 80, 10);
-    // Fresh zone — no explored data to load (or could load from save)
-    fog2.update(40, 40);
-    expect(fog2.isExplored(40, 40)).toBe(true);
+    // No stale zone 1 monsters should appear
+    expect(grid.queryRadius(10, 10, 50)).toHaveLength(0);
+    expect(grid.queryRadius(60, 60, 50)).toHaveLength(0);
 
-    // Zone 2: new spatial grid
-    const grid2 = new SpatialGrid(80, 80, 16);
-    grid2.insert({ id: 'z2m1', tileCol: 42, tileRow: 40 });
-    const z2Nearby = grid2.queryRadius(40, 40, 5);
-    expect(z2Nearby.length).toBe(1);
-    expect(z2Nearby[0].id).toBe('z2m1');
+    // --- Zone 2: repopulate with different monsters ---
+    const zone2Monsters: SpatialEntity[] = [
+      { id: 'z2m1', tileCol: 40, tileRow: 40 },
+      { id: 'z2m2', tileCol: 42, tileRow: 41 },
+      { id: 'z2m3', tileCol: 80, tileRow: 80 },
+      { id: 'z2m4', tileCol: 81, tileRow: 79 },
+    ];
+    for (const m of zone2Monsters) grid.insert(m);
+    expect(grid.size).toBe(4);
 
-    // Old grid is discarded — no stale references
-    expect(grid1.size).toBe(2); // still valid but unused
+    // Query near zone 2 spawn point
+    const nearSpawn = grid.queryRadius(40, 40, 5);
+    const nearSpawnIds = new Set(nearSpawn.map(e => e.id));
+    expect(nearSpawnIds.has('z2m1')).toBe(true);
+    expect(nearSpawnIds.has('z2m2')).toBe(true);
+    expect(nearSpawnIds.has('z2m3')).toBe(false); // too far
+    expect(nearSpawnIds.has('z2m4')).toBe(false); // too far
 
-    // Player buffs survive transition
-    expect(playerBuffs).toHaveLength(1);
-    expect(playerBuffs[0].stat).toBe('speed');
+    // Query near a cluster at (80,80)
+    const nearCluster = grid.queryRadius(80, 80, 3);
+    const nearClusterIds = new Set(nearCluster.map(e => e.id));
+    expect(nearClusterIds.has('z2m3')).toBe(true);
+    expect(nearClusterIds.has('z2m4')).toBe(true);
 
-    // --- Return to Zone 1 ---
-    const fog1Restored = new FogOfWarCore(120, 120, 10);
-    fog1Restored.loadExploredData(fogData);
-    fog1Restored.update(60, 60);
+    // No stale zone 1 entities leak through
+    expect(grid.has({ id: 'z1m1', tileCol: 0, tileRow: 0 } as SpatialEntity)).toBe(false);
+    expect(grid.has({ id: 'z1m2', tileCol: 0, tileRow: 0 } as SpatialEntity)).toBe(false);
+  });
 
-    // Previously explored tiles are still explored
-    expect(fog1Restored.isExplored(60, 60)).toBe(true);
-    expect(fog1Restored.isExplored(65, 60)).toBe(true);
+  it('distanceSq-based proximity checks work correctly after player position reset', () => {
+    // Player starts at zone 1 position
+    const z1PlayerCol = 90;
+    const z1PlayerRow = 90;
+
+    // Monsters in zone 1 near player
+    const z1Monster = { id: 'z1m', tileCol: 92, tileRow: 91 };
+    const aggroRange = 10;
+    const aggroRangeSq = aggroRange * aggroRange;
+
+    // Verify monster is in aggro range in zone 1
+    expect(distanceSq(z1PlayerCol, z1PlayerRow, z1Monster.tileCol, z1Monster.tileRow)).toBeLessThanOrEqual(aggroRangeSq);
+
+    // --- Zone transition: player moves to zone 2 spawn point ---
+    const z2PlayerCol = 5;
+    const z2PlayerRow = 5;
+
+    // New zone 2 monsters near the spawn
+    const z2MonsterNear = { id: 'z2near', tileCol: 8, tileRow: 7 };
+    const z2MonsterFar = { id: 'z2far', tileCol: 50, tileRow: 50 };
+
+    // After position reset, proximity uses distanceSq with new position
+    const distNear = distanceSq(z2PlayerCol, z2PlayerRow, z2MonsterNear.tileCol, z2MonsterNear.tileRow);
+    const distFar = distanceSq(z2PlayerCol, z2PlayerRow, z2MonsterFar.tileCol, z2MonsterFar.tileRow);
+
+    expect(distNear).toBeLessThanOrEqual(aggroRangeSq); // 3²+2² = 13 ≤ 100
+    expect(distFar).toBeGreaterThan(aggroRangeSq);       // 45²+45² = 4050 > 100
+
+    // Verify distanceSq with SpatialGrid agrees
+    const grid = new SpatialGrid(120, 120, 16);
+    grid.insert(z2MonsterNear);
+    grid.insert(z2MonsterFar);
+
+    const inRange = grid.queryRadius(z2PlayerCol, z2PlayerRow, aggroRange);
+    const inRangeIds = new Set(inRange.map(e => e.id));
+    expect(inRangeIds.has('z2near')).toBe(true);
+    expect(inRangeIds.has('z2far')).toBe(false);
+
+    // Cross-verify: manual distanceSq matches grid result for each entity
+    for (const entity of [z2MonsterNear, z2MonsterFar]) {
+      const d = distanceSq(z2PlayerCol, z2PlayerRow, entity.tileCol, entity.tileRow);
+      if (d <= aggroRangeSq) {
+        expect(inRangeIds.has(entity.id)).toBe(true);
+      } else {
+        expect(inRangeIds.has(entity.id)).toBe(false);
+      }
+    }
   });
 });
