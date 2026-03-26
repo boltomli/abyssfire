@@ -2407,34 +2407,43 @@ export class UIScene extends Phaser.Scene {
 
       // ── Navigation (multiple quests) ──
       if (total > 1) {
-        // Left arrow
+        // Minimum touch target size for mobile (44px physical = px(22))
+        const navTouchSize = px(22);
+
+        // Left arrow with touch-friendly hit area
         const leftArrow = this.add.text(px(40), curY + px(14), '◀', {
           fontSize: fs(16), color: currentIndex > 0 ? '#c0934a' : '#333',
           fontFamily: FONT,
-        }).setOrigin(0.5).setInteractive({ useHandCursor: currentIndex > 0 });
+        }).setOrigin(0.5);
+        const leftHit = this.add.rectangle(px(40), curY + px(14), navTouchSize, navTouchSize, 0x000000, 0)
+          .setInteractive({ useHandCursor: currentIndex > 0 });
         if (currentIndex > 0) {
-          leftArrow.on('pointerdown', () => { currentIndex--; renderCard(); });
-          leftArrow.on('pointerover', () => leftArrow.setColor('#f1c40f'));
-          leftArrow.on('pointerout', () => leftArrow.setColor('#c0934a'));
+          leftHit.on('pointerdown', () => { currentIndex--; renderCard(); });
+          leftHit.on('pointerover', () => leftArrow.setColor('#f1c40f'));
+          leftHit.on('pointerout', () => leftArrow.setColor('#c0934a'));
         }
         this.questCardPanel.add(leftArrow);
+        this.questCardPanel.add(leftHit);
 
         // Counter
         this.questCardPanel.add(this.add.text(pw / 2, curY + px(14), `${currentIndex + 1}/${total}`, {
           fontSize: fs(12), color: '#888', fontFamily: FONT,
         }).setOrigin(0.5));
 
-        // Right arrow
+        // Right arrow with touch-friendly hit area
         const rightArrow = this.add.text(pw - px(40), curY + px(14), '▶', {
           fontSize: fs(16), color: currentIndex < total - 1 ? '#c0934a' : '#333',
           fontFamily: FONT,
-        }).setOrigin(0.5).setInteractive({ useHandCursor: currentIndex < total - 1 });
+        }).setOrigin(0.5);
+        const rightHit = this.add.rectangle(pw - px(40), curY + px(14), navTouchSize, navTouchSize, 0x000000, 0)
+          .setInteractive({ useHandCursor: currentIndex < total - 1 });
         if (currentIndex < total - 1) {
-          rightArrow.on('pointerdown', () => { currentIndex++; renderCard(); });
-          rightArrow.on('pointerover', () => rightArrow.setColor('#f1c40f'));
-          rightArrow.on('pointerout', () => rightArrow.setColor('#c0934a'));
+          rightHit.on('pointerdown', () => { currentIndex++; renderCard(); });
+          rightHit.on('pointerover', () => rightArrow.setColor('#f1c40f'));
+          rightHit.on('pointerout', () => rightArrow.setColor('#c0934a'));
         }
         this.questCardPanel.add(rightArrow);
+        this.questCardPanel.add(rightHit);
 
         curY += navH;
       }
@@ -5036,7 +5045,12 @@ export class UIScene extends Phaser.Scene {
       let titleObj = this.questTrackerTexts[textIdx];
       if (!titleObj) {
         titleObj = this.add.text(0, 0, '', { fontFamily: FONT }).setOrigin(0, 0);
-        titleObj.setInteractive({ useHandCursor: true });
+        // Touch-friendly hit area: minimum px(22) height (44px physical at DPR=2)
+        titleObj.setInteractive(
+          new Phaser.Geom.Rectangle(0, 0, px(200), px(22)),
+          Phaser.Geom.Rectangle.Contains,
+        );
+        titleObj.input!.cursor = 'pointer';
         const idx = textIdx;
         titleObj.on('pointerdown', () => {
           // Find the quest ID from the text's data

@@ -58,8 +58,8 @@ export class NPC {
       this.drawProceduralNPC(scene);
     }
 
-    // Quest marker (created for quest NPCs, updated dynamically)
-    if (definition.type === 'quest') {
+    // Quest marker (created for any NPC with quests, updated dynamically)
+    if (definition.quests && definition.quests.length > 0) {
       this.questMarker = scene.add.text(0, -80, '!', {
         fontSize: fs(20),
         color: '#f1c40f',

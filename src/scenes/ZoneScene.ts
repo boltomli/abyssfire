@@ -46,6 +46,7 @@ import type { DungeonRunState, DungeonFloorConfig } from '../systems/DungeonSyst
 import { DifficultySystem, DIFFICULTY_UNLOCK_MESSAGES } from '../systems/DifficultySystem';
 import { SpatialGrid } from '../systems/SpatialGrid';
 import { DungeonBossDef, DungeonMidBossDef } from '../data/dungeonData';
+import { computeNPCIndicator } from '../ui/QuestNPCIndicators';
 import type { UIScene } from './UIScene';
 
 const TILE_KEYS = ['tile_grass', 'tile_dirt', 'tile_stone', 'tile_water', 'tile_wall', 'tile_camp', 'tile_camp_wall'];
@@ -486,6 +487,9 @@ export class ZoneScene extends Phaser.Scene {
     EventBus.on(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp, this);
     EventBus.on(GameEvents.QUEST_COMPLETED, this.handleQuestCompleted, this);
     EventBus.on(GameEvents.UI_SKILL_CLICK, this.handleUiSkillClick, this);
+    // Update NPC quest indicators immediately when quest state changes
+    EventBus.on(GameEvents.QUEST_ACCEPTED, this.updateNPCQuestMarkers, this);
+    EventBus.on(GameEvents.QUEST_TURNED_IN, this.updateNPCQuestMarkers, this);
 
     this.exploredZones.add(this.currentMapId);
     this.achievementSystem.update('explore', this.currentMapId);
@@ -2442,42 +2446,15 @@ export class ZoneScene extends Phaser.Scene {
   private updateNPCQuestMarkers(): void {
     for (const npc of this.npcs) {
       const def = npc.definition;
-      if (def.type !== 'quest' || !def.quests) continue;
+      if (!def.quests || def.quests.length === 0) continue;
 
-      let hasCompletedQuest = false;
-      let hasActiveQuest = false;
-      let hasAvailableQuest = false;
-      let isMainQuest = false;
-
-      for (const qid of def.quests) {
-        const prog = this.questSystem.progress.get(qid);
-        if (prog) {
-          if (prog.status === 'completed') hasCompletedQuest = true;
-          else if (prog.status === 'active') hasActiveQuest = true;
-        }
-      }
-
-      if (!hasCompletedQuest) {
-        const available = this.questSystem.getAvailableQuests(def.quests, this.player.level);
-        for (const q of available) {
-          const qProg = this.questSystem.progress.get(q.id);
-          if (!qProg || (qProg.status === 'failed' && q.reacceptable)) {
-            hasAvailableQuest = true;
-            if (q.category === 'main') isMainQuest = true;
-            break;
-          }
-        }
-      }
-
-      if (hasCompletedQuest) {
-        npc.setQuestMarker('?', '#f1c40f');
-      } else if (hasAvailableQuest) {
-        npc.setQuestMarker('!', isMainQuest ? '#f1c40f' : '#95a5a6');
-      } else if (hasActiveQuest) {
-        npc.setQuestMarker('?', '#888888');
-      } else {
-        npc.setQuestMarker('', '');
-      }
+      const indicator = computeNPCIndicator(
+        def,
+        this.questSystem.quests,
+        this.questSystem.progress,
+        this.player.level,
+      );
+      npc.setQuestMarker(indicator.text, indicator.color);
     }
   }
 
@@ -5986,6 +5963,8 @@ export class ZoneScene extends Phaser.Scene {
     EventBus.off(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp, this);
     EventBus.off(GameEvents.QUEST_COMPLETED, this.handleQuestCompleted, this);
     EventBus.off(GameEvents.UI_SKILL_CLICK, this.handleUiSkillClick, this);
+    EventBus.off(GameEvents.QUEST_ACCEPTED, this.updateNPCQuestMarkers, this);
+    EventBus.off(GameEvents.QUEST_TURNED_IN, this.updateNPCQuestMarkers, this);
     this.game.canvas.removeEventListener('contextmenu', this.contextMenuHandler);
     if (this.combatDebounceTimer) {
       clearTimeout(this.combatDebounceTimer);
