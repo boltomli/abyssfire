@@ -2826,9 +2826,10 @@ export class ZoneScene extends Phaser.Scene {
         EventBus.emit(GameEvents.SHOP_OPEN, { npcId: def.id, shopItems: def.shopItems ?? [], type: def.type });
         break;
       case 'quest': {
-        // Try to turn in completed quests first
+        // Try to turn in completed quests first (only for non-dialogue-tree NPCs;
+        // dialogue-tree NPCs now use the compact quest card which handles turn-in)
         const turnedIn: string[] = [];
-        if (def.quests) {
+        if (def.quests && !def.dialogueTree) {
           for (const qid of def.quests) {
             const reward = this.questSystem.turnInQuest(qid);
             if (reward) {
@@ -2844,7 +2845,7 @@ export class ZoneScene extends Phaser.Scene {
           }
         }
 
-        // If NPC has a dialogue tree, use the branching dialogue system
+        // If NPC has a dialogue tree, use the compact quest card / branching dialogue system
         if (def.dialogueTree) {
           // Collect turned-in quest IDs for the dialogue state
           const completedQuests: string[] = [];

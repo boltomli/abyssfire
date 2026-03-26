@@ -14,6 +14,8 @@ import type { ZoneScene } from './ZoneScene';
 import type { ItemInstance, WeaponBase, ArmorBase, DialogueTree, DialogueNode, DialogueChoice, EquipSlot } from '../data/types';
 import { MercenarySystem, MERCENARY_DEFS, MERCENARY_TYPES } from '../systems/MercenarySystem';
 import { QUEST_TYPE_LABELS } from '../systems/QuestSystem';
+import { gatherNpcQuests, buildQuestCardData, formatRewardSummary, buildToastMessage } from '../ui/QuestCardUI';
+import type { NpcQuestEntry, QuestCardData } from '../ui/QuestCardUI';
 import type { MercenaryState } from '../systems/MercenarySystem';
 import { LoreByZone, AllLoreEntries, getLoreCountByZone } from '../data/loreCollectibles';
 import type { LoreEntry } from '../data/loreCollectibles';
@@ -146,6 +148,9 @@ export class UIScene extends Phaser.Scene {
   private loreTextBackdrop: Phaser.GameObjects.Rectangle | null = null;
   /** Lore log sub-tab in quest log. */
   private questLogLoreTab = false;
+  /** Compact quest card panel. */
+  private questCardPanel: Phaser.GameObjects.Container | null = null;
+  private questCardBackdrop: Phaser.GameObjects.Rectangle | null = null;
 
   constructor() {
     super({ key: 'UIScene' });
@@ -418,7 +423,26 @@ export class UIScene extends Phaser.Scene {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private handleNpcInteract(data: any): void {
-    if (data.dialogueTree) {
+    if (data.dialogueTree && data.questSystem) {
+      // Try compact quest card first — show if there are available or turn-in quests
+      const questSystem = data.questSystem;
+      const npcDef = NPCDefinitions[data.npcId];
+      const npcQuestIds = npcDef?.quests ?? [];
+      if (npcQuestIds.length > 0) {
+        const entries = gatherNpcQuests(
+          npcQuestIds,
+          questSystem.quests,
+          questSystem.progress,
+          data.player?.level ?? 1,
+        );
+        if (entries.length > 0) {
+          this.openQuestCard(entries, data.npcName, !!data.dialogueTree, data);
+          return;
+        }
+      }
+      // No actionable quests — fall through to dialogue tree for story/lore
+      this.openDialogueTree(data);
+    } else if (data.dialogueTree) {
       this.openDialogueTree(data);
     } else {
       this.openDialogue(data);
@@ -2219,6 +2243,283 @@ export class UIScene extends Phaser.Scene {
     EventBus.emit(GameEvents.DIALOGUE_CLOSE);
     if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
     if (this.dialoguePanel) { this.dialoguePanel.destroy(); this.dialoguePanel = null; }
+  }
+
+  // --- Compact Quest Card ---
+
+  private closeQuestCard(): void {
+    if (this.questCardBackdrop) { this.questCardBackdrop.destroy(); this.questCardBackdrop = null; }
+    if (this.questCardPanel) { this.questCardPanel.destroy(); this.questCardPanel = null; }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private openQuestCard(entries: NpcQuestEntry[], npcName: string, hasDialogueTree: boolean, rawData: any): void {
+    this.closeDialogue();
+    this.closeQuestCard();
+    this.closeAllPanels();
+    audioManager.playSFX('click');
+
+    let currentIndex = 0;
+    const total = entries.length;
+
+    const renderCard = () => {
+      // Clean previous card (but keep backdrop)
+      if (this.questCardPanel) { this.questCardPanel.destroy(); this.questCardPanel = null; }
+
+      const cardData = buildQuestCardData(entries[currentIndex], hasDialogueTree);
+      const pw = px(380), headerH = px(48);
+
+      // Measure content height dynamically
+      const objCount = cardData.objectives.length;
+      const descH = px(36);
+      const objH = objCount * px(20) + px(8);
+      const rewardH = px(28);
+      const navH = total > 1 ? px(34) : 0;
+      const btnH = px(38);
+      const loreH = hasDialogueTree ? px(30) : 0;
+      const padBottom = px(14);
+      const ph = headerH + descH + objH + rewardH + navH + btnH + loreH + padBottom;
+
+      const panelX = (W - pw) / 2;
+      const panelY = (H - ph) / 2;
+
+      // Backdrop (only create once)
+      if (!this.questCardBackdrop) {
+        this.questCardBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.35)
+          .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
+        this.questCardBackdrop.on('pointerdown', () => this.closeQuestCard());
+      }
+
+      this.questCardPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
+      this.animatePanelOpen(this.questCardPanel);
+
+      // Panel background
+      this.questCardPanel.add(this.createPanelBg(pw, ph));
+
+      // ── Header ──
+      // Category badge
+      const catBadge = cardData.category === 'main' ? '【主线】' : '【支线】';
+      const catColor = cardData.category === 'main' ? '#f1c40f' : '#8e8e8e';
+      this.questCardPanel.add(this.add.text(px(14), px(8), catBadge, {
+        fontSize: fs(11), color: catColor, fontFamily: FONT, fontStyle: 'bold',
+      }));
+
+      // Type badge
+      this.questCardPanel.add(this.add.text(pw - px(14), px(8), cardData.typeBadge, {
+        fontSize: fs(11), color: '#888', fontFamily: FONT,
+      }).setOrigin(1, 0));
+
+      // Quest name
+      this.questCardPanel.add(this.add.text(pw / 2, px(24), cardData.name, {
+        fontSize: fs(16), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
+      }).setOrigin(0.5, 0));
+
+      // NPC name subtitle
+      this.questCardPanel.add(this.add.text(pw / 2, px(42), `─ ${npcName} ─`, {
+        fontSize: fs(10), color: '#555566', fontFamily: FONT,
+      }).setOrigin(0.5, 0));
+
+      // ── Description ──
+      let curY = headerH;
+      this.questCardPanel.add(this.add.text(px(14), curY, cardData.description, {
+        fontSize: fs(11), color: '#b0a896', fontFamily: FONT,
+        wordWrap: { width: pw - px(28), useAdvancedWrap: true },
+      }));
+      curY += descH;
+
+      // ── Objectives ──
+      const objSectionLabel = this.add.text(px(14), curY, '目标:', {
+        fontSize: fs(11), color: '#888', fontFamily: FONT, fontStyle: 'bold',
+      });
+      this.questCardPanel.add(objSectionLabel);
+      curY += px(16);
+
+      for (const obj of cardData.objectives) {
+        const checkMark = obj.done ? '✓' : '○';
+        const objColor = obj.done ? '#27ae60' : '#e0d8cc';
+        this.questCardPanel.add(this.add.text(px(18), curY, `${checkMark} ${obj.label}`, {
+          fontSize: fs(11), color: objColor, fontFamily: FONT,
+        }));
+        this.questCardPanel.add(this.add.text(pw - px(14), curY, obj.progress, {
+          fontSize: fs(11), color: obj.done ? '#27ae60' : '#c0934a', fontFamily: FONT,
+        }).setOrigin(1, 0));
+        curY += px(18);
+      }
+      curY += px(8);
+
+      // ── Rewards ──
+      const rewardText = formatRewardSummary(entries[currentIndex].quest.rewards);
+      this.questCardPanel.add(this.add.text(px(14), curY, '奖励:', {
+        fontSize: fs(11), color: '#888', fontFamily: FONT, fontStyle: 'bold',
+      }));
+      this.questCardPanel.add(this.add.text(px(52), curY, rewardText, {
+        fontSize: fs(11), color: '#f1c40f', fontFamily: FONT,
+      }));
+      curY += rewardH;
+
+      // ── Navigation (multiple quests) ──
+      if (total > 1) {
+        // Left arrow
+        const leftArrow = this.add.text(px(40), curY + px(14), '◀', {
+          fontSize: fs(16), color: currentIndex > 0 ? '#c0934a' : '#333',
+          fontFamily: FONT,
+        }).setOrigin(0.5).setInteractive({ useHandCursor: currentIndex > 0 });
+        if (currentIndex > 0) {
+          leftArrow.on('pointerdown', () => { currentIndex--; renderCard(); });
+          leftArrow.on('pointerover', () => leftArrow.setColor('#f1c40f'));
+          leftArrow.on('pointerout', () => leftArrow.setColor('#c0934a'));
+        }
+        this.questCardPanel.add(leftArrow);
+
+        // Counter
+        this.questCardPanel.add(this.add.text(pw / 2, curY + px(14), `${currentIndex + 1}/${total}`, {
+          fontSize: fs(12), color: '#888', fontFamily: FONT,
+        }).setOrigin(0.5));
+
+        // Right arrow
+        const rightArrow = this.add.text(pw - px(40), curY + px(14), '▶', {
+          fontSize: fs(16), color: currentIndex < total - 1 ? '#c0934a' : '#333',
+          fontFamily: FONT,
+        }).setOrigin(0.5).setInteractive({ useHandCursor: currentIndex < total - 1 });
+        if (currentIndex < total - 1) {
+          rightArrow.on('pointerdown', () => { currentIndex++; renderCard(); });
+          rightArrow.on('pointerover', () => rightArrow.setColor('#f1c40f'));
+          rightArrow.on('pointerout', () => rightArrow.setColor('#c0934a'));
+        }
+        this.questCardPanel.add(rightArrow);
+
+        curY += navH;
+      }
+
+      // ── Action Button ──
+      const isAccept = cardData.cardAction === 'accept';
+      const btnLabel = isAccept ? '接受' : '交付';
+      const btnColor = isAccept ? 0x1a2a1a : 0x2a1a1a;
+      const btnStroke = isAccept ? 0x27ae60 : 0xc0934a;
+      const btnTextColor = isAccept ? '#27ae60' : '#c0934a';
+      const btnW = px(160), bH = px(32);
+
+      const actionBg = this.add.rectangle(pw / 2, curY + bH / 2, btnW, bH, btnColor)
+        .setStrokeStyle(Math.round(2 * DPR), btnStroke)
+        .setInteractive({ useHandCursor: true });
+      const actionText = this.add.text(pw / 2, curY + bH / 2, btnLabel, {
+        fontSize: fs(15), color: btnTextColor, fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(0.5);
+
+      actionBg.on('pointerover', () => {
+        actionBg.setFillStyle(isAccept ? 0x224422 : 0x332222);
+        actionText.setColor(isAccept ? '#44dd44' : '#f1c40f');
+      });
+      actionBg.on('pointerout', () => {
+        actionBg.setFillStyle(btnColor);
+        actionText.setColor(btnTextColor);
+      });
+      actionBg.on('pointerdown', () => {
+        const entry = entries[currentIndex];
+        const questSystem = rawData.questSystem;
+
+        if (entry.cardAction === 'accept') {
+          questSystem.acceptQuest(entry.quest.id);
+        } else {
+          // Turn-in: grant rewards via ZoneScene approach
+          const reward = questSystem.turnInQuest(entry.quest.id);
+          if (reward) {
+            const player = rawData.player;
+            if (player) {
+              player.addExp(reward.exp);
+              player.gold += reward.gold;
+            }
+            if (reward.petReward && rawData.homesteadSystem) {
+              rawData.homesteadSystem.addPet(reward.petReward);
+            }
+            if (rawData.achievementSystem) {
+              rawData.achievementSystem.update('quest');
+            }
+          }
+        }
+
+        // Toast confirmation
+        const toastMsg = buildToastMessage(entry.cardAction, entry.quest.name);
+        this.showQuestToast(toastMsg, entry.cardAction);
+
+        // Auto-dismiss
+        this.closeQuestCard();
+      });
+
+      this.questCardPanel.add(actionBg);
+      this.questCardPanel.add(actionText);
+      curY += btnH;
+
+      // ── View Lore Button (optional) ──
+      if (hasDialogueTree) {
+        const loreBtnW = px(120), loreBtnH = px(24);
+        const loreBg = this.add.rectangle(pw / 2, curY + loreBtnH / 2, loreBtnW, loreBtnH, 0x1a1a2e, 0.8)
+          .setStrokeStyle(Math.round(1 * DPR), 0x555566)
+          .setInteractive({ useHandCursor: true });
+        const loreText = this.add.text(pw / 2, curY + loreBtnH / 2, '查看故事', {
+          fontSize: fs(11), color: '#8888aa', fontFamily: FONT,
+        }).setOrigin(0.5);
+
+        loreBg.on('pointerover', () => { loreBg.setFillStyle(0x222233); loreText.setColor('#aaaacc'); });
+        loreBg.on('pointerout', () => { loreBg.setFillStyle(0x1a1a2e); loreText.setColor('#8888aa'); });
+        loreBg.on('pointerdown', () => {
+          this.closeQuestCard();
+          this.openDialogueTree(rawData);
+        });
+
+        this.questCardPanel.add(loreBg);
+        this.questCardPanel.add(loreText);
+      }
+    };
+
+    renderCard();
+  }
+
+  /** Show a brief quest toast at the top of the screen. */
+  private showQuestToast(message: string, action: 'accept' | 'turn_in'): void {
+    const toastW = px(280), toastH = px(40);
+    const toastX = (W - toastW) / 2, toastY = px(60);
+    const toast = this.add.container(toastX, toastY).setDepth(PANEL_STYLE.depth.toast).setAlpha(0);
+
+    const borderColor = action === 'accept' ? 0x27ae60 : 0xc0934a;
+    const textColor = action === 'accept' ? '#27ae60' : '#c0934a';
+    const icon = action === 'accept' ? '✦' : '✓';
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x1a1a0a, 0.95);
+    bg.fillRoundedRect(0, 0, toastW, toastH, px(6));
+    bg.lineStyle(Math.round(2 * DPR), borderColor, 0.9);
+    bg.strokeRoundedRect(0, 0, toastW, toastH, px(6));
+    toast.add(bg);
+
+    toast.add(this.add.text(px(14), toastH / 2, icon, {
+      fontSize: fs(16), color: textColor, fontFamily: FONT,
+    }).setOrigin(0, 0.5));
+
+    toast.add(this.add.text(px(32), toastH / 2, message, {
+      fontSize: fs(13), color: textColor, fontFamily: FONT, fontStyle: 'bold',
+    }).setOrigin(0, 0.5));
+
+    // Animate in
+    this.tweens.add({
+      targets: toast,
+      alpha: 1,
+      y: toastY + px(10),
+      duration: 400,
+      ease: 'Back.easeOut',
+    });
+
+    // Auto-dismiss after 2s
+    this.time.delayedCall(2000, () => {
+      this.tweens.add({
+        targets: toast,
+        alpha: 0,
+        y: toastY - px(20),
+        duration: 300,
+        ease: 'Power2',
+        onComplete: () => toast.destroy(),
+      });
+    });
   }
 
   // --- Branching Dialogue Tree Panel ---
@@ -4522,9 +4823,8 @@ export class UIScene extends Phaser.Scene {
     this.hideItemTooltip();
     this.hideContextPopup();
     this.closeDialogue();
-  }
-
-  private getQualityColorNum(quality: string): number {
+    this.closeQuestCard();
+  }  private getQualityColorNum(quality: string): number {
     switch (quality) {
       case 'magic': return 0x2471a3;
       case 'rare': return 0xc0934a;
