@@ -1,0 +1,41 @@
+{
+  "featureId": "fix-i18n-foundation-scrutiny",
+  "reviewedAt": "2026-03-28T07:51:19Z",
+  "commitId": "ecaeeb480531e6312ed4d207925edbc8ff696773",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The fix resolves the original SC/TC length mismatch, switches production off the stale static zh-TW snapshot, localizes the Continue button class names, and moves the two help-panel control labels into locale data. However, the new runtime zh-TW path still applies a blind character-by-character conversion to every zh-CN string, and that produces incorrect Traditional Chinese in visible UI text (for example `钢铁意志,剑盾无双` becomes `鋼鐵意誌,劍盾無雙`).",
+    "issues": [
+      {
+        "file": "src/i18n/index.ts",
+        "line": 19,
+        "severity": "blocking",
+        "description": "`generateZhTW()` converts every zh-CN value character-by-character with no phrase-level overrides, so the fix still emits invalid Traditional Chinese for context-sensitive words. A visible example is `src/i18n/locales/zh-CN.ts:33`: `menu.classSelect.warrior.desc` is `钢铁意志,剑盾无双`, which the current runtime converter turns into `鋼鐵意誌,劍盾無雙`; Traditional Chinese should be `鋼鐵意志,劍盾無雙`. That means the fix still fails the mission requirement for valid zh-TW UI text (VAL-FOUND-016 / VAL-MENU-018)."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The shared i18n architecture doc is now stale: it still documents a checked-in `src/i18n/locales/zh-TW.ts` file and says locale data is imported statically, but this fix deleted that file and moved zh-TW generation into `src/i18n/index.ts` at runtime.",
+      "evidence": "`.factory/library/architecture.md:137` still lists `zh-TW.ts`, and `.factory/library/architecture.md:150` says locale data is imported statically; the reviewed fix commit deletes `src/i18n/locales/zh-TW.ts` and `src/i18n/index.ts:19-29` now generates zh-TW from zh-CN at runtime."
+    },
+    {
+      "area": "skills",
+      "observation": "The `i18n-worker` skill no longer matches repo reality after this fix: it still tells workers to regenerate `zh-TW.ts`, and its example handoff still claims that file is produced, even though zh-TW is now runtime-generated instead.",
+      "evidence": "`.factory/skills/i18n-worker/SKILL.md:63` says 'Never hand-edit `zh-TW.ts` — always regenerate from zh-CN via the converter', and `.factory/skills/i18n-worker/SKILL.md:73` still describes `src/i18n/locales/zh-TW.ts (auto-generated)`, but the reviewed commit removes that file and uses `src/i18n/index.ts:19-29` for runtime generation."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The validation contract examples still reference snake_case locale keys like `menu.new_game`, while the actual implementation and locale files use camelCase keys like `menu.newGame`. That mismatch can mislead future workers and reviewers during manual validation.",
+      "evidence": "`validation-contract.md:12,17,22,47,82` use `menu.new_game`, but `src/i18n/locales/zh-CN.ts:19` defines `menu.newGame` and the code/tests use that camelCase key."
+    }
+  ],
+  "addressesFailureFrom": [
+    "/Users/feuvan/src/abyssfire/.factory/validation/i18n-foundation/scrutiny/reviews/i18n-core-module.json",
+    "/Users/feuvan/src/abyssfire/.factory/validation/i18n-foundation/scrutiny/reviews/i18n-menu-scene.json"
+  ],
+  "summary": "Reviewed the fix handoff, transcript skeleton, shared-state docs, prior failure reports, and commit `ecaeeb4`. The rerun does fix the original length-mismatch, static zh-TW snapshot, Continue-label, and help-key findings, but it still cannot pass because the new runtime zh-TW converter produces incorrect Traditional Chinese in visible menu text such as `鋼鐵意誌,劍盾無雙`."
+}

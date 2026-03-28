@@ -134,7 +134,6 @@ src/i18n/
   locales/
     zh-CN.ts        # Primary locale (Simplified Chinese) — flat key-value object
     en.ts           # English locale — flat key-value object
-    zh-TW.ts        # Auto-generated from zh-CN via converter
   converter.ts      # zh-CN → zh-TW character mapping table and conversion function
 ```
 
@@ -145,9 +144,9 @@ src/i18n/
 3. **Fallback chain**: zh-TW → zh-CN → en → key path (never undefined). en is the final fallback for missing keys.
 4. **Persistence**: `localStorage.getItem('abyssfire_locale')` / `setItem`. Read at boot time (BootScene).
 5. **Default locale**: zh-CN when no localStorage value exists.
-6. **zh-TW auto-conversion**: Character mapping table in `converter.ts`. Processes zh-CN values char-by-char. Non-CJK chars pass through unchanged.
+6. **zh-TW auto-conversion**: Character mapping table in `converter.ts`. `src/i18n/index.ts` generates the zh-TW locale object at module init by converting each zh-CN value. Non-CJK chars pass through unchanged.
 7. **Reactivity**: When locale changes, scenes must re-render affected text. For Phaser text objects, this means calling `setText()` with the new `t()` value. The i18n module emits an event via EventBus when locale changes.
-8. **No hot-reload of locale files**: Locale data is imported statically. Language switch just changes which locale object `t()` reads from.
+8. **Locale loading model**: zh-CN and en locale data are imported statically; zh-TW is derived in memory from zh-CN during module initialization. Language switch just changes which locale object `t()` reads from.
 
 ### Integration Pattern
 

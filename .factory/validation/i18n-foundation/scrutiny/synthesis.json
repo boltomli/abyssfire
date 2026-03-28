@@ -1,6 +1,6 @@
 {
   "milestone": "i18n-foundation",
-  "round": 1,
+  "round": 2,
   "status": "fail",
   "validatorsRun": {
     "test": {
@@ -27,65 +27,41 @@
     }
   },
   "reviewsSummary": {
-    "total": 2,
+    "total": 1,
     "passed": 0,
-    "failed": 2,
+    "failed": 1,
     "failedFeatures": [
-      "i18n-core-module",
-      "i18n-menu-scene"
+      "fix-i18n-foundation-scrutiny"
     ]
   },
   "blockingIssues": [
     {
-      "featureId": "i18n-core-module",
+      "featureId": "fix-i18n-foundation-scrutiny",
       "severity": "blocking",
-      "description": "src/i18n/converter.ts pairs SC and TC strings of unequal lengths (1305 vs 1308), producing corrupted zh-TW conversions such as `潜 -> 誌`, `菜单 -> 綠單`, and `翠绿 -> 翠潛`."
-    },
-    {
-      "featureId": "i18n-core-module",
-      "severity": "blocking",
-      "description": "src/i18n/index.ts imports a static locales/zh-TW.ts snapshot; production never generates zh-TW from zh-CN via convertToTraditional(), and the checked-in file has already drifted from converter output."
-    },
-    {
-      "featureId": "i18n-menu-scene",
-      "severity": "blocking",
-      "description": "src/scenes/MenuScene.ts builds the Continue label from AllClasses[save.classId].name, so English and zh-TW continue buttons still show Simplified Chinese class names (`战士`/`法师`/`盗贼`)."
+      "description": "src/i18n/index.ts generates zh-TW by blindly converting every zh-CN string character-by-character, which still emits invalid visible Traditional Chinese such as `钢铁意志,剑盾无双` → `鋼鐵意誌,劍盾無雙` instead of `鋼鐵意志,劍盾無雙`."
     }
   ],
-  "appliedUpdates": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Updated .factory/library/architecture.md to document that zh-TW is generated in memory at module init from zh-CN via src/i18n/index.ts, rather than imported from a checked-in locales/zh-TW.ts snapshot.",
+      "sourceFeature": "fix-i18n-foundation-scrutiny"
+    }
+  ],
   "suggestedGuidanceUpdates": [
     {
-      "target": "AGENTS.md",
-      "suggestion": "Document a concrete zh-TW regeneration workflow (script/command) or a sanctioned post-generation fixup step instead of only saying zh-TW must never be hand-edited.",
-      "evidence": "Both `i18n-core-module` and `i18n-menu-scene` reviews found that workers manually corrected or drifted `src/i18n/locales/zh-TW.ts` because the repo has no production regeneration step beyond the converter module.",
-      "isSystemic": true
-    },
-    {
       "target": "i18n-worker skill",
-      "suggestion": "Make TDD and agent-browser verification conditional on feature type, separating core-module work from scene/UI extraction so validators can rely on existing unit coverage and code inspection when browser checks are not meaningful.",
-      "evidence": "Both reviewed worker sessions deviated from the current skill: the core-module feature never needed scene-level browser interaction, and the menu-scene feature completed without agent-browser despite the skill making it mandatory.",
+      "suggestion": "Update the skill to describe the current runtime zh-TW generation model and stop instructing workers to regenerate or hand off a checked-in src/i18n/locales/zh-TW.ts file.",
+      "evidence": "The fix deleted src/i18n/locales/zh-TW.ts and now derives zh-TW inside src/i18n/index.ts, but .factory/skills/i18n-worker/SKILL.md still tells workers to regenerate and report that file.",
       "isSystemic": true
     },
     {
-      "target": "AGENTS.md",
-      "suggestion": "Add an explicit rule to stage only feature-owned files and never blanket-stage `.factory/` or other shared validation directories.",
-      "evidence": "Transcript session `8a73cbec-670b-4ff1-ba53-f5790a1abbfc` staged `.factory/` wholesale, and commit `8a17fec9cbe8600e03f92687621d689ae1f7744a` included unrelated validation artifacts from other milestones.",
+      "target": "validation-contract.md",
+      "suggestion": "Align example translation keys with the implemented camelCase key naming convention (for example `menu.newGame` instead of `menu.new_game`) to avoid false-negative manual validation steps.",
+      "evidence": "validation-contract.md still references snake_case keys like `menu.new_game`, while src/i18n/locales/zh-CN.ts and the implementation use camelCase keys such as `menu.newGame`.",
       "isSystemic": false
     }
   ],
-  "rejectedObservations": [
-    {
-      "observation": "Update `.factory/library` now to describe the current manual zh-TW correction process.",
-      "reason": "rejected because the current workflow is under scrutiny failure and belongs in orchestrator guidance or a future fix feature, not stable reference material."
-    },
-    {
-      "observation": "Treat the menu-scene review's zh-TW workflow mismatch as a separate guidance item from the core-module regeneration-gap note.",
-      "reason": "duplicate of the broader zh-TW workflow guidance recommendation already captured above."
-    },
-    {
-      "observation": "Treat the menu-scene 'skill over-specifies verification' note as separate from the core-module 'UI-centric skill' note.",
-      "reason": "duplicate of the combined i18n-worker skill recommendation above."
-    }
-  ],
-  "previousRound": null
+  "rejectedObservations": [],
+  "previousRound": ".factory/validation/i18n-foundation/scrutiny/synthesis.round1.json"
 }
