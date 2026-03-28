@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE, DPR } from '../config';
 import { SaveSystem } from '../systems/SaveSystem';
-import { AllClasses } from '../data/classes/index';
+
 import { EventBus, GameEvents } from '../utils/EventBus';
 import { audioManager } from '../systems/audio/AudioManager';
 import type { SaveData } from '../data/types';
@@ -371,9 +371,9 @@ export class MenuScene extends Phaser.Scene {
     let y = save ? px(300) : px(340);
 
     if (save) {
-      // "Continue" button — shows class name + level
-      const classData = AllClasses[save.classId];
-      const className = classData?.name ?? save.classId;
+      // "Continue" button — shows locale-aware class name + level
+      const classNameKey = `data.class.${save.classId}.name`;
+      const className = t(classNameKey);
       const label = t('menu.continue', { class: className, level: String(save.player.level) });
 
       const bg = this.add.rectangle(cx, y, px(320), px(65), 0x12121e, 0.9)
@@ -600,7 +600,7 @@ export class MenuScene extends Phaser.Scene {
         titleKey: 'menu.helpPanel.cat.movement',
         keys: [
           ['W / A / S / D', t('menu.helpPanel.movement.wasd')],
-          ['Mouse LMB', t('menu.helpPanel.movement.mouse')],
+          [t('menu.helpPanel.movement.mouseKey'), t('menu.helpPanel.movement.mouse')],
         ],
       },
       {
@@ -608,7 +608,7 @@ export class MenuScene extends Phaser.Scene {
         keys: [
           ['1 - 6', t('menu.helpPanel.combat.skills')],
           ['TAB', t('menu.helpPanel.combat.autoCombat')],
-          ['R / RMB', t('menu.helpPanel.combat.teleport')],
+          [t('menu.helpPanel.combat.teleportKey'), t('menu.helpPanel.combat.teleport')],
         ],
       },
       {

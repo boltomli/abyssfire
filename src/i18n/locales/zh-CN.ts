@@ -36,15 +36,22 @@ const zhCN: LocaleData = {
   'menu.classSelect.rogue.name': '盗贼 Rogue',
   'menu.classSelect.rogue.desc': '暗影潜行,一击致命',
 
+  // ─── Class Name Keys (for interpolation, e.g. Continue button) ───
+  'data.class.warrior.name': '战士',
+  'data.class.mage.name': '法师',
+  'data.class.rogue.name': '盗贼',
+
   // ─── Menu Scene — Help Panel ───
   'menu.helpPanel.title': '快捷键',
   'menu.helpPanel.cat.movement': '移动',
   'menu.helpPanel.cat.combat': '战斗',
   'menu.helpPanel.cat.ui': '界面',
   'menu.helpPanel.movement.wasd': '上 / 左 / 下 / 右移动',
+  'menu.helpPanel.movement.mouseKey': '鼠标左键',
   'menu.helpPanel.movement.mouse': '点击移动 / 攻击 / 交互',
   'menu.helpPanel.combat.skills': '使用技能',
   'menu.helpPanel.combat.autoCombat': '切换自动战斗',
+  'menu.helpPanel.combat.teleportKey': 'R / 鼠标右键',
   'menu.helpPanel.combat.teleport': '传送回营地',
   'menu.helpPanel.ui.inventory': '背包',
   'menu.helpPanel.ui.character': '角色属性',

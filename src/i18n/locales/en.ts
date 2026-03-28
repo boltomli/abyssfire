@@ -36,15 +36,22 @@ const en: LocaleData = {
   'menu.classSelect.rogue.name': 'Rogue',
   'menu.classSelect.rogue.desc': 'Shadow stealth, lethal precision',
 
+  // ─── Class Name Keys (for interpolation, e.g. Continue button) ───
+  'data.class.warrior.name': 'Warrior',
+  'data.class.mage.name': 'Mage',
+  'data.class.rogue.name': 'Rogue',
+
   // ─── Menu Scene — Help Panel ───
   'menu.helpPanel.title': 'Keyboard Shortcuts',
   'menu.helpPanel.cat.movement': 'Movement',
   'menu.helpPanel.cat.combat': 'Combat',
   'menu.helpPanel.cat.ui': 'Interface',
   'menu.helpPanel.movement.wasd': 'Move up / left / down / right',
+  'menu.helpPanel.movement.mouseKey': 'Mouse LMB',
   'menu.helpPanel.movement.mouse': 'Click to move / attack / interact',
   'menu.helpPanel.combat.skills': 'Use skills',
   'menu.helpPanel.combat.autoCombat': 'Toggle auto-combat',
+  'menu.helpPanel.combat.teleportKey': 'R / RMB',
   'menu.helpPanel.combat.teleport': 'Teleport to camp',
   'menu.helpPanel.ui.inventory': 'Inventory',
   'menu.helpPanel.ui.character': 'Character Stats',

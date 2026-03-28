@@ -8,16 +8,25 @@
 import type { LocaleId, LocaleData } from './types';
 import zhCN from './locales/zh-CN';
 import en from './locales/en';
-import zhTW from './locales/zh-TW';
+import { convertToTraditional } from './converter';
 import { EventBus, GameEvents } from '../utils/EventBus';
 
 const STORAGE_KEY = 'abyssfire_locale';
 const DEFAULT_LOCALE: LocaleId = 'zh-CN';
 const SUPPORTED_LOCALES: LocaleId[] = ['zh-CN', 'zh-TW', 'en'];
 
+/** Generate zh-TW locale data at runtime by converting every zh-CN value */
+function generateZhTW(source: LocaleData): LocaleData {
+  const result: LocaleData = {};
+  for (const [key, value] of Object.entries(source)) {
+    result[key] = convertToTraditional(value);
+  }
+  return result;
+}
+
 const localeMap: Record<LocaleId, LocaleData> = {
   'zh-CN': zhCN,
-  'zh-TW': zhTW,
+  'zh-TW': generateZhTW(zhCN),
   'en': en,
 };
 

@@ -362,11 +362,47 @@ describe('Locale Data Integrity', () => {
     expect(missingInZhCN).toEqual([]);
   });
 
-  it('zh-TW locale has the same keys as zh-CN', async () => {
+  it('runtime-generated zh-TW has the same keys as zh-CN', async () => {
+    // zh-TW is now generated at runtime from zh-CN via converter.
+    // Verify that every zh-CN key produces a zh-TW translation.
+    setLocale('zh-TW');
     const zhCN = (await import('../i18n/locales/zh-CN')).default;
-    const zhTW = (await import('../i18n/locales/zh-TW')).default;
-    const zhCNKeys = Object.keys(zhCN).sort();
-    const zhTWKeys = Object.keys(zhTW).sort();
-    expect(zhTWKeys).toEqual(zhCNKeys);
+    for (const key of Object.keys(zhCN)) {
+      const twValue = t(key);
+      expect(twValue).toBeTruthy();
+      expect(typeof twValue).toBe('string');
+    }
+  });
+});
+
+describe('Converter SC/TC String Validation', () => {
+  it('SC and TC mapping strings have equal codepoint lengths', async () => {
+    const converterModule = await import('../i18n/converter');
+    expect(converterModule.SC_LENGTH).toBe(converterModule.TC_LENGTH);
+  });
+
+  it('SC_LENGTH equals TC_LENGTH and both are greater than 800', async () => {
+    const converterModule = await import('../i18n/converter');
+    expect(converterModule.SC_LENGTH).toBeGreaterThan(800);
+    expect(converterModule.TC_LENGTH).toBeGreaterThan(800);
+    expect(converterModule.SC_LENGTH).toBe(converterModule.TC_LENGTH);
+  });
+
+  it('converter correctly maps specific characters used in game text', () => {
+    // Characters found in game UI that must convert correctly
+    expect(convertToTraditional('潜')).toBe('潛'); // 潜行 → 潛行
+    expect(convertToTraditional('绿')).toBe('綠'); // 翠绿 → 翠綠
+    expect(convertToTraditional('菜')).toBe('菜'); // unchanged (same in SC/TC)
+    expect(convertToTraditional('准')).toBe('準'); // 准备 → 準備
+    expect(convertToTraditional('志')).toBe('誌'); // 杂志 → 雜誌
+  });
+
+  it('zh-TW auto-generation produces correct Traditional for game strings', () => {
+    // Full string conversions that are important for the game
+    expect(convertToTraditional('暗影潜行')).toBe('暗影潛行');
+    expect(convertToTraditional('菜单')).toBe('菜單');
+    expect(convertToTraditional('翠绿平原')).toBe('翠綠平原');
+    expect(convertToTraditional('继续游戏')).toBe('繼續遊戲');
+    expect(convertToTraditional('选择职业')).toBe('選擇職業');
   });
 });
