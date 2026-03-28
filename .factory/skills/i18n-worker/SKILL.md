@@ -60,7 +60,7 @@ Features that involve:
 - **Namespace keys**: Use dot-separated paths matching the scene/system: `menu.newGame`, `ui.inventory.title`, `zone.enterZone`, `data.monster.goblin`, `sys.inventory.bagFull`
 - **Parameter placeholders**: Use `{paramName}` syntax: `t('menu.continue', { class: className, level: lvl })`
 - **Fallback**: en is the final fallback. If a key exists in zh-CN but not en, the zh-CN value is returned. If missing from both, return the key path string.
-- **zh-TW**: Auto-generated. Never hand-edit `zh-TW.ts` — always regenerate from zh-CN via the converter.
+- **zh-TW**: Auto-generated **at runtime** — there is no static `zh-TW.ts` file. When the i18n module initializes (`src/i18n/index.ts`), it calls `generateZhTW(zhCN)` which converts every zh-CN value using `converter.ts`. Never create a static zh-TW locale file. The converter uses a char-by-char mapping plus phrase-level fixups for context-sensitive characters (e.g., 志 stays 志 in 意志 but becomes 誌 in 日志→日誌).
 - **Locale persistence**: `localStorage.getItem('abyssfire_locale')` / `localStorage.setItem('abyssfire_locale', locale)`
 - **Font**: Ensure `index.html` includes both Noto Sans SC and Noto Sans TC Google Fonts for proper CJK rendering.
 - **EventBus integration**: Import `EventBus` and `GameEvents` from `src/utils/EventBus.ts`. Add a `LOCALE_CHANGED` event if not present.
