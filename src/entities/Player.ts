@@ -253,6 +253,8 @@ export class Player {
     const dx = targetWorld.x - this.sprite.x;
     const dy = targetWorld.y - this.sprite.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
+    // Ignore sub-pixel jitter so the sprite doesn't flicker on vertical paths.
+    if (Math.abs(dx) > 1.5) this.animator.faceToward(dx);
 
     const step = this.currentSpeed * dt;
 
@@ -417,16 +419,17 @@ export class Player {
     });
   }
 
-  playAttack(targetX: number, targetY: number): void {
-    this.animator.playAttack(targetX, targetY);
+  /** Returns ms until the swing visually connects. */
+  playAttack(targetX: number, targetY: number): number {
+    return this.animator.playAttack(targetX, targetY, { attackIntervalMs: this.attackSpeed });
   }
 
   playCast(): void {
     this.animator.playCast();
   }
 
-  playHurt(sourceX: number, sourceY: number): void {
-    this.animator.playHurt(sourceX, sourceY);
+  playHurt(sourceX: number, sourceY: number, strength: number = 1): void {
+    this.animator.playHurt(sourceX, sourceY, strength);
   }
 
   playDodge(directionX: number, directionY: number): void {

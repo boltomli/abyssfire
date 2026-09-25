@@ -70,10 +70,10 @@ export type FrameSizeRegistry = Record<string, { frameWidth: number; frameHeight
 /** Build frame-size registry from the existing configs. Used by BootScene for spritesheet loading. */
 export function buildFrameSizeRegistry(): FrameSizeRegistry {
   return {
-    // Players (64x96, PLAYER_TOTAL_FRAMES frames)
-    player_warrior: { frameWidth: 64, frameHeight: 96 },
-    player_mage: { frameWidth: 64, frameHeight: 96 },
-    player_rogue: { frameWidth: 64, frameHeight: 96 },
+    // Players (96x96, PLAYER_TOTAL_FRAMES frames; wide for weapon reach)
+    player_warrior: { frameWidth: 96, frameHeight: 96 },
+    player_mage: { frameWidth: 96, frameHeight: 96 },
+    player_rogue: { frameWidth: 96, frameHeight: 96 },
     // Monsters (various sizes, 20 frames)
     monster_slime: { frameWidth: 48, frameHeight: 40 },
     monster_goblin: { frameWidth: 48, frameHeight: 56 },
@@ -129,5 +129,34 @@ export function buildFrameSizeRegistry(): FrameSizeRegistry {
     npc_mercenary_ranged: { frameWidth: 80, frameHeight: 120 },
     npc_mercenary_healer: { frameWidth: 80, frameHeight: 120 },
     npc_mercenary_mage: { frameWidth: 80, frameHeight: 120 },
+  };
+}
+
+/**
+ * Widest texture we emit. 4096 is the WebGL MAX_TEXTURE_SIZE floor on older
+ * mobile / integrated GPUs; a single-row strip wider than the device limit
+ * uploads as a black rectangle, so sheets wrap into a grid instead.
+ */
+export const MAX_SHEET_DIMENSION = 4096;
+
+export interface SheetGrid {
+  frameW: number;
+  frameH: number;
+  cols: number;
+  rows: number;
+  width: number;
+  height: number;
+}
+
+export function computeSheetGrid(frameW: number, frameH: number, totalFrames: number): SheetGrid {
+  const cols = Math.max(1, Math.min(totalFrames, Math.floor(MAX_SHEET_DIMENSION / frameW)));
+  const rows = Math.max(1, Math.ceil(totalFrames / cols));
+  return { frameW, frameH, cols, rows, width: cols * frameW, height: rows * frameH };
+}
+
+export function sheetFrameOrigin(grid: SheetGrid, index: number): { x: number; y: number } {
+  return {
+    x: (index % grid.cols) * grid.frameW,
+    y: Math.floor(index / grid.cols) * grid.frameH,
   };
 }

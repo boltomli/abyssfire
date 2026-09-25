@@ -1,5 +1,9 @@
 import Phaser from 'phaser';
 import { EventBus, GameEvents } from '../utils/EventBus';
+import { HIT_PROFILES, type HitWeight } from './HitFeedback';
+
+// Above entities (depth = world y + offset) and the lighting overlay, below floating text.
+const IMPACT_DEPTH = 4400;
 
 /**
  * Centralized VFX manager — camera effects, per-GameObject FX, combat juice.
@@ -12,6 +16,9 @@ export class VFXManager {
   // Throttle timestamps
   private lastShakeTime = 0;
   private lastFlashTime = 0;
+
+  // Slow-motion (elite/boss kill beats)
+  private slowMoTimer: Phaser.Time.TimerEvent | null = null;
 
   // Low HP vignette
   private dangerVignette: Phaser.FX.Vignette | null = null;
@@ -37,14 +44,9 @@ export class VFXManager {
         const duration = Math.max(50, Math.min(120, 50 + ratio * 100));
         this.cameraShake(duration, intensity);
       }
-    } else {
-      const intensity = Math.max(0.001, Math.min(0.005, ratio * 0.008));
-      const duration = Math.max(40, Math.min(100, 40 + ratio * 80));
-      this.cameraShake(duration, intensity);
-      if (data.isCrit) {
-        this.cameraFlash(50, 0.3, 0xffffff);
-      }
     }
+    // Hits on monsters are driven per-hit by ZoneScene via HIT_PROFILES
+    // (see impactBurst / playHitImpact) so shake scales with hit weight.
   };
   private readonly handlePlayerLevelUp = (): void => {
     this.cameraFlash(200, 0.5, 0xffd700);
@@ -256,6 +258,97 @@ export class VFXManager {
     });
   }
 
+  // ── Melee Impact ─────────────────────────────────────────
+
+  /**
+   * Directional impact: hot core flash, flattened shock ring on the ground
+   * plane, and spark streaks spraying *away* from the attacker.
+   * @param angle radians, attacker → target.
+   */
+  impactBurst(x: number, y: number, angle: number, weight: HitWeight, color: number = 0xfff2c0): void {
+    const profile = HIT_PROFILES[weight];
+    if (profile.sparks <= 0 && profile.ringRadius <= 0) return;
+    const scene = this.scene;
+    const r = profile.ringRadius;
+    const big = weight === 'crit' || weight === 'kill';
+
+    // Core flash
+    const core = scene.add.circle(x, y, r * 0.55, 0xffffff, 0.95)
+      .setDepth(IMPACT_DEPTH + 1).setBlendMode(Phaser.BlendModes.ADD).setScale(0.35);
+    scene.tweens.add({
+      targets: core, scale: 1.3, alpha: 0, duration: big ? 150 : 110, ease: 'Quad.easeOut',
+      onComplete: () => core.destroy(),
+    });
+    const halo = scene.add.circle(x, y, r, color, 0.45)
+      .setDepth(IMPACT_DEPTH).setBlendMode(Phaser.BlendModes.ADD).setScale(0.5);
+    scene.tweens.add({
+      targets: halo, scale: 1.25, alpha: 0, duration: big ? 220 : 160, ease: 'Cubic.easeOut',
+      onComplete: () => halo.destroy(),
+    });
+
+    // Ground-plane shock ring (iso-flattened)
+    const ring = scene.add.ellipse(x, y + 12, r * 1.6, r * 0.8)
+      .setStrokeStyle(big ? 2.5 : 1.5, color, 0.9)
+      .setDepth(IMPACT_DEPTH - 1).setBlendMode(Phaser.BlendModes.ADD).setScale(0.3);
+    ring.isFilled = false;
+    scene.tweens.add({
+      targets: ring, scale: big ? 1.9 : 1.4, alpha: 0, duration: big ? 320 : 240, ease: 'Cubic.easeOut',
+      onComplete: () => ring.destroy(),
+    });
+
+    // Directional spark streaks
+    const spread = big ? 1.25 : 0.9;
+    for (let i = 0; i < profile.sparks; i++) {
+      const a = angle + (Math.random() - 0.5) * spread;
+      const len = (big ? 9 : 6) + Math.random() * (big ? 9 : 5);
+      const tint = i % 3 === 0 ? 0xffffff : color;
+      const spark = scene.add.rectangle(x, y, len, big ? 2 : 1.5, tint, 1)
+        .setDepth(IMPACT_DEPTH + 1).setBlendMode(Phaser.BlendModes.ADD).setRotation(a);
+      const dist = (big ? 26 : 16) + Math.random() * (big ? 30 : 18);
+      scene.tweens.add({
+        targets: spark,
+        x: x + Math.cos(a) * dist,
+        y: y + Math.sin(a) * dist * 0.75 + 4,
+        scaleX: 0.15,
+        alpha: 0,
+        duration: 170 + Math.random() * 120,
+        ease: 'Quad.easeOut',
+        onComplete: () => spark.destroy(),
+      });
+    }
+
+    // Crit/kill: four-point glint that pops over the target
+    if (big) {
+      const glint = scene.add.container(x, y).setDepth(IMPACT_DEPTH + 2);
+      const h = scene.add.rectangle(0, 0, r * 3.2, 2.5, 0xffffff, 1).setBlendMode(Phaser.BlendModes.ADD);
+      const v = scene.add.rectangle(0, 0, 2.5, r * 2.2, 0xffffff, 1).setBlendMode(Phaser.BlendModes.ADD);
+      glint.add([h, v]);
+      glint.setScale(0.2).setRotation(angle + Math.PI / 4);
+      scene.tweens.add({
+        targets: glint, scale: 1, alpha: 0, duration: 200, ease: 'Expo.easeOut',
+        onComplete: () => glint.destroy(),
+      });
+    }
+
+    if (profile.shakeMs > 0) this.cameraShake(profile.shakeMs, profile.shakeIntensity);
+  }
+
+  /**
+   * Brief slow-motion beat for big kills. Scales tweens and sprite
+   * animation playback only — combat timers keep running in real time.
+   */
+  slowMotion(durationMs: number = 260, scale: number = 0.3): void {
+    const scene = this.scene;
+    scene.tweens.timeScale = scale;
+    scene.anims.globalTimeScale = scale;
+    this.slowMoTimer?.remove(false);
+    this.slowMoTimer = scene.time.delayedCall(durationMs, () => {
+      this.slowMoTimer = null;
+      scene.tweens.timeScale = 1;
+      scene.anims.globalTimeScale = 1;
+    });
+  }
+
   // ── Particle Burst Effects (tween-based, reliable) ───────
 
   /** Burst particles outward from a point using tweened sprites */
@@ -351,6 +444,12 @@ export class VFXManager {
   // ── Cleanup ─────────────────────────────────────────────
 
   destroy(): void {
+    if (this.slowMoTimer) {
+      this.slowMoTimer.remove(false);
+      this.slowMoTimer = null;
+      this.scene.tweens.timeScale = 1;
+      this.scene.anims.globalTimeScale = 1;
+    }
     EventBus.off(GameEvents.COMBAT_DAMAGE, this.handleCombatDamage);
     EventBus.off(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp);
     EventBus.off(GameEvents.PLAYER_DIED, this.handlePlayerDied);

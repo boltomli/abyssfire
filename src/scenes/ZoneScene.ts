@@ -27,6 +27,7 @@ import { SkillEffectSystem } from '../systems/SkillEffectSystem';
 import { MobileControlsSystem, isMobileDevice } from '../systems/MobileControlsSystem';
 import { LightingSystem } from '../systems/LightingSystem';
 import { VFXManager } from '../systems/VFXManager';
+import { classifyHit, HIT_PROFILES, type HitWeight } from '../systems/HitFeedback';
 import { WeatherSystem } from '../systems/WeatherSystem';
 import { TrailRenderer } from '../systems/TrailRenderer';
 import { StatusEffectSystem } from '../systems/StatusEffectSystem';
@@ -67,6 +68,12 @@ const CAMPFIRE_RECOVERY_RADIUS_SQ = CAMPFIRE_RECOVERY_RADIUS * CAMPFIRE_RECOVERY
 const CAMPFIRE_HP_REGEN_MULTIPLIER = 50;
 const CAMPFIRE_MANA_REGEN_MULTIPLIER = 50;
 const ZONE_FLOATING_TEXT_DEPTH = 4500;
+/** Spark/flash tint for each class's basic-attack impacts. */
+const CLASS_IMPACT_COLORS: Record<string, number> = {
+  warrior: 0xffd98a,
+  mage: 0xc7a6ff,
+  rogue: 0x9dffc8,
+};
 const ZONE_SCREEN_UI_DEPTH = 5000;
 
 function fs(basePx: number): string {
@@ -250,6 +257,7 @@ export class ZoneScene extends Phaser.Scene {
   // ─── Performance Pools ─────────────────────────────────────────────
   /** Pool of floating damage text objects to avoid per-hit allocation. */
   private floatingTextPool: Phaser.GameObjects.Text[] = [];
+  private damageTextStacks = new Map<string, { time: number; index: number }>();
 
   /** Squared distance beyond which monster AI updates are skipped (monsters still render). */
   private static readonly MONSTER_AI_CULL_DIST_SQ = 30 * 30;
@@ -1898,7 +1906,7 @@ export class ZoneScene extends Phaser.Scene {
       // Also deal the skill's base damage
       if (skill.damageMultiplier > 0) {
         const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), target.toCombatEntity(), skill, level, this.player.skillLevels);
-        target.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
+        target.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
         this.applySteal(result);
         this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit, false, false, skill.damageType);
         if (!target.isAlive()) this.onMonsterKilled(target);
@@ -1917,7 +1925,7 @@ export class ZoneScene extends Phaser.Scene {
       for (const t of aoeTargets) {
         if (skill.damageMultiplier > 0) {
           const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), t.toCombatEntity(), skill, level, this.player.skillLevels);
-          t.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
+          t.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
           this.applySteal(result);
           this.showDamageText(t.sprite.x, t.sprite.y, result.damage, result.isCrit, false, false, skill.damageType);
           if (!t.isAlive()) { this.onMonsterKilled(t); continue; }
@@ -1982,7 +1990,7 @@ export class ZoneScene extends Phaser.Scene {
         if (skillId === 'combustion' && this.statusEffects.hasEffect(t.id, 'burn')) {
           finalDmg = Math.floor(finalDmg * 1.5);
         }
-        t.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y);
+        t.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
         this.applySteal(result);
         this.showDamageText(t.sprite.x, t.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
         // Apply status effects from skill damage type
@@ -2014,7 +2022,7 @@ export class ZoneScene extends Phaser.Scene {
       if (skillId === 'combustion' && this.statusEffects.hasEffect(target.id, 'burn')) {
         finalDmg = Math.floor(finalDmg * 1.5);
       }
-      target.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y);
+      target.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
       this.applySteal(result);
       this.showDamageText(target.sprite.x, target.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
       // Apply status effects from skill damage type
@@ -2052,110 +2060,8 @@ export class ZoneScene extends Phaser.Scene {
       if (this.statusEffects.isImmobilized(monster.id)) continue;
       if (time - monster.lastAttackTime >= monster.definition.attackSpeed) {
         monster.lastAttackTime = time;
-        monster.playAttack(this.player.sprite.x, this.player.sprite.y);
-        const result = this.combatSystem.calculateDamage(monster.toCombatEntity(), this.player.toCombatEntity(this.getEquipStats()));
-        if (this.dodgeController.isInvulnerable(time)) {
-          if (this.dodgeController.claimAvoidanceReward(time)) {
-            this.player.gainSpirit('dodge');
-          }
-          this.showDamageText(this.player.sprite.x, this.player.sprite.y, 0, false, true);
-          EventBus.emit(GameEvents.COMBAT_DAMAGE, {
-            targetId: 'player', damage: 0, isDodged: true,
-            isCrit: false, isPlayerTarget: true,
-            targetMaxHP: this.player.maxHp,
-          });
-          if (this.vfx) {
-            this.vfx.hitSparks(this.player.sprite.x, this.player.sprite.y - 16, 6);
-          }
-        } else if (result.isDodged) {
-          this.player.gainSpirit('dodge');
-          this.showDamageText(this.player.sprite.x, this.player.sprite.y, 0, false, true);
-          // dodgeCounter: after dodging, next attack is guaranteed crit
-          const eqDc = this.getEquipStats();
-          if (eqDc.dodgeCounter > 0) {
-            this._dodgeCounterReady = true;
-            EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.dodgeCounterReady'), type: 'combat' });
-          }
-        } else {
-          // Difficulty damage scaling is already applied at monster spawn time via DifficultySystem.scaleMonster
-          const finalDmg = result.damage;
-          this.player.hp = Math.max(0, this.player.hp - finalDmg);
-
-          // Thorns heal (set bonus: recover % maxHp on hit taken)
-          const eq = this.getEquipStats();
-          if (eq.thornsHeal > 0 && this.player.hp > 0) {
-            const heal = Math.floor(this.player.maxHp * eq.thornsHeal / 100);
-            this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
-            EventBus.emit(GameEvents.PLAYER_HEALTH_CHANGED, { hp: this.player.hp, maxHp: this.player.maxHp });
-          }
-
-          this.player.playHurt(monster.sprite.x, monster.sprite.y);
-          this.showDamageText(this.player.sprite.x, this.player.sprite.y, finalDmg, result.isCrit, false, true);
-          if (monster.definition.attackRange > 2.5) {
-            const projColor = monster.definition.spriteKey.includes('fire') || monster.definition.spriteKey.includes('phoenix')
-              ? 0xff6600 : monster.definition.spriteKey.includes('ice') ? 0x4488ff : 0xcc44cc;
-            this.skillEffects.playMonsterRangedAttack(
-              monster.sprite.x, monster.sprite.y,
-              this.player.sprite.x, this.player.sprite.y, projColor,
-            );
-          } else {
-            this.skillEffects.playMonsterAttack(this.player.sprite.x, this.player.sprite.y);
-          }
-          EventBus.emit(GameEvents.COMBAT_DAMAGE, {
-            targetId: 'player', damage: finalDmg, isDodged: false,
-            isCrit: result.isCrit, isPlayerTarget: true,
-            targetMaxHP: this.player.maxHp,
-          });
-
-          // Monster applies status effects to player based on monster type
-          this.applyMonsterStatusEffect(monster, time);
-
-          // ── Elite Affix: on-hit effects ──
-          if (monster.eliteAffixes.length > 0) {
-            const affixStats = this.eliteAffixSystem.getCombinedStats(monster.eliteAffixes);
-
-            // Fire Enhanced: extra fire damage
-            if (affixStats.extraFireDamage > 0) {
-              const fireDmg = Math.floor(finalDmg * affixStats.extraFireDamage);
-              if (fireDmg > 0) {
-                this.player.hp = Math.max(0, this.player.hp - fireDmg);
-                this.showDamageText(this.player.sprite.x + 10, this.player.sprite.y - 5, fireDmg, false, false, true, 'fire');
-                EventBus.emit(GameEvents.COMBAT_DAMAGE, {
-                  targetId: 'player', damage: fireDmg, isDodged: false,
-                  isCrit: false, isPlayerTarget: true, targetMaxHP: this.player.maxHp,
-                });
-              }
-            }
-
-            // Vampiric: lifesteal on hit
-            if (affixStats.lifestealFraction > 0) {
-              const heal = Math.floor(finalDmg * affixStats.lifestealFraction);
-              if (heal > 0) {
-                monster.hp = Math.min(monster.maxHp, monster.hp + heal);
-              }
-            }
-
-            // Frozen: chance to apply slow on hit
-            if (affixStats.freezeChance > 0 && Math.random() < affixStats.freezeChance) {
-              this.statusEffects.apply('player', 'slow', 30, 2500, monster.id, time);
-              EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.freezeSlow'), type: 'combat' });
-            }
-          }
-
-          if (this.player.hp <= 0) {
-            // Death save check (set bonus / legendary)
-            const eqDs = this.getEquipStats();
-            if (eqDs.deathSave > 0 && !this._deathSaveUsed) {
-              this.player.hp = Math.floor(this.player.maxHp * 0.3);
-              this._deathSaveUsed = true;
-              this.time.delayedCall(60000, () => { this._deathSaveUsed = false; });
-              EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.deathImmunity'), type: 'system' });
-              if (this.vfx) this.vfx.healBurst(this.player.sprite.x, this.player.sprite.y - 16, 20);
-            } else {
-              this.player.die(); break;
-            }
-          }
-        }
+        const impactDelay = monster.playAttack(this.player.sprite.x, this.player.sprite.y);
+        this.time.delayedCall(impactDelay, () => this.resolveMonsterStrike(monster));
       }
     }
 
@@ -2168,83 +2074,225 @@ export class ZoneScene extends Phaser.Scene {
       const dSq = distanceSq(this.player.tileCol, this.player.tileRow, target.tileCol, target.tileRow);
       if (dSq <= this.player.attackRange * this.player.attackRange && time - this.player.lastAttackTime >= this.player.attackSpeed) {
         this.player.lastAttackTime = time;
-        this.player.playAttack(target.sprite.x, target.sprite.y);
-        const eq = this.getEquipStats();
+        // Damage lands on the swing's contact beat, not at wind-up start.
+        const impactDelay = this.player.playAttack(target.sprite.x, target.sprite.y);
+        this.time.delayedCall(impactDelay, () => this.resolvePlayerStrike(target));
+      }
+    }
+  }
 
-        // dodgeCounter: guaranteed crit after dodge
-        const forceCrit = this._dodgeCounterReady;
-        if (forceCrit) {
-          this._dodgeCounterReady = false;
-          EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.dodgeCounterCrit'), type: 'combat' });
-        }
+  /** Resolve a basic attack at the moment the swing connects. */
+  private resolvePlayerStrike(target: Monster): void {
+    if (this.player.hp <= 0 || !target.isAlive() || this.isTransitioning) return;
+    const eq = this.getEquipStats();
 
-        const result = this.combatSystem.calculateDamage(
+    // dodgeCounter: guaranteed crit after dodge
+    const forceCrit = this._dodgeCounterReady;
+    if (forceCrit) {
+      this._dodgeCounterReady = false;
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.dodgeCounterCrit'), type: 'combat' });
+    }
+
+    const fromX = this.player.sprite.x;
+    const fromY = this.player.sprite.y;
+    const result = this.combatSystem.calculateDamage(
+      this.player.toCombatEntity(eq), target.toCombatEntity(),
+      undefined, 1, undefined, forceCrit,
+    );
+    const weight = target.takeDamage(result.damage, fromX, fromY, { isCrit: result.isCrit });
+    this.applySteal(result);
+    this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
+
+    // Consume stealthDamage buff after attack (it multiplies next attack only)
+    if (this.player.buffs.some(b => b.stat === 'stealthDamage')) {
+      this.player.buffs = this.player.buffs.filter(b => b.stat !== 'stealthDamage');
+    }
+
+    if (result.isCrit || result.damage > 0) {
+      EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+        targetId: target.id, damage: result.damage, isDodged: false,
+        isCrit: result.isCrit, isPlayerTarget: false,
+        targetMaxHP: target.maxHp,
+      });
+      this.playHitImpact(target, weight, fromX, fromY);
+    }
+    // Weapon slash trail on basic attack
+    if (this.trails) {
+      const angle = Math.atan2(target.sprite.y - fromY, target.sprite.x - fromX);
+      this.trails.stampSlash(target.sprite.x, target.sprite.y - 16, angle, 0xffffcc);
+    }
+
+    // critDoubleStrike: on crit, X% chance for immediate extra attack
+    if (result.isCrit && eq.critDoubleStrike > 0 && target.isAlive()) {
+      if (this.combatSystem.checkCritDoubleStrike(eq.critDoubleStrike, true)) {
+        const extraResult = this.combatSystem.calculateDamage(
           this.player.toCombatEntity(eq), target.toCombatEntity(),
-          undefined, 1, undefined, forceCrit,
         );
-        target.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
-        this.applySteal(result);
-        this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
-        this.skillEffects.playAttack(this.player.sprite.x, this.player.sprite.y, target.sprite.x, target.sprite.y, true);
+        const extraWeight = target.takeDamage(extraResult.damage, fromX, fromY, { isCrit: extraResult.isCrit });
+        this.applySteal(extraResult);
+        this.showDamageText(target.sprite.x, target.sprite.y - 20, extraResult.damage, extraResult.isCrit);
+        EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.comboTrigger'), type: 'combat' });
+        this.playHitImpact(target, extraWeight, fromX, fromY);
+      }
+    }
 
-        // Consume stealthDamage buff after attack (it multiplies next attack only)
-        if (this.player.buffs.some(b => b.stat === 'stealthDamage')) {
-          this.player.buffs = this.player.buffs.filter(b => b.stat !== 'stealthDamage');
-        }
+    // doubleShot: X% chance to fire double projectile on ranged auto-attack
+    if (eq.doubleShot > 0 && target.isAlive()) {
+      if (this.combatSystem.checkDoubleShot(eq.doubleShot, this.player.attackRange)) {
+        const extraResult = this.combatSystem.calculateDamage(
+          this.player.toCombatEntity(eq), target.toCombatEntity(),
+        );
+        const extraWeight = target.takeDamage(extraResult.damage, fromX, fromY, { isCrit: extraResult.isCrit });
+        this.applySteal(extraResult);
+        this.showDamageText(target.sprite.x + 15, target.sprite.y - 15, extraResult.damage, extraResult.isCrit);
+        EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.doubleArrow'), type: 'combat' });
+        this.skillEffects.playAttack(fromX, fromY, target.sprite.x, target.sprite.y, true);
+        this.playHitImpact(target, extraWeight, fromX, fromY);
+      }
+    }
 
-        // VFX for player attacks — crit flash + hit sparks
-        if (result.isCrit || result.damage > 0) {
-          EventBus.emit(GameEvents.COMBAT_DAMAGE, {
-            targetId: target.id, damage: result.damage, isDodged: false,
-            isCrit: result.isCrit, isPlayerTarget: false,
-            targetMaxHP: target.maxHp,
-          });
-          // Hit-freeze and flash
-          target.animator.triggerHitFreeze(35);
-          this.player.animator.triggerHitFreeze(35);
-          if (this.vfx) this.vfx.hitFlash(target.sprite);
-          if (result.isCrit && this.vfx) {
-            this.vfx.hitSparks(target.sprite.x, target.sprite.y - 16, 12);
+    if (!target.isAlive()) {
+      this.onMonsterKilled(target);
+      if (this.player.attackTarget === target.id) this.player.attackTarget = null;
+      EventBus.emit(GameEvents.TARGET_CHANGED, { targetId: null, targetName: null });
+    }
+  }
+
+  /** Attacker-side hit feedback: hit-stop on the player, impact burst, shake. */
+  private playHitImpact(target: Monster, weight: HitWeight, fromX: number, fromY: number): void {
+    const profile = HIT_PROFILES[weight];
+    this.player.animator.triggerHitFreeze(profile.attackerStopMs);
+    if (!this.vfx) return;
+    const angle = Math.atan2(target.sprite.y - fromY, target.sprite.x - fromX);
+    const color = CLASS_IMPACT_COLORS[this.player.classData.id] ?? 0xfff2c0;
+    this.vfx.impactBurst(target.sprite.x, target.sprite.y - 18, angle, weight, color);
+    if (weight === 'kill' && target.definition.elite) {
+      this.vfx.slowMotion(280, 0.3);
+    }
+  }
+
+  /** Launch a monster's attack; its damage resolves when the blow (or projectile) lands. */
+  private resolveMonsterStrike(monster: Monster): void {
+    if (!monster.isAlive() || this.player.hp <= 0 || this.isTransitioning) return;
+    // Stunned/rooted mid-swing: the attack is interrupted.
+    if (this.statusEffects.isImmobilized(monster.id)) return;
+    const ranged = monster.definition.attackRange > 2.5;
+    if (ranged) {
+      const spriteKey = monster.definition.spriteKey;
+      const projColor = spriteKey.includes('fire') || spriteKey.includes('phoenix')
+        ? 0xff6600 : spriteKey.includes('ice') ? 0x4488ff : 0xcc44cc;
+      this.skillEffects.playMonsterRangedAttack(
+        monster.sprite.x, monster.sprite.y,
+        this.player.sprite.x, this.player.sprite.y, projColor,
+        () => {
+          if (!monster.isAlive() || this.player.hp <= 0 || this.isTransitioning) return;
+          this.applyMonsterHit(monster, true);
+        },
+      );
+      return;
+    }
+    // Melee whiffs if the player stepped out of reach during the wind-up.
+    const reach = monster.definition.attackRange * 1.35 + 0.5;
+    if (distanceSq(this.player.tileCol, this.player.tileRow, monster.tileCol, monster.tileRow) > reach * reach) return;
+    this.applyMonsterHit(monster, false);
+  }
+
+  private applyMonsterHit(monster: Monster, ranged: boolean): void {
+    const time = this.time.now;
+    const result = this.combatSystem.calculateDamage(monster.toCombatEntity(), this.player.toCombatEntity(this.getEquipStats()));
+    if (this.dodgeController.isInvulnerable(time)) {
+      if (this.dodgeController.claimAvoidanceReward(time)) {
+        this.player.gainSpirit('dodge');
+      }
+      this.showDamageText(this.player.sprite.x, this.player.sprite.y, 0, false, true);
+      EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+        targetId: 'player', damage: 0, isDodged: true,
+        isCrit: false, isPlayerTarget: true,
+        targetMaxHP: this.player.maxHp,
+      });
+      if (this.vfx) {
+        this.vfx.hitSparks(this.player.sprite.x, this.player.sprite.y - 16, 6);
+      }
+    } else if (result.isDodged) {
+      this.player.gainSpirit('dodge');
+      this.showDamageText(this.player.sprite.x, this.player.sprite.y, 0, false, true);
+      // dodgeCounter: after dodging, next attack is guaranteed crit
+      const eqDc = this.getEquipStats();
+      if (eqDc.dodgeCounter > 0) {
+        this._dodgeCounterReady = true;
+        EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.dodgeCounterReady'), type: 'combat' });
+      }
+    } else {
+      // Difficulty damage scaling is already applied at monster spawn time via DifficultySystem.scaleMonster
+      const finalDmg = result.damage;
+      this.player.hp = Math.max(0, this.player.hp - finalDmg);
+
+      // Thorns heal (set bonus: recover % maxHp on hit taken)
+      const eq = this.getEquipStats();
+      if (eq.thornsHeal > 0 && this.player.hp > 0) {
+        const heal = Math.floor(this.player.maxHp * eq.thornsHeal / 100);
+        this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
+        EventBus.emit(GameEvents.PLAYER_HEALTH_CHANGED, { hp: this.player.hp, maxHp: this.player.maxHp });
+      }
+
+      const hurtWeight = classifyHit({ damage: finalDmg, maxHp: this.player.maxHp, isCrit: result.isCrit });
+      this.player.playHurt(monster.sprite.x, monster.sprite.y, HIT_PROFILES[hurtWeight].recoil);
+      monster.animator.triggerHitFreeze(Math.round(HIT_PROFILES[hurtWeight].attackerStopMs * 0.6));
+      this.showDamageText(this.player.sprite.x, this.player.sprite.y, finalDmg, result.isCrit, false, true);
+      // Ranged hits already showed their projectile burst on arrival.
+      if (!ranged) this.skillEffects.playMonsterAttack(this.player.sprite.x, this.player.sprite.y);
+      EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+        targetId: 'player', damage: finalDmg, isDodged: false,
+        isCrit: result.isCrit, isPlayerTarget: true,
+        targetMaxHP: this.player.maxHp,
+      });
+
+      // Monster applies status effects to player based on monster type
+      this.applyMonsterStatusEffect(monster, time);
+
+      // ── Elite Affix: on-hit effects ──
+      if (monster.eliteAffixes.length > 0) {
+        const affixStats = this.eliteAffixSystem.getCombinedStats(monster.eliteAffixes);
+
+        // Fire Enhanced: extra fire damage
+        if (affixStats.extraFireDamage > 0) {
+          const fireDmg = Math.floor(finalDmg * affixStats.extraFireDamage);
+          if (fireDmg > 0) {
+            this.player.hp = Math.max(0, this.player.hp - fireDmg);
+            this.showDamageText(this.player.sprite.x + 10, this.player.sprite.y - 5, fireDmg, false, false, true, 'fire');
+            EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+              targetId: 'player', damage: fireDmg, isDodged: false,
+              isCrit: false, isPlayerTarget: true, targetMaxHP: this.player.maxHp,
+            });
           }
         }
-        // Weapon slash trail on basic attack
-        if (this.trails) {
-          const angle = Math.atan2(target.sprite.y - this.player.sprite.y, target.sprite.x - this.player.sprite.x);
-          this.trails.stampSlash(target.sprite.x, target.sprite.y - 16, angle, 0xffffcc);
-        }
 
-        // critDoubleStrike: on crit, X% chance for immediate extra attack
-        if (result.isCrit && eq.critDoubleStrike > 0 && target.isAlive()) {
-          if (this.combatSystem.checkCritDoubleStrike(eq.critDoubleStrike, true)) {
-            const extraResult = this.combatSystem.calculateDamage(
-              this.player.toCombatEntity(eq), target.toCombatEntity(),
-            );
-            target.takeDamage(extraResult.damage, this.player.sprite.x, this.player.sprite.y);
-            this.applySteal(extraResult);
-            this.showDamageText(target.sprite.x, target.sprite.y - 20, extraResult.damage, extraResult.isCrit);
-            EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.comboTrigger'), type: 'combat' });
-            if (this.vfx) this.vfx.hitSparks(target.sprite.x, target.sprite.y - 16, 8);
+        // Vampiric: lifesteal on hit
+        if (affixStats.lifestealFraction > 0) {
+          const heal = Math.floor(finalDmg * affixStats.lifestealFraction);
+          if (heal > 0) {
+            monster.hp = Math.min(monster.maxHp, monster.hp + heal);
           }
         }
 
-        // doubleShot: X% chance to fire double projectile on ranged auto-attack
-        if (eq.doubleShot > 0 && target.isAlive()) {
-          if (this.combatSystem.checkDoubleShot(eq.doubleShot, this.player.attackRange)) {
-            const extraResult = this.combatSystem.calculateDamage(
-              this.player.toCombatEntity(eq), target.toCombatEntity(),
-            );
-            target.takeDamage(extraResult.damage, this.player.sprite.x, this.player.sprite.y);
-            this.applySteal(extraResult);
-            this.showDamageText(target.sprite.x + 15, target.sprite.y - 15, extraResult.damage, extraResult.isCrit);
-            EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.doubleArrow'), type: 'combat' });
-            this.skillEffects.playAttack(this.player.sprite.x, this.player.sprite.y, target.sprite.x, target.sprite.y, true);
-          }
+        // Frozen: chance to apply slow on hit
+        if (affixStats.freezeChance > 0 && Math.random() < affixStats.freezeChance) {
+          this.statusEffects.apply('player', 'slow', 30, 2500, monster.id, time);
+          EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.freezeSlow'), type: 'combat' });
         }
+      }
 
-        if (!target.isAlive()) {
-          this.onMonsterKilled(target);
-          this.player.attackTarget = null;
-          EventBus.emit(GameEvents.TARGET_CHANGED, { targetId: null, targetName: null });
+      if (this.player.hp <= 0) {
+        // Death save check (set bonus / legendary)
+        const eqDs = this.getEquipStats();
+        if (eqDs.deathSave > 0 && !this._deathSaveUsed) {
+          this.player.hp = Math.floor(this.player.maxHp * 0.3);
+          this._deathSaveUsed = true;
+          this.time.delayedCall(60000, () => { this._deathSaveUsed = false; });
+          EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.deathImmunity'), type: 'system' });
+          if (this.vfx) this.vfx.healBurst(this.player.sprite.x, this.player.sprite.y - 16, 20);
+        } else {
+          this.player.die(); return;
         }
       }
     }
@@ -4893,35 +4941,76 @@ export class ZoneScene extends Phaser.Scene {
       if (isCrit) size = fs(32);
     }
 
+    // Stack numbers that spawn on the same spot in quick succession so
+    // multi-hits and AoE ticks stay readable instead of overprinting.
+    const now = this.time.now;
+    const stackKey = `${Math.round(x / 28)},${Math.round(y / 28)}`;
+    const prev = this.damageTextStacks.get(stackKey);
+    const stackIndex = prev && now - prev.time < 320 ? Math.min(prev.index + 1, 4) : 0;
+    this.damageTextStacks.set(stackKey, { time: now, index: stackIndex });
+    if (this.damageTextStacks.size > 64) {
+      for (const [key, entry] of this.damageTextStacks) {
+        if (now - entry.time > 1000) this.damageTextStacks.delete(key);
+      }
+    }
+    const drift = (stackIndex % 2 === 0 ? 1 : -1) * (isCrit ? 14 : 10) + randomInt(-4, 4);
+    const startX = x + randomInt(-6, 6);
+    const startY = y - 30 - stackIndex * 11;
+
     // Acquire from pool or create new
     let t: Phaser.GameObjects.Text;
     const poolIdx = this.floatingTextPool.findIndex(obj => !obj.active);
     if (poolIdx !== -1) {
       t = this.floatingTextPool[poolIdx];
       t.setActive(true).setVisible(true);
-      t.setPosition(x + randomInt(-15, 15), y - 30);
+      t.setPosition(startX, startY);
       t.setText(text);
       t.setStyle({ fontSize: size, color, fontFamily: '"Cinzel", serif', fontStyle: isCrit ? 'bold' : 'normal', stroke: '#000000', strokeThickness: Math.round((isCrit ? 4 : 3) * DPR) });
-      t.setAlpha(1);
-      t.setScale(1);
     } else {
-      t = this.add.text(x + randomInt(-15, 15), y - 30, text, {
+      t = this.add.text(startX, startY, text, {
         fontSize: size, color, fontFamily: '"Cinzel", serif', fontStyle: isCrit ? 'bold' : 'normal',
         stroke: '#000000', strokeThickness: Math.round((isCrit ? 4 : 3) * DPR),
       });
       this.floatingTextPool.push(t);
     }
-    t.setOrigin(0.5).setDepth(ZONE_FLOATING_TEXT_DEPTH);
+    t.setOrigin(0.5).setDepth(ZONE_FLOATING_TEXT_DEPTH + stackIndex);
+    t.setAlpha(1).setAngle(0);
 
     const releaseToPool = (): void => { t.setActive(false).setVisible(false); };
 
-    if (isCrit) {
-      t.setScale(1.5);
-      this.tweens.add({ targets: t, scale: 1, duration: 200, ease: 'Back.easeOut' });
-      this.tweens.add({ targets: t, y: t.y - 70, alpha: 0, duration: 1500, ease: 'Power2', onComplete: releaseToPool });
-    } else {
-      this.tweens.add({ targets: t, y: t.y - 50, alpha: 0, duration: 1200, ease: 'Power2', onComplete: releaseToPool });
+    if (isDodged) {
+      t.setScale(0.8);
+      this.tweens.add({ targets: t, scale: 1, duration: 90, ease: 'Quad.easeOut' });
+      this.tweens.add({ targets: t, y: startY - 22, alpha: 0, duration: 650, delay: 120, ease: 'Quad.easeOut', onComplete: releaseToPool });
+      return;
     }
+
+    // Pop: overshoot then settle — sells the impact of the number itself.
+    const peak = isCrit ? 1.75 : 1.2;
+    const rest = isCrit ? 1.2 : 1;
+    t.setScale(isCrit ? 0.35 : 0.5);
+    if (isCrit) t.setAngle(-8);
+    this.tweens.add({
+      targets: t, scale: peak, angle: 0, duration: isCrit ? 90 : 70, ease: 'Quad.easeOut',
+      onComplete: () => {
+        if (!t.active) return;
+        this.tweens.add({ targets: t, scale: rest, duration: isCrit ? 160 : 110, ease: 'Back.easeOut' });
+      },
+    });
+    // Arc: drift sideways while rising, then sink slightly as it fades.
+    const rise = isCrit ? 40 : 28;
+    const life = isCrit ? 1050 : 780;
+    this.tweens.add({ targets: t, x: startX + drift, duration: life, ease: 'Sine.easeOut' });
+    this.tweens.add({
+      targets: t, y: startY - rise, duration: life * 0.45, ease: 'Quad.easeOut',
+      onComplete: () => {
+        if (!t.active) return;
+        this.tweens.add({
+          targets: t, y: startY - rise + 8, alpha: 0, duration: life * 0.55, ease: 'Quad.easeIn',
+          onComplete: releaseToPool,
+        });
+      },
+    });
   }
 
   /** Convert a desired screen-fraction position to scrollFactor(0) object position, accounting for camera zoom. */
@@ -5257,7 +5346,7 @@ export class ZoneScene extends Phaser.Scene {
           const monster = this.monsters.find(m => m.id === entityId && m.isAlive());
           if (monster) {
             // Bleed ignores defense (damage applied directly via takeDamage)
-            monster.takeDamage(tick.damage);
+            monster.takeDamage(tick.damage, undefined, undefined, { isTick: true });
             this.showDamageText(
               monster.sprite.x, monster.sprite.y,
               tick.damage, false, false, false,
@@ -5597,7 +5686,7 @@ export class ZoneScene extends Phaser.Scene {
           const entity = this.mercenarySystem.toCombatEntity();
           if (entity) {
             const result = this.combatSystem.calculateDamage(entity, target.toCombatEntity());
-            target.takeDamage(result.damage, this.mercenarySprite?.x ?? 0, this.mercenarySprite?.y ?? 0);
+            target.takeDamage(result.damage, this.mercenarySprite?.x ?? 0, this.mercenarySprite?.y ?? 0, { isCrit: result.isCrit });
             this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
             if (!target.isAlive()) {
               this.onMonsterKilled(target);
@@ -6391,6 +6480,7 @@ export class ZoneScene extends Phaser.Scene {
     // Clean up floating text pool
     for (const t of this.floatingTextPool) t.destroy();
     this.floatingTextPool = [];
+    this.damageTextStacks.clear();
     for (const sprite of this.campDecorSprites.values()) sprite.destroy();
     this.campDecorSprites.clear();
     for (const emitter of this.campParticles.values()) emitter.destroy();

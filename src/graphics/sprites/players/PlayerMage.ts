@@ -5,7 +5,7 @@ import {
   PLAYER_TOTAL_FRAMES,
 } from '../types';
 import type { DrawUtils } from '../../DrawUtils';
-import { samplePose, sinePulse, smoothstep } from './PlayerMotion';
+import { samplePose, sinePulse, smoothstep, walkBob, walkStride } from './PlayerMotion';
 
 const ROBE_BASE    = 0x1e132a;
 const ROBE_LIGHT   = 0x2d1e3d;
@@ -21,13 +21,14 @@ const HAT_TRIM     = 0x8a5ac0;
 
 export const PlayerMageDrawer: EntityDrawer = {
   key: 'player_mage',
-  frameW: 64,
+  // Wide frame leaves room for weapon reach at the contact pose.
+  frameW: 96,
   frameH: 96,
   totalFrames: PLAYER_TOTAL_FRAMES,
 
   drawFrame(ctx, frame, action, w, h, utils) {
     const act = action as PlayerAction;
-    const s = w / 64;
+    const s = h / 96;
 
     const count = PLAYER_ACTION_FRAME_COUNTS[act];
     const localFrame = frame % count;
@@ -56,7 +57,7 @@ export const PlayerMageDrawer: EntityDrawer = {
         wispPhase = phase * 0.5;
         break;
       case 'walk':
-        bodyOffsetY = -Math.abs(Math.sin(phase)) * 1.45 * s;
+        bodyOffsetY = -walkBob(phase) * 1.6 * s;
         staffAngle = -Math.PI * 0.1 + Math.sin(phase) * 0.105;
         leanX = Math.sin(phase) * 1.1;
         robeFlow = Math.sin(phase - 0.7);
@@ -200,9 +201,11 @@ export const PlayerMageDrawer: EntityDrawer = {
     robeGrad.addColorStop(1, utils.rgb(ROBE_DARK));
     ctx.fillStyle = robeGrad;
     ctx.beginPath();
+    // Hem corners are pushed by the stepping legs underneath.
+    const hemSwing = act === 'walk' ? Math.sin(phase) * 2.5 * s : 0;
     ctx.moveTo(torsoX - robeTopW / 2, robeTop);
     ctx.lineTo(torsoX + robeTopW / 2, robeTop);
-    ctx.lineTo(torsoX + robeBotW / 2, robeBot);
+    ctx.lineTo(torsoX + robeBotW / 2 + hemSwing, robeBot);
     // Wavy hem (3 gentle waves)
     const waveY = robeBot;
     const waveAmp = 2.5 * s * (
@@ -211,7 +214,7 @@ export const PlayerMageDrawer: EntityDrawer = {
       + Math.abs(robeFlow) * 0.45
     );
     ctx.quadraticCurveTo(torsoX + robeBotW / 2 - 4 * s, waveY - waveAmp, torsoX + 2 * s, waveY);
-    ctx.quadraticCurveTo(torsoX - 4 * s, waveY + waveAmp, torsoX - robeBotW / 2, waveY);
+    ctx.quadraticCurveTo(torsoX - 4 * s, waveY + waveAmp, torsoX - robeBotW / 2 - hemSwing, waveY);
     ctx.closePath();
     ctx.fill();
 
@@ -219,9 +222,9 @@ export const PlayerMageDrawer: EntityDrawer = {
     ctx.strokeStyle = utils.rgb(ROBE_LIGHT, 0.6);
     ctx.lineWidth = 1 * s;
     ctx.beginPath();
-    ctx.moveTo(torsoX - robeBotW / 2, waveY);
+    ctx.moveTo(torsoX - robeBotW / 2 - hemSwing, waveY);
     ctx.quadraticCurveTo(torsoX - 4 * s, waveY + waveAmp, torsoX, waveY);
-    ctx.quadraticCurveTo(torsoX + 4 * s, waveY - waveAmp * 0.5, torsoX + robeBotW / 2, waveY);
+    ctx.quadraticCurveTo(torsoX + 4 * s, waveY - waveAmp * 0.5, torsoX + robeBotW / 2 + hemSwing, waveY);
     ctx.stroke();
 
     // Cloth shoes — flat ellipses visible below robe
@@ -229,11 +232,12 @@ export const PlayerMageDrawer: EntityDrawer = {
       const shoePhase = act === 'walk'
         ? phase + (side === -1 ? 0 : Math.PI)
         : 0;
+      const stride = act === 'walk' ? walkStride(shoePhase) : { swing: 0, lift: 0 };
       ctx.fillStyle = utils.rgb(ROBE_DARK);
       utils.fillEllipse(
         ctx,
-        torsoX + side * 5 * s + Math.sin(shoePhase) * 2 * s,
-        baseY - 2 * s - Math.max(0, Math.sin(shoePhase)) * 1.3 * s,
+        torsoX + side * 5 * s + stride.swing * 4 * s,
+        baseY - 2 * s - stride.lift * 3 * s,
         5 * s,
         3 * s,
       );
@@ -308,7 +312,8 @@ export const PlayerMageDrawer: EntityDrawer = {
     // ── Arms ──────────────────────────────────────────────────────────────
     for (const side of [-1, 1]) {
       const isRight = side === 1;
-      const armPhase = act === 'walk' ? phase + (isRight ? Math.PI : 0) : 0;
+      // Arms counter-swing against the same-side leg.
+      const armPhase = act === 'walk' ? phase + (isRight ? 0 : Math.PI) : 0;
       const shoulderX = torsoX + side * 9 * s;
       const shoulderY = torsoY - 9 * s;
 

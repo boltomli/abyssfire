@@ -5,7 +5,7 @@ import {
   PLAYER_TOTAL_FRAMES,
 } from '../types';
 import type { DrawUtils } from '../../DrawUtils';
-import { samplePose, sinePulse, smoothstep } from './PlayerMotion';
+import { samplePose, sinePulse, smoothstep, walkBob, walkStride } from './PlayerMotion';
 
 const ARMOR_BASE   = 0x2a3542;
 const ARMOR_LIGHT  = 0x3e4c5c;
@@ -20,13 +20,14 @@ const SHIELD_TRIM  = 0xb8860b;
 
 export const PlayerWarriorDrawer: EntityDrawer = {
   key: 'player_warrior',
-  frameW: 64,
+  // Wide frame leaves room for weapon reach at the contact pose.
+  frameW: 96,
   frameH: 96,
   totalFrames: PLAYER_TOTAL_FRAMES,
 
   drawFrame(ctx, frame, action, w, h, utils) {
     const act = action as PlayerAction;
-    const s = w / 64;
+    const s = h / 96;
 
     const count = PLAYER_ACTION_FRAME_COUNTS[act];
     const localFrame = frame % count;
@@ -54,8 +55,8 @@ export const PlayerWarriorDrawer: EntityDrawer = {
         break;
       case 'walk':
         // Deliberate heel-to-toe march, heavy without feeling rigid.
-        bodyOffsetY = -Math.abs(Math.sin(phase)) * 1.8 * s;
-        lunge = Math.sin(phase) * 0.22;
+        bodyOffsetY = -walkBob(phase) * 2.2 * s;
+        lunge = 0.12 + Math.sin(phase * 2) * 0.05;
         shieldRaise = 0.12 + Math.max(0, Math.sin(phase)) * 0.08;
         globalRotation = Math.sin(phase) * 0.018;
         stance = 0.08;
@@ -190,12 +191,14 @@ export const PlayerWarriorDrawer: EntityDrawer = {
     // ── Legs / Greaves ─────────────────────────────────────────────────────
     for (const side of [-1, 1]) {
       const legPhase = act === 'walk' ? phase + (side === -1 ? 0 : Math.PI) : 0;
+      const stride = act === 'walk' ? walkStride(legPhase) : { swing: 0, lift: 0 };
       const hipX = cx + side * (9 + stance * 3) * s + lunge * 2 * s;
       const hipY = baseY - 28 * s + bodyOffsetY + crouch * 2 * s;
-      const kneeX = hipX + side * (1 + stance) * s + Math.sin(legPhase) * 2.5 * s;
-      const kneeY = hipY + (13 - crouch * 2) * s;
-      const footX = hipX + side * (2 + stance * 1.4) * s + Math.sin(legPhase) * 1.5 * s;
-      const footY = baseY - 2 * s;
+      // Knee leads the foot while it's lifted; planted foot slides back.
+      const kneeX = hipX + side * (1 + stance) * s + stride.swing * 3.5 * s + stride.lift * 2 * s;
+      const kneeY = hipY + (13 - crouch * 2 - stride.lift * 2.5) * s;
+      const footX = hipX + side * (2 + stance * 1.4) * s + stride.swing * 5 * s;
+      const footY = baseY - 2 * s - stride.lift * 4 * s;
 
       utils.drawLimb(ctx, [
         { x: hipX, y: hipY },
@@ -269,7 +272,8 @@ export const PlayerWarriorDrawer: EntityDrawer = {
     // ── Arms (THICK, armored) ───────────────────────────────────────────
     for (const side of [-1, 1]) {
       const isRight = side === 1;
-      const armPhase = act === 'walk' ? phase + (isRight ? Math.PI : 0) : 0;
+      // Arms counter-swing against the same-side leg.
+      const armPhase = act === 'walk' ? phase + (isRight ? 0 : Math.PI) : 0;
       const shoulderX = torsoX + side * 16 * s;
       const shoulderY = torsoY - 10 * s;
 
@@ -282,7 +286,8 @@ export const PlayerWarriorDrawer: EntityDrawer = {
         const baseAngle = -Math.PI * 0.6 + swing;
         elbowX = shoulderX + Math.cos(baseAngle) * armLen1;
         elbowY = shoulderY + Math.sin(baseAngle) * armLen1;
-        const foreAngle = baseAngle + Math.PI * 0.3;
+        // Elbow bent on the wind-up, arm locks straight through contact.
+        const foreAngle = baseAngle + Math.PI * 0.3 * (1 - Math.min(1, swordSwing));
         handX = elbowX + Math.cos(foreAngle) * armLen2;
         handY = elbowY + Math.sin(foreAngle) * armLen2;
       } else if (
@@ -300,10 +305,10 @@ export const PlayerWarriorDrawer: EntityDrawer = {
         handX = elbowX + 2 * s;
         handY = elbowY + 6 * s - raiseAmt * 0.5;
       } else {
-        elbowX = shoulderX + side * 4 * s + Math.sin(armPhase) * 2.5 * s;
+        elbowX = shoulderX + side * 4 * s + Math.sin(armPhase) * 3 * s;
         elbowY = shoulderY + 10 * s;
-        handX = elbowX + side * 3 * s + Math.sin(armPhase) * 2 * s;
-        handY = elbowY + 10 * s + Math.sin(armPhase) * 2.5 * s;
+        handX = elbowX + side * 3 * s + Math.sin(armPhase) * 3.5 * s;
+        handY = elbowY + 10 * s - Math.abs(Math.sin(armPhase)) * 1.5 * s;
       }
 
       // Upper arm plate — thicker
@@ -367,9 +372,13 @@ export const PlayerWarriorDrawer: EntityDrawer = {
         const swX = handX + side * 2 * s;
         const swY = handY;
         // Blade extends in the swing direction
-        const bladeAngle = act === 'attack' || act === 'cast' || act === 'dodge'
-          ? -Math.PI * 0.6 + swordSwing * Math.PI * 0.75 - Math.PI * 0.5
-          : -Math.PI * 0.5;
+        // During swings the blade extends the forearm line: straight up at
+        // the top of the wind-up, forward-down at contact.
+        const bladeAngle = act === 'attack'
+          ? -Math.PI * 0.5 + swordSwing * Math.PI * 0.75
+          : act === 'cast' || act === 'dodge'
+            ? -Math.PI * 0.6 + swordSwing * Math.PI * 0.75 - Math.PI * 0.5
+            : -Math.PI * 0.5;
         const bladeLen = 22 * s;
         const tipX = swX + Math.cos(bladeAngle) * bladeLen;
         const tipY = swY + Math.sin(bladeAngle) * bladeLen;

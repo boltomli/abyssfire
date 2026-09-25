@@ -5,7 +5,7 @@ import {
   PLAYER_TOTAL_FRAMES,
 } from '../types';
 import type { DrawUtils } from '../../DrawUtils';
-import { samplePose, sinePulse, smoothstep } from './PlayerMotion';
+import { samplePose, sinePulse, smoothstep, walkBob, walkStride } from './PlayerMotion';
 
 const LEATHER_BASE = 0x1e2a1e;
 const LEATHER_DARK = 0x131e13;
@@ -20,13 +20,14 @@ const WRAP_COLOR   = 0x2a2a1e;
 
 export const PlayerRogueDrawer: EntityDrawer = {
   key: 'player_rogue',
-  frameW: 64,
+  // Wide frame leaves room for weapon reach at the contact pose.
+  frameW: 96,
   frameH: 96,
   totalFrames: PLAYER_TOTAL_FRAMES,
 
   drawFrame(ctx, frame, action, w, h, utils) {
     const act = action as PlayerAction;
-    const s = w / 64;
+    const s = h / 96;
 
     const count = PLAYER_ACTION_FRAME_COUNTS[act];
     const localFrame = frame % count;
@@ -58,7 +59,7 @@ export const PlayerRogueDrawer: EntityDrawer = {
         cloakFlow = Math.sin(phase - 0.8) * 0.35;
         break;
       case 'walk':
-        bodyOffsetY = -Math.abs(Math.sin(phase)) * 1.25 * s;
+        bodyOffsetY = -walkBob(phase) * 1.8 * s;
         lunge = 0.18 + Math.sin(phase) * 0.18;
         stance = 0.16;
         crouch = 0.12 + Math.abs(Math.sin(phase)) * 0.08;
@@ -209,12 +210,14 @@ export const PlayerRogueDrawer: EntityDrawer = {
     // ── Legs / Wrapped Boots ───────────────────────────────────────────────
     for (const side of [-1, 1]) {
       const legPhase = act === 'walk' ? phase + (side === -1 ? 0 : Math.PI) : 0;
+      const stride = act === 'walk' ? walkStride(legPhase) : { swing: 0, lift: 0 };
       const hipX = cx + side * (6 + stance * 3) * s + lunge * 2 * s;
       const hipY = baseY - 26 * s + bodyOffsetY + crouch * 1.5 * s;
-      const kneeX = hipX + side * (1 + stance) * s + Math.sin(legPhase) * 3 * s;
-      const kneeY = hipY + (13 - crouch * 2.2) * s;
-      const footX = hipX + side * (2 + stance) * s + Math.sin(legPhase) * 2 * s;
-      const footY = baseY - 2 * s;
+      // Light-footed prowl: longer stride, higher knee than the warrior.
+      const kneeX = hipX + side * (1 + stance) * s + stride.swing * 4 * s + stride.lift * 2.5 * s;
+      const kneeY = hipY + (13 - crouch * 2.2 - stride.lift * 3) * s;
+      const footX = hipX + side * (2 + stance) * s + stride.swing * 5.5 * s;
+      const footY = baseY - 2 * s - stride.lift * 4.5 * s;
 
       utils.drawLimb(ctx, [
         { x: hipX, y: hipY },
@@ -319,7 +322,8 @@ export const PlayerRogueDrawer: EntityDrawer = {
     // ── Arms ──────────────────────────────────────────────────────────────
     for (const side of [-1, 1]) {
       const isRight = side === 1;
-      const armPhase = act === 'walk' ? phase + (isRight ? Math.PI : 0) : 0;
+      // Arms counter-swing against the same-side leg.
+      const armPhase = act === 'walk' ? phase + (isRight ? 0 : Math.PI) : 0;
       const shoulderX = torsoX + side * 10 * s;
       const shoulderY = torsoY - 10 * s;
 

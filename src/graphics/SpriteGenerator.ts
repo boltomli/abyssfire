@@ -8,6 +8,8 @@ import {
   PLAYER_ACTION_FRAME_COUNTS,
   PLAYER_ACTION_ORDER,
   getPlayerActionFrameRange,
+  computeSheetGrid,
+  sheetFrameOrigin,
 } from './sprites/types';
 import { SlimeDrawer } from './sprites/monsters/Slime';
 import { SkeletonDrawer } from './sprites/monsters/Skeleton';
@@ -1042,7 +1044,8 @@ export class SpriteGenerator {
 
     const s = TEXTURE_SCALE;
     const fw = drawer.frameW * s, fh = drawer.frameH * s;
-    const [canvas, ctx] = this.utils.createCanvas(fw * drawer.totalFrames, fh);
+    const grid = computeSheetGrid(fw, fh, drawer.totalFrames);
+    const [canvas, ctx] = this.utils.createCanvas(grid.width, grid.height);
 
     const isPlayer = PLAYER_DRAWER_BY_KEY.has(drawer.key);
     const actions: [EntityAction, number, number][] = isPlayer
@@ -1060,9 +1063,13 @@ export class SpriteGenerator {
 
     for (const [action, start, count] of actions) {
       for (let f = 0; f < count; f++) {
-        const ox = (start + f) * fw;
+        const cell = sheetFrameOrigin(grid, start + f);
         ctx.save();
-        ctx.translate(ox, 0);
+        ctx.translate(cell.x, cell.y);
+        // Clip to the cell so strokes can't bleed into neighbouring frames.
+        ctx.beginPath();
+        ctx.rect(0, 0, fw, fh);
+        ctx.clip();
         drawer.drawFrame(ctx, f, action, fw, fh, this.utils);
         ctx.restore();
       }
@@ -1074,7 +1081,8 @@ export class SpriteGenerator {
     if (this.scene.textures.exists(key)) this.scene.textures.remove(key);
     const canvasTex = this.scene.textures.addCanvas(key, canvas)!;
     for (let i = 0; i < drawer.totalFrames; i++) {
-      canvasTex.add(i, 0, i * fw, 0, fw, fh);
+      const cell = sheetFrameOrigin(grid, i);
+      canvasTex.add(i, 0, cell.x, cell.y, fw, fh);
     }
   }
 
@@ -1094,7 +1102,8 @@ export class SpriteGenerator {
 
     const s = TEXTURE_SCALE;
     const fw = drawer.frameW * s, fh = drawer.frameH * s;
-    const [canvas, ctx] = this.utils.createCanvas(fw * drawer.totalFrames, fh);
+    const grid = computeSheetGrid(fw, fh, drawer.totalFrames);
+    const [canvas, ctx] = this.utils.createCanvas(grid.width, grid.height);
 
     const actions: [string, number, number][] = [
       ['working', NPC_WORK_START, NPC_WORK_COUNT],
@@ -1105,9 +1114,13 @@ export class SpriteGenerator {
 
     for (const [action, start, count] of actions) {
       for (let f = 0; f < count; f++) {
-        const ox = (start + f) * fw;
+        const cell = sheetFrameOrigin(grid, start + f);
         ctx.save();
-        ctx.translate(ox, 0);
+        ctx.translate(cell.x, cell.y);
+        // Clip to the cell so strokes can't bleed into neighbouring frames.
+        ctx.beginPath();
+        ctx.rect(0, 0, fw, fh);
+        ctx.clip();
         drawer.drawFrame(ctx, f, action as any, fw, fh, this.utils);
         ctx.restore();
       }
@@ -1119,7 +1132,8 @@ export class SpriteGenerator {
     if (this.scene.textures.exists(key)) this.scene.textures.remove(key);
     const canvasTex = this.scene.textures.addCanvas(key, canvas)!;
     for (let i = 0; i < drawer.totalFrames; i++) {
-      canvasTex.add(i, 0, i * fw, 0, fw, fh);
+      const cell = sheetFrameOrigin(grid, i);
+      canvasTex.add(i, 0, cell.x, cell.y, fw, fh);
     }
   }
 

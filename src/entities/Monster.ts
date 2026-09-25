@@ -8,6 +8,13 @@ import type { CombatEntity, ActiveBuff } from '../systems/CombatSystem';
 import { CharacterAnimator, getAnimConfig } from '../systems/CharacterAnimator';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
 import type { EliteAffixInstance } from '../systems/EliteAffixSystem';
+import { classifyHit, HIT_PROFILES, type HitWeight } from '../systems/HitFeedback';
+
+export interface MonsterDamageOptions {
+  isCrit?: boolean;
+  /** Damage-over-time tick: flash only, no flinch or hit-stop. */
+  isTick?: boolean;
+}
 
 function fs(basePx: number): string {
   return `${Math.round(basePx * DPR)}px`;
@@ -53,6 +60,8 @@ export class Monster {
 
   private currentMoveSpeed = 0;
   private readonly moveAccel = 6;
+  /** Where the most recent hit came from — the corpse is thrown away from it. */
+  private lastHitFrom: { x: number; y: number } | null = null;
 
   private static idCounter = 0;
 
@@ -237,37 +246,47 @@ export class Monster {
     }
 
     const worldPos = cartToIso(this.tileCol, this.tileRow);
+    this.animator.faceToward(worldPos.x - this.sprite.x);
     this.sprite.setPosition(worldPos.x, worldPos.y);
     this.sprite.setDepth(worldPos.y + 50);
 
     return false;
   }
 
-  takeDamage(amount: number, sourceX?: number, sourceY?: number): void {
+  /**
+   * Apply damage and play the matching hit reaction. Returns the hit weight
+   * so callers can scale attacker-side feedback (hit-stop, shake, sparks).
+   */
+  takeDamage(amount: number, sourceX?: number, sourceY?: number, options: MonsterDamageOptions = {}): HitWeight {
+    if (this.state === 'dead') return 'tick';
+    const wasAlive = this.hp > 0;
     this.hp = Math.max(0, this.hp - amount);
     this.updateHpBar();
 
-    this.animator.playHurt(sourceX ?? this.sprite.x, sourceY ?? (this.sprite.y - 40));
-
-    // Knockback recoil: push sprite away from damage source briefly
-    const sx = sourceX ?? this.sprite.x;
-    const sy = sourceY ?? this.sprite.y;
-    const dx = this.sprite.x - sx;
-    const dy = this.sprite.y - sy;
-    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    const knockDist = 10;
-    this.scene.tweens.add({
-      targets: this.sprite,
-      x: this.sprite.x + (dx / dist) * knockDist,
-      y: this.sprite.y + (dy / dist) * knockDist,
-      duration: 200,
-      yoyo: true,
-      ease: 'Back.easeOut',
+    const weight = classifyHit({
+      damage: amount,
+      maxHp: this.maxHp,
+      isCrit: options.isCrit,
+      killed: wasAlive && this.hp <= 0,
+      isTick: options.isTick,
     });
+    const profile = HIT_PROFILES[weight];
+    const sx = sourceX ?? this.sprite.x;
+    const sy = sourceY ?? (this.sprite.y - 40);
+    if (sourceX !== undefined && sourceY !== undefined) this.lastHitFrom = { x: sx, y: sy };
+
+    // Recoil lives on the animator's inner sprite so the container stays
+    // locked to the monster's tile position (the old container yoyo tween
+    // could leave monsters permanently offset when hits overlapped).
+    this.animator.flashWhite(profile.flashMs);
 
     if (this.hp <= 0) {
       this.die();
+      return weight;
     }
+    this.animator.playHurt(sx, sy, profile.recoil);
+    this.animator.triggerHitFreeze(profile.targetStopMs);
+    return weight;
   }
 
   private updateHpBar(): void {
@@ -290,11 +309,15 @@ export class Monster {
     this.cleanupAffixVisuals();
     this.animator.playDeath(() => {
       this.sprite.destroy();
-    });
+    }, this.lastHitFrom?.x, this.lastHitFrom?.y);
   }
 
-  playAttack(targetX: number, targetY: number): void {
-    this.animator.playAttack(targetX, targetY);
+  /** Returns ms until the attack visually connects. */
+  playAttack(targetX: number, targetY: number): number {
+    return this.animator.playAttack(targetX, targetY, {
+      attackIntervalMs: this.definition.attackSpeed,
+      telegraphColor: this.definition.elite ? 0xff7a5c : 0xffc4b0,
+    });
   }
 
   toCombatEntity(): CombatEntity {

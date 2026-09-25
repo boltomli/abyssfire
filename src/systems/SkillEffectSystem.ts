@@ -1333,7 +1333,9 @@ export class SkillEffectSystem {
     this.burst(x, cy, 'particle_circle', 0xff4444, 8, { speed: 80, lifespan: 350, scale: { start: 0.8, end: 0 } });
   }
 
-  playMonsterRangedAttack(sx: number, sy: number, tx: number, ty: number, color: number = 0xff6600): void {
+  playMonsterRangedAttack(
+    sx: number, sy: number, tx: number, ty: number, color: number = 0xff6600, onImpact?: () => void,
+  ): void {
     const startX = sx, startY = sy - 16, endX = tx, endY = ty - 16;
     const dist = Phaser.Math.Distance.Between(startX, startY, endX, endY);
     const duration = Math.max(200, Math.min(500, dist * 2));
@@ -1353,6 +1355,7 @@ export class SkillEffectSystem {
         proj.destroy(); glow.destroy(); trail.stop(); this.scene.time.delayedCall(300, () => trail.destroy());
         this.burst(endX, endY, 'particle_spark', color, 10, { speed: 120, lifespan: 350 });
         this.flash(endX, endY, color, 8);
+        onImpact?.();
       },
     });
   }
