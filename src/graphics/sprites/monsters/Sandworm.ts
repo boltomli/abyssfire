@@ -1,247 +1,404 @@
 // src/graphics/sprites/monsters/Sandworm.ts
-import type { EntityDrawer, MonsterAction } from '../types';
-import type { DrawUtils } from '../../DrawUtils';
+//
+// 沙虫 — a great armoured worm bursting from a sand mound. Telescoping
+// sun-bleached ring plates with hot flesh glowing in the gaps, a blunt
+// head that splits into two jaw petals around a ringed, tooth-lined maw
+// with a molten gullet. Sways and churns the sand to move, rears back and
+// lunges down to bite, slumps and sinks into the dune on death.
+import type { MonsterAction } from '../types';
+import {
+  GROUND_Y,
+  blobPath,
+  capsulePath,
+  cel,
+  glow,
+  lerpV,
+  polyPath,
+  samplePoseTrack,
+  smear,
+  tone,
+  vec,
+  type Key,
+  type Tone,
+  type V,
+} from '../rig/Rig';
+import { rigMonster } from '../rig/MonsterKit';
 
-const HIDE_MID   = 0x614e2c;
-const HIDE_DARK  = 0x342110;
-const HIDE_LIGHT = 0x7b6543;
-const SAND_COLOR = 0x867043;
-const TOOTH_COLOR = 0x977b5f;
+interface WormPose {
+  /** Bezier control point of the body and the head centre. */
+  mid: V;
+  head: V;
+  /** Direction the maw faces (canvas radians, 0 = right, + = down). */
+  ang: number;
+  /** Maw opening 0..1. */
+  maw: number;
+  /** How far the whole worm has sunk below the sand. */
+  sink: number;
+  /** Mound size 0..1. */
+  mound: number;
+  /** Strike intensity. */
+  fx: number;
+  /** Life: 1 alive … 0 dead (dims the gullet glow). */
+  life: number;
+}
 
-export const SandwormDrawer: EntityDrawer = {
-  key: 'monster_sandworm',
-  frameW: 56,
-  frameH: 48,
-  totalFrames: 20,
+const BASE = vec(40, GROUND_Y + 5);
+const RING = tone(0xdcae68, { light: 0.42, shadow: 0.4 });
+const RING_B = tone(0xb8743c, { light: 0.35, shadow: 0.42 });
+const HEAD = tone(0x9c5a30, { light: 0.4 });
+const PETAL = tone(0xc98848, { light: 0.45 });
+const FLESH = tone(0xe0582a, { light: 0.3, shadow: 0.3 });
+const SAND = tone(0xe6c68a, { light: 0.4, shadow: 0.3 });
+const SAND_BACK = tone(0xc7a26a, { light: 0.25, shadow: 0.35 });
+const BONE = '#f6ecd2';
+const SPINE = tone(0xf0dcae, { light: 0.4, shadow: 0.45 });
 
-  drawFrame(ctx, frame, action, w, h, utils) {
-    const act = action as MonsterAction;
-    const s = w / 56;
+const REST: WormPose = { mid: vec(33, 60), head: vec(59, 43), ang: 0.4, maw: 0.15, sink: 0, mound: 1, fx: 0, life: 1 };
+const P = (o: Partial<WormPose>): WormPose => ({ ...REST, ...o });
 
-    const frameCounts: Record<MonsterAction, number> = { idle: 4, walk: 6, attack: 4, hurt: 2, death: 4 };
-    const count = frameCounts[act] || 4;
-    const localFrame = frame % count;
-    const t = count > 1 ? localFrame / (count - 1) : 0;
-    const phase = (localFrame / count) * Math.PI * 2;
+const ATTACK: Key<WormPose>[] = [
+  { at: 0, pose: REST },
+  { at: 0.33, ease: 'out', pose: P({ mid: vec(30, 58), head: vec(44, 39), ang: -0.25, maw: 0.05, fx: 0.2 }) },
+  { at: 0.67, ease: 'in', pose: P({ mid: vec(44, 50), head: vec(66, 44), ang: 0.45, maw: 0.85, fx: 0.6 }) },
+  { at: 1, ease: 'linear', pose: P({ mid: vec(54, 50), head: vec(76, 63), ang: 0.72, maw: 1, fx: 1, sink: -1 }) },
+];
 
-    let alpha = 1;
-    let headOffsetX = 0;
-    let headOffsetY = 0;
-    let mouthOpen = 0;
-    let bodyRise = 0;
+const HURT: Key<WormPose>[] = [
+  { at: 0, pose: P({ mid: vec(35, 58), head: vec(47, 44), ang: -0.2, maw: 0.7 }) },
+  { at: 1, pose: P({ mid: vec(38, 58), head: vec(53, 41), ang: 0.1, maw: 0.4 }) },
+];
 
-    switch (act) {
-      case 'idle':
-        headOffsetX = Math.sin(phase) * 2 * s;
-        headOffsetY = Math.sin(phase * 0.7) * 1.5 * s;
-        mouthOpen = 0.05 + Math.abs(Math.sin(phase * 0.5)) * 0.05;
-        bodyRise = Math.sin(phase) * 1 * s;
-        break;
-      case 'walk':
-        headOffsetX = Math.sin(phase) * 4 * s;
-        headOffsetY = -Math.abs(Math.sin(phase)) * 2 * s;
-        mouthOpen = 0.05;
-        bodyRise = -Math.abs(Math.sin(phase)) * 2 * s;
-        break;
-      case 'attack':
-        headOffsetX = t * 6 * s;
-        headOffsetY = -t * 8 * s;
-        mouthOpen = t * 0.9;
-        bodyRise = -t * 4 * s;
-        break;
-      case 'hurt':
-        headOffsetX = -t * 5 * s;
-        alpha = 0.7 + t * 0.3;
-        break;
-      case 'death':
-        headOffsetY = t * 15 * s;
-        alpha = 1 - t * 0.8;
-        break;
-    }
+const DEATH: Key<WormPose>[] = [
+  { at: 0, pose: P({ mid: vec(35, 58), head: vec(47, 44), ang: -0.2, maw: 0.7 }) },
+  { at: 0.33, pose: P({ mid: vec(31, 56), head: vec(46, 46), ang: -0.38, maw: 1, life: 0.8 }) },
+  { at: 0.67, ease: 'in', pose: P({ mid: vec(50, 58), head: vec(70, 70), ang: 0.9, maw: 0.5, life: 0.4, mound: 0.8 }) },
+  { at: 1, ease: 'out', pose: P({ mid: vec(56, 78), head: vec(76, 86), ang: 0.35, maw: 0.25, life: 0, sink: 3, mound: 0.6 }) },
+];
 
+function wormPose(act: MonsterAction, t: number): WormPose {
+  const ph = t * Math.PI * 2;
+  switch (act) {
+    case 'idle':
+      return P({
+        mid: vec(REST.mid.x - Math.sin(ph) * 1.5, REST.mid.y),
+        head: vec(REST.head.x + Math.sin(ph) * 1.8, REST.head.y + Math.cos(ph) * 1.1),
+        ang: REST.ang + Math.sin(ph - 0.6) * 0.1,
+        maw: 0.12 + Math.max(0, Math.sin(ph)) * 0.22,
+      });
+    case 'walk':
+      return P({
+        mid: vec(REST.mid.x - Math.sin(ph) * 4.5, REST.mid.y + Math.sin(ph * 2) * 1.2),
+        head: vec(REST.head.x + Math.sin(ph) * 3.5, REST.head.y + 1.5 + Math.sin(ph * 2 + 0.8) * 1.6),
+        ang: REST.ang + Math.sin(ph + 0.8) * 0.16,
+        maw: 0.12,
+        sink: 1.5 + Math.sin(ph * 2) * 1.5,
+        mound: 1.1,
+      });
+    case 'attack': return samplePoseTrack(ATTACK, t);
+    case 'hurt': return samplePoseTrack(HURT, t);
+    case 'death': return samplePoseTrack(DEATH, t);
+  }
+}
+
+// ── Body curve ──────────────────────────────────────────────────────────
+
+const N = 9;
+
+function neckOf(p: WormPose): V {
+  return vec(p.head.x - Math.cos(p.ang) * 6, p.head.y - Math.sin(p.ang) * 6 + p.sink);
+}
+
+function bez(p: WormPose, t: number): V {
+  const a = BASE;
+  const b = vec(p.mid.x, p.mid.y + p.sink);
+  const c = neckOf(p);
+  const u = 1 - t;
+  return vec(u * u * a.x + 2 * u * t * b.x + t * t * c.x, u * u * a.y + 2 * u * t * b.y + t * t * c.y);
+}
+
+function radius(t: number): number {
+  return 10.5 - 2.4 * t;
+}
+
+function drawBody(ctx: CanvasRenderingContext2D, p: WormPose): void {
+  const pts: V[] = [];
+  for (let i = 0; i <= N; i++) pts.push(bez(p, i / N));
+  // Hot flesh underneath the plates
+  for (let i = 0; i < N; i++) {
+    cel(ctx, () => capsulePath(ctx, pts[i], pts[i + 1], radius(i / N) - 0.8, radius((i + 1) / N) - 0.8), FLESH, { band: 1.6, stroke: 0 });
+  }
+  // Ring plates, base → neck; edges curve toward the base (seen from above)
+  for (let i = 0; i < N; i++) {
+    const a = lerpV(pts[i], pts[i + 1], 0.02);
+    const b = lerpV(pts[i], pts[i + 1], 0.8);
+    const ra = radius(i / N);
+    const rb = radius((i + 0.8) / N) + 0.3;
+    const dx = pts[i + 1].x - pts[i].x;
+    const dy = pts[i + 1].y - pts[i].y;
+    const len = Math.max(0.01, Math.hypot(dx, dy));
+    const ux = dx / len;
+    const uy = dy / len;
+    const nx = -uy;
+    const ny = ux;
+    const path = (): void => {
+      ctx.moveTo(a.x + nx * ra, a.y + ny * ra);
+      ctx.quadraticCurveTo(a.x - ux * ra * 0.55, a.y - uy * ra * 0.55, a.x - nx * ra, a.y - ny * ra);
+      ctx.lineTo(b.x - nx * rb, b.y - ny * rb);
+      ctx.quadraticCurveTo(b.x - ux * rb * 0.55, b.y - uy * rb * 0.55, b.x + nx * rb, b.y + ny * rb);
+      ctx.closePath();
+    };
+    const t: Tone = i % 2 === 0 ? RING : RING_B;
+    cel(ctx, path, t, { band: 2.2, hi: 1 });
     ctx.save();
-    ctx.globalAlpha = alpha;
-
-    const cx = w / 2;
-    const groundY = h * 0.82;
-
-    // ── Sand particles (behind everything) ──────────────────────────────────
-    ctx.fillStyle = utils.rgb(SAND_COLOR, 0.18);
-    for (let i = 0; i < 12; i++) {
-      const px = cx - 20 * s + utils.hash2d(i * 7, frame + i) * 40 * s;
-      const py = groundY - 2 * s + utils.hash2d(i * 11, frame * 2 + i) * 8 * s;
-      const pr = (0.5 + utils.hash2d(i * 3, i * 17) * 1.2) * s;
-      utils.fillCircle(ctx, px, py, pr);
-    }
-
-    // ── Coils behind head ────────────────────────────────────────────────────
-    const coilCX = cx - 8 * s + headOffsetX * 0.3;
-    const coilCY = groundY - 8 * s + bodyRise;
-    for (let ci = 0; ci < 3; ci++) {
-      const cr = (9 - ci * 2.5) * s;
-      const coilAlpha = 0.55 - ci * 0.12;
-      const coilGrad = ctx.createRadialGradient(
-        coilCX - cr * 0.3, coilCY - cr * 0.2, 0,
-        coilCX, coilCY, cr
-      );
-      coilGrad.addColorStop(0, utils.rgb(HIDE_LIGHT, coilAlpha + 0.1));
-      coilGrad.addColorStop(0.6, utils.rgb(HIDE_MID, coilAlpha));
-      coilGrad.addColorStop(1, utils.rgb(HIDE_DARK, coilAlpha));
-      ctx.fillStyle = coilGrad;
-      ctx.beginPath();
-      ctx.arc(coilCX + ci * 2 * s, coilCY + ci * 1 * s, cr, 0, Math.PI * 2);
-      ctx.fill();
-      // Segment stripe
-      ctx.strokeStyle = utils.rgb(HIDE_DARK, 0.35);
-      ctx.lineWidth = 1.2 * s;
-      ctx.beginPath();
-      ctx.arc(coilCX + ci * 2 * s, coilCY + ci * 1 * s, cr * 0.85, Math.PI * 0.9, Math.PI * 2.1);
-      ctx.stroke();
-    }
-
-    // ── Body segments (arc stripes between coils and head) ───────────────────
-    const segCount = 4;
-    const headCX = cx + headOffsetX;
-    const headBaseY = groundY - 14 * s + headOffsetY;
-    for (let si = 0; si < segCount; si++) {
-      const frac = (si + 1) / (segCount + 1);
-      const segX = coilCX + (headCX - coilCX) * frac;
-      const segY = coilCY + (headBaseY - coilCY) * frac;
-      const segR = (7 - si * 0.8) * s;
-      ctx.strokeStyle = utils.rgb(HIDE_MID, 0.45);
-      ctx.lineWidth = 1.5 * s;
-      ctx.beginPath();
-      ctx.arc(segX, segY, segR * 0.8, Math.PI * 0.1, Math.PI * 0.9);
-      ctx.stroke();
-    }
-
-    // ── Ground cutoff line (sand surface) ────────────────────────────────────
-    const sandGrad = ctx.createLinearGradient(0, groundY - 2 * s, 0, groundY + 6 * s);
-    sandGrad.addColorStop(0, utils.rgb(SAND_COLOR, 0.55));
-    sandGrad.addColorStop(1, utils.rgb(HIDE_DARK, 0));
-    ctx.fillStyle = sandGrad;
-    ctx.fillRect(cx - 22 * s, groundY - 2 * s, 44 * s, 8 * s);
-
-    // ── Shadow ───────────────────────────────────────────────────────────────
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    utils.fillEllipse(ctx, cx, groundY + 2 * s, 18 * s, 3 * s);
-
-    // ── Neck / lower body emerging ───────────────────────────────────────────
-    const neckGrad = ctx.createLinearGradient(headCX - 9 * s, headBaseY + 8 * s, headCX + 9 * s, headBaseY + 8 * s);
-    neckGrad.addColorStop(0, utils.rgb(HIDE_DARK));
-    neckGrad.addColorStop(0.4, utils.rgb(HIDE_MID));
-    neckGrad.addColorStop(1, utils.rgb(HIDE_DARK));
-    ctx.fillStyle = neckGrad;
     ctx.beginPath();
-    ctx.ellipse(headCX, headBaseY + 6 * s, 9 * s, 10 * s, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // ── Head ─────────────────────────────────────────────────────────────────
-    const headR = 11 * s;
-    const headY = headBaseY - headR * 0.5;
-
-    // Soft outline glow (sandy — desert)
-    utils.zoneEntityOutline(ctx, w, h);
-
-    const headGrad = ctx.createRadialGradient(
-      headCX - headR * 0.25, headY - headR * 0.2, 0,
-      headCX, headY, headR
-    );
-    headGrad.addColorStop(0, utils.rgb(HIDE_LIGHT));
-    headGrad.addColorStop(0.5, utils.rgb(HIDE_MID));
-    headGrad.addColorStop(1, utils.rgb(HIDE_DARK));
-    ctx.fillStyle = headGrad;
+    path();
+    ctx.clip();
+    // Pale belly scute on the forward-facing side
+    const bs = nx > 0 ? 1 : -1;
+    const bm = lerpV(a, b, 0.4);
+    ctx.fillStyle = 'rgba(250,232,190,0.5)';
     ctx.beginPath();
-    ctx.ellipse(headCX, headY, headR, headR * 0.92, 0, 0, Math.PI * 2);
+    ctx.ellipse(bm.x + nx * bs * rb * 0.6, bm.y + ny * bs * rb * 0.6, rb * 0.36, len * 0.9, Math.atan2(dy, dx) - Math.PI / 2, 0, Math.PI * 2);
     ctx.fill();
-
-    // End soft outline
-    utils.softOutlineEnd(ctx);
-
-    // Rim light on head
-    utils.zoneEntityRimLight(ctx, headCX, headY, headR, headR * 0.92);
-
-    // ── Sensory pits (eyeless indentations) ──────────────────────────────────
-    for (const side of [-1, 1]) {
-      const px = headCX + side * 4.5 * s;
-      const py = headY - 2 * s;
-      ctx.fillStyle = utils.rgb(HIDE_DARK, 0.7);
-      utils.fillEllipse(ctx, px, py, 2.5 * s, 2 * s);
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      utils.fillEllipse(ctx, px, py, 1.5 * s, 1.2 * s);
-    }
-
-    // ── Mouth ring (concentric teeth arcs) ───────────────────────────────────
-    const mouthY = headY + headR * 0.4;
-    const outerR = 8 * s + mouthOpen * 3 * s;
-    const innerR = 4.5 * s + mouthOpen * 2 * s;
-
-    // Outer gum ring
-    ctx.fillStyle = utils.rgb(0x4a2110);
+    // Sun-bleached lip on the leading edge
+    ctx.strokeStyle = 'rgba(255,244,214,0.75)';
+    ctx.lineWidth = 0.9;
     ctx.beginPath();
-    ctx.arc(headCX, mouthY, outerR, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Mid ring
-    ctx.fillStyle = utils.rgb(0x611c0b);
-    ctx.beginPath();
-    ctx.arc(headCX, mouthY, outerR * 0.75, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Inner dark maw
-    ctx.fillStyle = '#0a0505';
-    ctx.beginPath();
-    ctx.arc(headCX, mouthY, innerR, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Concentric ring grooves
-    for (let ring = 0; ring < 3; ring++) {
-      const rr = outerR * (0.88 - ring * 0.12);
-      ctx.strokeStyle = utils.rgb(HIDE_DARK, 0.5);
-      ctx.lineWidth = 0.8 * s;
+    ctx.moveTo(b.x - nx * rb - ux * 0.5, b.y - ny * rb - uy * 0.5);
+    ctx.quadraticCurveTo(b.x - ux * (rb * 0.55 + 0.5), b.y - uy * (rb * 0.55 + 0.5), b.x + nx * rb - ux * 0.5, b.y + ny * rb - uy * 0.5);
+    ctx.stroke();
+    // Worn pits
+    ctx.fillStyle = 'rgba(96,48,20,0.45)';
+    for (const k of [-0.45, 0.1]) {
       ctx.beginPath();
-      ctx.arc(headCX, mouthY, rr, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // Teeth — triangle spikes around outer ring
-    const toothCount = 10;
-    ctx.fillStyle = utils.rgb(TOOTH_COLOR);
-    for (let ti = 0; ti < toothCount; ti++) {
-      const angle = (ti / toothCount) * Math.PI * 2;
-      const tx = headCX + Math.cos(angle) * (outerR - 1 * s);
-      const ty = mouthY + Math.sin(angle) * (outerR - 1 * s);
-      const inx = headCX + Math.cos(angle) * (innerR + 0.5 * s);
-      const iny = mouthY + Math.sin(angle) * (innerR + 0.5 * s);
-      const perpAngle = angle + Math.PI / 2;
-      const tw = 1.2 * s;
-      ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(inx + Math.cos(perpAngle) * tw, iny + Math.sin(perpAngle) * tw);
-      ctx.lineTo(inx - Math.cos(perpAngle) * tw, iny - Math.sin(perpAngle) * tw);
-      ctx.closePath();
+      ctx.arc(bm.x - nx * bs * rb * k * -1 - ux, bm.y - ny * bs * rb * k * -1 - uy, 0.6, 0, Math.PI * 2);
       ctx.fill();
     }
-
-    // Inner row of smaller teeth
-    const innerToothCount = 8;
-    ctx.fillStyle = utils.rgb(utils.darken(TOOTH_COLOR, 20));
-    for (let ti = 0; ti < innerToothCount; ti++) {
-      const angle = (ti / innerToothCount) * Math.PI * 2 + Math.PI / innerToothCount;
-      const tx = headCX + Math.cos(angle) * (innerR - 0.5 * s);
-      const ty = mouthY + Math.sin(angle) * (innerR - 0.5 * s);
-      const cx2 = headCX + Math.cos(angle) * (innerR * 0.5);
-      const cy2 = mouthY + Math.sin(angle) * (innerR * 0.5);
-      const perpAngle = angle + Math.PI / 2;
-      const tw = 0.8 * s;
-      ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(cx2 + Math.cos(perpAngle) * tw, cy2 + Math.sin(perpAngle) * tw);
-      ctx.lineTo(cx2 - Math.cos(perpAngle) * tw, cy2 - Math.sin(perpAngle) * tw);
-      ctx.closePath();
-      ctx.fill();
-    }
-
     ctx.restore();
-  },
-};
+    // Dorsal spine on the back ridge
+    if (i > 0) {
+      const sb = lerpV(a, b, 0.45);
+      const bx = sb.x - nx * bs * (rb - 0.6);
+      const by = sb.y - ny * bs * (rb - 0.6);
+      const tipLen = 3.4 - i * 0.12;
+      cel(ctx, () => polyPath(ctx, [
+        vec(bx - ux * 1.6, by - uy * 1.6),
+        vec(bx - nx * bs * tipLen - ux * 1.4, by - ny * bs * tipLen - uy * 1.4),
+        vec(bx + ux * 1.4, by + uy * 1.4),
+      ]), SPINE, { band: 0.5, stroke: 0.4 });
+    }
+  }
+}
+
+function petal(ctx: CanvasRenderingContext2D, hinge: V, rot: number, flip: number): void {
+  ctx.save();
+  ctx.translate(hinge.x, hinge.y);
+  ctx.rotate(rot);
+  ctx.scale(1, flip);
+  cel(ctx, () => blobPath(ctx, [vec(-1, -2.2), vec(4, -3.4), vec(9.5, -1.8), vec(12.6, 1.4), vec(7, 1.6), vec(0, 2.2)]), PETAL, { band: 1 });
+  // Hooked fang at the petal tip + ridge
+  ctx.fillStyle = BONE;
+  ctx.beginPath();
+  ctx.moveTo(10, 0.8);
+  ctx.lineTo(12.8, 1.2);
+  ctx.lineTo(10.4, 3.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(96,44,18,0.6)';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(1, -0.8);
+  ctx.quadraticCurveTo(6, -2, 10.5, -0.2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawHead(ctx: CanvasRenderingContext2D, p: WormPose): void {
+  const hx = p.head.x;
+  const hy = p.head.y + p.sink;
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.rotate(p.ang);
+  ctx.scale(1.22, 1.22);
+  const open = p.maw;
+  // Upper jaw petal sits behind the head silhouette
+  petal(ctx, vec(3, -5.6), 0.42 - open * 1.05, 1);
+  // Armoured head
+  const skull = [vec(-7, -8), vec(-1, -8.8), vec(4.5, -7.2), vec(6.8, -2), vec(6.8, 2), vec(4.5, 7.2), vec(-1, 8.8), vec(-7, 8)];
+  cel(ctx, () => blobPath(ctx, skull), HEAD, { band: 1.6, hi: 0.8 });
+  ctx.save();
+  ctx.beginPath();
+  blobPath(ctx, skull);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(255,230,190,0.55)';
+  ctx.lineWidth = 0.8;
+  for (const x of [-4.5, -0.5]) {
+    ctx.beginPath();
+    ctx.moveTo(x, -9);
+    ctx.quadraticCurveTo(x + 2.2, 0, x, 9);
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(255,240,210,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(-1.5, -5.6, 4.6, 1.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  // Sensory pits glow faintly
+  for (const [x, y] of [[1.6, -5.2], [3.6, -4.1], [-1.2, -5.8]] as const) {
+    ctx.fillStyle = '#2a0c06';
+    ctx.beginPath();
+    ctx.arc(x, y, 0.75, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255,170,70,${0.8 * p.life})`;
+    ctx.beginPath();
+    ctx.arc(x, y, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Ringed maw
+  const mx = 5.8;
+  const rx = 1 + 3.4 * open;
+  const ry = 5.2 + 1.2 * open;
+  ctx.fillStyle = '#2a0806';
+  ctx.beginPath();
+  ctx.ellipse(mx, 0, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (open > 0.08) {
+    const g = ctx.createRadialGradient(mx + rx * 0.3, 0, 0, mx + rx * 0.3, 0, ry);
+    g.addColorStop(0, `rgba(255,${190 * p.life + 40},90,${0.95 * p.life + 0.05})`);
+    g.addColorStop(0.45, `rgba(214,60,24,${0.8 * p.life + 0.1})`);
+    g.addColorStop(1, 'rgba(60,8,6,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, rx * 0.8, ry * 0.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Two rings of inward-pointing teeth
+    for (const [scale, n, tl] of [[0.95, 10, 1.9], [0.58, 8, 1.2]] as const) {
+      ctx.fillStyle = scale > 0.9 ? BONE : 'rgba(246,226,190,0.85)';
+      for (let k = 0; k < n; k++) {
+        const th = (k / n) * Math.PI * 2 + (scale < 0.9 ? 0.4 : 0);
+        const px = mx + Math.cos(th) * rx * scale;
+        const py = Math.sin(th) * ry * scale;
+        const ix = mx + Math.cos(th) * rx * (scale - 0.35);
+        const iy = Math.sin(th) * ry * Math.max(0.1, scale - tl / ry);
+        const tx = -Math.sin(th) * 0.55;
+        const ty = Math.cos(th) * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(px + tx, py + ty);
+        ctx.lineTo(ix, iy);
+        ctx.lineTo(px - tx, py - ty);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+  ctx.strokeStyle = '#5a2412';
+  ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  ctx.ellipse(mx, 0, rx + 0.4, ry + 0.3, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  // Lower jaw petal in front
+  petal(ctx, vec(3, 5.6), -(0.42 - open * 1.05), -1);
+  ctx.restore();
+}
+
+function drawMound(ctx: CanvasRenderingContext2D, p: WormPose, front: boolean, t: number): void {
+  const m = p.mound;
+  const cx = BASE.x;
+  if (!front) {
+    cel(ctx, () => blobPath(ctx, [vec(cx - 16 * m, GROUND_Y), vec(cx - 10 * m, GROUND_Y - 9 * m), vec(cx - 2, GROUND_Y - 13 * m), vec(cx + 7 * m, GROUND_Y - 12 * m), vec(cx + 14 * m, GROUND_Y - 7 * m), vec(cx + 18 * m, GROUND_Y)]), SAND_BACK, { band: 1.2 });
+    return;
+  }
+  const pts = [
+    vec(cx - 22 * m, GROUND_Y + 0.8), vec(cx - 17 * m, GROUND_Y - 3 * m), vec(cx - 10 * m, GROUND_Y - 8.5 * m),
+    vec(cx - 4 * m, GROUND_Y - 6.5 * m), vec(cx + 3 * m, GROUND_Y - 9 * m), vec(cx + 9 * m, GROUND_Y - 6 * m),
+    vec(cx + 16 * m, GROUND_Y - 4 * m), vec(cx + 23 * m, GROUND_Y + 0.8), vec(cx, GROUND_Y + 2.2),
+  ];
+  cel(ctx, () => blobPath(ctx, pts), SAND, { band: 1.6, hi: 0.9 });
+  // Wind ripples, pebbles and a sun-bleached bone
+  ctx.strokeStyle = 'rgba(160,112,58,0.55)';
+  ctx.lineWidth = 0.55;
+  for (const [x, y, w] of [[-9, -2.5, 6], [3, -3.2, 7], [11, -1.2, 5]] as const) {
+    ctx.beginPath();
+    ctx.moveTo(cx + x * m, GROUND_Y + y * m);
+    ctx.quadraticCurveTo(cx + (x + w / 2) * m, GROUND_Y + (y - 1) * m, cx + (x + w) * m, GROUND_Y + y * m);
+    ctx.stroke();
+  }
+  const peb = tone(0x9a7a58, { light: 0.4 });
+  for (const [x, y, r] of [[-15, -1, 1.3], [16, -0.6, 1.1], [7, -0.4, 0.8]] as const) {
+    cel(ctx, () => { ctx.ellipse(cx + x * m, GROUND_Y + y, r * 1.3, r, 0, 0, Math.PI * 2); }, peb, { band: 0.4, stroke: 0.3 });
+  }
+  // Grains trickling off the rim (animated)
+  ctx.fillStyle = 'rgba(248,226,176,0.9)';
+  for (let i = 0; i < 7; i++) {
+    const k = (i / 7 + t * 2) % 1;
+    const side = i % 2 === 0 ? -1 : 1;
+    const x = cx + side * (4 + k * 12) * m;
+    const y = GROUND_Y - 5 * m + k * 5 * m;
+    ctx.fillRect(x, y, 0.8, 0.8);
+  }
+}
+
+function drawWorm(ctx: CanvasRenderingContext2D, p: WormPose, t: number): void {
+  drawMound(ctx, p, false, t);
+  ctx.save();
+  // Everything below the dune line is buried
+  ctx.beginPath();
+  ctx.rect(-200, -200, 500, GROUND_Y - 1 + 200);
+  ctx.clip();
+  drawBody(ctx, p);
+  drawHead(ctx, p);
+  ctx.restore();
+  drawMound(ctx, p, true, t);
+}
+
+function mawCentre(p: WormPose): V {
+  return vec(p.head.x + Math.cos(p.ang) * 8, p.head.y + p.sink + Math.sin(p.ang) * 8);
+}
+
+function wormFx(ctx: CanvasRenderingContext2D, p: WormPose, act: MonsterAction, t: number): void {
+  // Gullet glow
+  if (p.maw > 0.1 && p.life > 0.05) {
+    glow(ctx, mawCentre(p), 5 + 6 * p.maw * p.fx + 3 * p.maw, 0xff6a2a, (0.25 + 0.4 * p.maw) * p.life);
+  }
+  if (act === 'attack' && t > 0.5) {
+    const tips: V[] = [];
+    const bases: V[] = [];
+    for (let i = 0; i <= 5; i++) {
+      const q = samplePoseTrack(ATTACK, t - 0.34 + (i / 5) * 0.34);
+      tips.push(mawCentre(q));
+      bases.push(vec(q.head.x - Math.cos(q.ang) * 4, q.head.y - Math.sin(q.ang) * 4));
+    }
+    smear(ctx, tips, bases, 0xffd08a, 0.45 * p.fx);
+  }
+  // Sand spray when churning / biting / collapsing
+  let spray = 0;
+  if (act === 'walk') spray = 0.8;
+  else if (act === 'attack') spray = Math.max(0, t - 0.5) * 2;
+  else if (act === 'death') spray = t > 0.5 ? 1 - (t - 0.5) : 0;
+  if (spray > 0) {
+    for (let i = 0; i < 9; i++) {
+      const k = (i / 9 + t * (act === 'walk' ? 1 : 0.6)) % 1;
+      const side = i % 2 === 0 ? -1 : 1;
+      const x = BASE.x + side * (8 + k * 16) + (i % 3) * 1.5;
+      const y = GROUND_Y - 6 - Math.sin(k * Math.PI) * (6 + (i % 3) * 2);
+      ctx.fillStyle = `rgba(236,208,150,${0.75 * spray * (1 - k * 0.6)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, 0.8 + (i % 2) * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+export const SandwormDrawer = rigMonster<WormPose>({
+  key: 'monster_sandworm',
+  // Wider than the old sheet so the lunge fits; width doesn't move the sprite in-game.
+  frameW: 72,
+  frameH: 48,
+  scale: 1.32,
+  pose: wormPose,
+  draw: (ctx, p, _act, t) => drawWorm(ctx, p, t),
+  shadow: (p) => ({ x: BASE.x + 2 + (p.head.x - 58) * 0.2, r: 24, lift: 0 }),
+  fx: wormFx,
+  rim: 'rgba(255,238,200,0.6)',
+  ink: '#22100a',
+});
