@@ -1,284 +1,643 @@
 // src/graphics/sprites/monsters/Werewolf.ts
+//
+// 狼人 — a hunched, digitigrade wolf-man of the Twilight Forest: shaggy
+// dusk-grey fur with a spiky mane, pale chest ruff, shredded violet breeches,
+// a snarling muzzle with glowing amber eyes, long hooked claws and a bushy
+// tail. Prowls low, rears back and rips a huge claw swipe across its prey.
+//
+// The body is built by `werewolfDrawer(spec)` so the Alpha can reuse it with
+// its own look, bulk and attack.
 import type { EntityDrawer, MonsterAction } from '../types';
-import type { DrawUtils } from '../../DrawUtils';
+import {
+  CENTER_X,
+  GROUND_Y,
+  blobPath,
+  cel,
+  clothChain,
+  ellipsePath,
+  glow,
+  inBone,
+  lerpV,
+  limb,
+  polyPath,
+  samplePoseTrack,
+  smear,
+  tone,
+  vec,
+  type Key,
+  type Tone,
+  type V,
+} from '../rig/Rig';
+import {
+  basePose,
+  drawHumanoid,
+  gait,
+  solveSkeleton,
+  spun,
+  type HumanPose,
+  type HumanSkin,
+  type Proportions,
+  type Skeleton,
+} from '../rig/Humanoid';
+import { humanoidTracks, rigMonster } from '../rig/MonsterKit';
 
-const FUR_DARK  = 0x1d1006;
-const FUR_MID   = 0x4a3321;
-const FUR_LIGHT = 0x61482c;
-const CLAW_COLOR = 0xf0ece0;
+export interface WolfLook {
+  fur: Tone;
+  furFar: Tone;
+  /** Mane / back ridge. */
+  mane: Tone;
+  /** Chest ruff, muzzle and tail tip. */
+  pale: Tone;
+  pants: Tone;
+  claw: Tone;
+  nose: string;
+  gum: string;
+  eye: number;
+  eyeCore: string;
+  /** Battle scars across muzzle and chest. */
+  scars?: boolean;
+  /** Notched far ear. */
+  tornEar?: boolean;
+  /** Strokes painted into the fur (dark on light). */
+  furLine: string;
+  /** Spiked iron collar with a snapped chain. */
+  collar?: boolean;
+}
 
-export const WerewolfDrawer: EntityDrawer = {
-  key: 'monster_werewolf',
-  frameW: 52,
-  frameH: 64,
-  totalFrames: 20,
+export interface WolfSpec {
+  key: string;
+  frameW: number;
+  frameH: number;
+  scale: number;
+  look: WolfLook;
+  /** Limb/torso thickness multiplier. */
+  bulk: number;
+  /** 'swipe': one-armed rake; 'maul': two-handed overhead crash. */
+  attack: 'swipe' | 'maul';
+  ready?: Partial<HumanPose>;
+  shadowR?: number;
+}
 
-  drawFrame(ctx, frame, action, w, h, utils) {
-    const act = action as MonsterAction;
-    const s = w / 52;
+const PROP: Proportions = {
+  thigh: 9.6, shin: 8, upperArm: 9.6, foreArm: 9,
+  torso: 15, neck: 6.2,
+  // Digitigrade: the IK "ankle" is the raised hock; the paw is drawn below it.
+  ankle: 7.4,
+  hipN: vec(1.8, 0), hipF: vec(-2.2, -0.4),
+  shN: vec(2, 3.4), shF: vec(-3.4, 3),
+};
 
-    const frameCounts: Record<MonsterAction, number> = { idle: 4, walk: 6, attack: 4, hurt: 2, death: 4 };
-    const count = frameCounts[act] || 4;
-    const localFrame = frame % count;
-    const t = count > 1 ? localFrame / (count - 1) : 0;
-    const phase = (localFrame / count) * Math.PI * 2;
+const IRON = tone(0x8a8e9c, { light: 0.45 });
 
-    let alpha = 1;
-    let globalRotation = 0;
+/** The neck juts forward; the face is rotated back by this much to stay level. */
+const FACE_TILT = 0.55;
 
+// ── Drawing helpers ─────────────────────────────────────────────────────
+
+function perp(a: V, b: V): { u: V; n: V } {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const l = Math.hypot(dx, dy) || 1;
+  return { u: vec(dx / l, dy / l), n: vec(-dy / l, dx / l) };
+}
+
+/** Spiky fur tuft growing from `at` in direction `ang` (radians, canvas). */
+function tuft(ctx: CanvasRenderingContext2D, at: V, ang: number, len: number, width: number, t: Tone, spikes = 3): void {
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  const P = (along: number, side: number): V => vec(at.x + c * along - s * side, at.y + s * along + c * side);
+  const pts: V[] = [P(0, -width)];
+  for (let i = 0; i < spikes; i++) {
+    const k = (i + 0.5) / spikes;
+    const side = -width + k * 2 * width;
+    pts.push(P(len * (0.75 + 0.25 * Math.sin(i * 2.3 + 1)), side));
+    pts.push(P(len * 0.35, side + width / spikes));
+  }
+  pts.push(P(0, width));
+  cel(ctx, () => polyPath(ctx, pts), t, { band: width * 0.35, stroke: 0.4 });
+}
+
+/** Curved claw from `base`, pointing along `ang`, hooking downward. */
+function claw(ctx: CanvasRenderingContext2D, base: V, ang: number, len: number, t: Tone): void {
+  ctx.save();
+  ctx.translate(base.x, base.y);
+  ctx.rotate(ang);
+  cel(ctx, () => {
+    ctx.moveTo(0, -0.55);
+    ctx.quadraticCurveTo(len * 0.6, -0.9, len, len * 0.28);
+    ctx.quadraticCurveTo(len * 0.5, 0.2, 0, 0.55);
+    ctx.closePath();
+  }, t, { band: 0.25, stroke: 0.35 });
+  ctx.restore();
+}
+
+// ── Werewolf factory ────────────────────────────────────────────────────
+
+export function werewolfDrawer(spec: WolfSpec): EntityDrawer {
+  const L = spec.look;
+  const b = spec.bulk;
+  const clawLen = 5.4 * (0.9 + b * 0.1);
+
+  function paw(ctx: CanvasRenderingContext2D, hand: V, el: V, t: Tone, fx: number): void {
+    const dir = Math.atan2(hand.y - el.y, hand.x - el.x);
+    const spread = 0.28 + fx * 0.2;
+    // Far claws behind the palm
+    for (const i of [-1.5, -0.5]) {
+      const a = dir + i * spread * 0.7;
+      claw(ctx, vec(hand.x + Math.cos(a) * 1.8, hand.y + Math.sin(a) * 1.8), a + 0.25, clawLen, L.claw);
+    }
+    cel(ctx, () => ellipsePath(ctx, hand, 2.8 * b, 2.3 * b, dir), t, { band: 0.8 });
+    for (const i of [0.5, 1.5]) {
+      const a = dir + i * spread * 0.7;
+      claw(ctx, vec(hand.x + Math.cos(a) * 2.1, hand.y + Math.sin(a) * 2.1), a + 0.25, clawLen, L.claw);
+    }
+  }
+
+  function arm(ctx: CanvasRenderingContext2D, sh: V, el: V, hand: V, t: Tone, fx: number, near: boolean): void {
+    limb(ctx, sh, el, 3.4 * b, 2.6 * b, t);
+    // Elbow tuft sweeping back
+    const { u } = perp(sh, el);
+    tuft(ctx, el, Math.atan2(u.y, u.x) + 2.5, 3.4 * b, 1.5 * b, t, 2);
+    limb(ctx, el, hand, 2.5 * b, 2.1 * b, t);
+    paw(ctx, hand, el, t, fx);
+    if (near) {
+      // Shoulder mane tuft
+      tuft(ctx, vec(sh.x - 1, sh.y - 1), -2.3, 5 * b, 2.4 * b, L.mane, 3);
+    }
+  }
+
+  function leg(ctx: CanvasRenderingContext2D, sk: Skeleton, near: boolean): void {
+    const t = near ? L.fur : L.furFar;
+    const hip = near ? sk.hipN : sk.hipF;
+    const knee = near ? sk.kneeN : sk.kneeF;
+    const hock = near ? sk.footN : sk.footF;
+    const sole = near ? sk.soleN : sk.soleF;
+    // Haunch
+    limb(ctx, hip, knee, 4.4 * b, 3.1 * b, t);
+    tuft(ctx, lerpV(hip, knee, 0.55), Math.PI * 0.85, 3.6 * b, 1.6 * b, t, 2);
+    // Shin to the raised hock
+    limb(ctx, knee, hock, 2.9 * b, 2 * b, t);
+    // Hock spur tuft
+    tuft(ctx, hock, Math.PI * 0.95, 2.6 * b, 1.1 * b, t, 2);
+    // Long paw down to the toes
+    const ball = vec(sole.x + 4.6, sole.y - 1.6);
+    limb(ctx, hock, ball, 2 * b, 1.7 * b, t);
+    cel(ctx, () => ellipsePath(ctx, vec(sole.x + 5.6, sole.y - 1.3), 2.9 * b, 1.4 * b), t, { band: 0.5 });
+    for (const dx of [7.2, 8.4]) {
+      claw(ctx, vec(sole.x + dx * (0.9 + b * 0.1), sole.y - 1.3), 0.55, 2.4, L.claw);
+    }
+  }
+
+  function torso(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+    inBone(ctx, sk.neck, sk.pelvis, (len) => {
+      const ph = t * Math.PI * 2;
+      const ruffle = Math.sin(ph) * 0.4 + p.flow * 1.2;
+      // Spiky mane down the back
+      const mane = [
+        vec(-1, -4 * b), vec(-5.5 * b, -6 * b - ruffle), vec(-6.5 * b, -3), vec(-11 * b - ruffle, -3.6), vec(-8.6 * b, 0),
+        vec(-12 * b - ruffle, 2), vec(-9 * b, 3.6), vec(-11 * b - ruffle * 0.6, 7), vec(-8 * b, 7.4),
+        vec(-9 * b, len * 0.7), vec(-5, len * 0.62), vec(0, 2),
+      ];
+      cel(ctx, () => polyPath(ctx, mane), L.mane, { band: 1.2 });
+      // Barrel chest tapering to a lean waist
+      const body = [
+        vec(-7 * b, -0.6), vec(0, -3 * b), vec(6.8 * b, -0.2), vec(8.6 * b, len * 0.34),
+        vec(6.4 * b, len * 0.72), vec(4.6 * b, len + 0.4), vec(-4.8 * b, len + 0.8), vec(-6.6 * b, len * 0.5),
+      ];
+      cel(ctx, () => blobPath(ctx, body), L.fur, { band: 1.8 });
+      // Pale chest ruff with jagged edge
+      const ruff = [
+        vec(2.4, -1.6), vec(7.2 * b, 0.4), vec(8.6 * b, len * 0.3), vec(7 * b, len * 0.48), vec(7.6 * b, len * 0.56),
+        vec(5.6 * b, len * 0.7), vec(5.8 * b, len * 0.8), vec(3.6, len * 0.72), vec(2.4, len * 0.5), vec(3.4, len * 0.4), vec(1.6, len * 0.2),
+      ];
+      cel(ctx, () => polyPath(ctx, ruff), L.pale, { band: 1 });
+      // Fur strokes
+      ctx.strokeStyle = L.furLine;
+      ctx.lineWidth = 0.45;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (const [x, y] of [[-3, 3], [-1, 6], [-4, len * 0.55], [0.5, len * 0.35], [-2.2, len * 0.75]] as const) {
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 1.4, y + 1.6);
+      }
+      for (const [x, y] of [[5, 2.4], [6.2, len * 0.28], [4.6, len * 0.5]] as const) {
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + 0.8, y + 1.4);
+      }
+      ctx.stroke();
+      if (L.scars) {
+        ctx.strokeStyle = 'rgba(214,168,176,0.85)';
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        ctx.moveTo(2, len * 0.18);
+        ctx.lineTo(7, len * 0.42);
+        ctx.moveTo(1.4, len * 0.3);
+        ctx.lineTo(5.8, len * 0.56);
+        ctx.moveTo(-5, 1);
+        ctx.lineTo(-2.4, 5);
+        ctx.stroke();
+      }
+      // Shredded breeches
+      const hem = (x: number, ph2: number): V => {
+        const c = clothChain(vec(x, len + 2.2), 2.6, 2, p.flow, 1, ph + ph2);
+        return c[2];
+      };
+      const h1 = hem(4.6 * b, 0);
+      const h2 = hem(0.8, 1.3);
+      const h3 = hem(-3.6 * b, 2.2);
+      cel(ctx, () => polyPath(ctx, [
+        vec(-5.4 * b, len - 3), vec(5.8 * b, len - 3.6), vec(6.4 * b, len + 1.4), h1, vec(3, len + 2.4),
+        h2, vec(-1.4, len + 2.2), h3, vec(-5.8 * b, len + 1.2),
+      ]), L.pants, { band: 0.9 });
+      // Frayed rope belt
+      cel(ctx, () => polyPath(ctx, [vec(-5.6 * b, len - 3.4), vec(6 * b, len - 4), vec(6.1 * b, len - 2.6), vec(-5.6 * b, len - 2)]), tone(0x7a6448), { band: 0.3, stroke: 0.4 });
+      // Throat ruff tufts
+      tuft(ctx, vec(4.2, 0.6), 1.2, 4 * b, 2.2 * b, L.pale, 3);
+      if (L.collar) {
+        // Spiked iron collar, a snapped chain swinging from it
+        const chain = clothChain(vec(-2, 1.6), 7, 4, p.flow + 0.2, 1.4, ph + 0.6);
+        for (let i = 1; i < chain.length; i++) {
+          const m = lerpV(chain[i - 1], chain[i], 0.5);
+          const ang = Math.atan2(chain[i].y - chain[i - 1].y, chain[i].x - chain[i - 1].x);
+          cel(ctx, () => ellipsePath(ctx, m, 1.2, i % 2 ? 0.55 : 0.8, ang), IRON, { band: 0.3, stroke: 0.4 });
+        }
+        cel(ctx, () => polyPath(ctx, [vec(-6.8 * b, -1.6), vec(7 * b, -0.6), vec(7 * b, 1.6), vec(-6.8 * b, 0.8)]), IRON, { band: 0.6 });
+        for (const x of [-4.4, -0.8, 2.8, 6]) {
+          cel(ctx, () => polyPath(ctx, [vec(x - 0.8, -1.2), vec(x + 0.2, -3.6), vec(x + 0.8, -1.1)]), IRON, { band: 0.25, stroke: 0.35 });
+        }
+      }
+    });
+  }
+
+  function head(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+    // Thick neck
+    limb(ctx, sk.neck, lerpV(sk.neck, sk.head, 0.55), 3.8 * b, 3 * b, L.fur);
     ctx.save();
-
-    const cx = w / 2;
-    const baseY = h * 0.96;
-
-    // Per-action modifiers
-    let squishY = 1, squishX = 1;
-    let bodyOffsetX = 0, bodyOffsetY = 0;
-    let lungeFwd = 0;
-    let recoil = 0;
-    let earTwitch = 0;
-
-    switch (act) {
-      case 'idle':
-        squishY = 1 + Math.sin(phase) * 0.03;
-        squishX = 1 - Math.sin(phase) * 0.015;
-        earTwitch = Math.sin(phase * 2) * 0.15;
-        break;
-      case 'walk':
-        squishY = 1 + Math.sin(phase) * 0.04;
-        bodyOffsetY = Math.abs(Math.sin(phase)) * -1.5 * s;
-        bodyOffsetX = Math.sin(phase) * 1.5 * s;
-        break;
-      case 'attack':
-        lungeFwd = t;
-        bodyOffsetX = t * 6 * s;
-        bodyOffsetY = -t * 3 * s;
-        break;
-      case 'hurt':
-        recoil = t;
-        bodyOffsetX = -t * 5 * s;
-        alpha = 0.75 + t * 0.25;
-        break;
-      case 'death':
-        globalRotation = t * Math.PI * 0.5;
-        bodyOffsetY = t * h * 0.3;
-        alpha = 1 - t * 0.7;
-        break;
+    ctx.translate(sk.head.x, sk.head.y);
+    ctx.rotate(sk.headAng - FACE_TILT);
+    ctx.scale(b * 0.96, b * 0.96);
+    const ph = t * Math.PI * 2;
+    const twitch = Math.sin(ph * 2 + 0.5) * 0.12;
+    // Far ear
+    const farEar = L.tornEar
+      ? [vec(-2.6, -3.4), vec(-4.4, -9.6), vec(-3.2, -8.6), vec(-3, -10.8), vec(-0.4, -4.6)]
+      : [vec(-2.6, -3.4), vec(-4.2, -11), vec(-0.4, -4.6)];
+    cel(ctx, () => polyPath(ctx, farEar), L.furFar, { band: 0.6 });
+    // Lower jaw (hinged back under the ear, opens with the snarl)
+    const jaw = 0.12 + p.fx * 0.5 + Math.max(0, Math.sin(ph * 2)) * 0.04;
+    ctx.save();
+    ctx.translate(0.4, 2.2);
+    ctx.rotate(jaw * 0.75);
+    cel(ctx, () => polyPath(ctx, [vec(-1.8, -0.6), vec(8.6, 0.2), vec(8.8, 1.4), vec(3, 2.8), vec(-1.4, 2)]), L.pale, { band: 0.6 });
+    ctx.fillStyle = L.gum;
+    ctx.fillRect(1.6, -0.6, 6.8, 0.9);
+    ctx.fillStyle = '#f4efe0';
+    for (const x of [3, 5, 7.2]) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + 0.5, -1.4);
+      ctx.lineTo(x + 1, 0);
+      ctx.fill();
     }
-
-    ctx.globalAlpha = alpha;
-    ctx.translate(cx, baseY);
-    ctx.rotate(globalRotation);
-    ctx.translate(-cx, -baseY);
-
-    // ── Shadow ──────────────────────────────────────────────────────────────
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    utils.fillEllipse(ctx, cx + bodyOffsetX * 0.5, baseY + 1 * s, 16 * s, 3.5 * s);
-
-    // ── Digitigrade legs ─────────────────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const legPhase = act === 'walk' ? phase + (side === -1 ? 0 : Math.PI) : 0;
-      const hipX = cx + side * 7 * s + bodyOffsetX * 0.3;
-      const hipY = baseY - 26 * s + bodyOffsetY;
-      // Digitigrade: hip -> backward knee -> ankle -> paw
-      const kneeX = hipX + side * 1 * s - Math.sin(legPhase) * 3 * s;
-      const kneeY = hipY + 12 * s + Math.abs(Math.sin(legPhase)) * 2 * s;
-      // backward knee — angles backward
-      const ankleX = kneeX + side * 3 * s + Math.sin(legPhase) * 2 * s;
-      const ankleY = kneeY + 8 * s - Math.abs(Math.sin(legPhase)) * 3 * s;
-      const pawX = ankleX + side * 2 * s;
-      const pawY = baseY - 2 * s;
-
-      utils.drawLimb(ctx, [
-        { x: hipX, y: hipY },
-        { x: kneeX, y: kneeY },
-        { x: ankleX, y: ankleY },
-        { x: pawX, y: pawY },
-      ], 4 * s, FUR_MID);
-
-      // Claws on paw
-      ctx.strokeStyle = utils.rgb(CLAW_COLOR);
-      ctx.lineWidth = 0.8 * s;
-      ctx.lineCap = 'round';
-      for (let c = -1; c <= 1; c++) {
-        ctx.beginPath();
-        ctx.moveTo(pawX + c * 1.5 * s, pawY);
-        ctx.lineTo(pawX + c * 2.2 * s + side * 1 * s, pawY + 2.5 * s);
-        ctx.stroke();
-      }
-    }
-
-    // ── Torso ────────────────────────────────────────────────────────────────
-    const torsoX = cx + bodyOffsetX;
-    const torsoY = baseY - 40 * s + bodyOffsetY;
-    const torsoW = 14 * s * squishX;
-    const torsoH = 16 * s * squishY;
-
-    // Soft outline glow (brown — beast)
-    utils.zoneEntityOutline(ctx, w, h);
-
-    const torsoGrad = ctx.createRadialGradient(
-      torsoX - 3 * s, torsoY - 4 * s, 0,
-      torsoX, torsoY, torsoW * 1.1
-    );
-    torsoGrad.addColorStop(0, utils.rgb(FUR_LIGHT));
-    torsoGrad.addColorStop(0.5, utils.rgb(FUR_MID));
-    torsoGrad.addColorStop(1, utils.rgb(FUR_DARK));
-    ctx.fillStyle = torsoGrad;
-    utils.fillEllipse(ctx, torsoX, torsoY, torsoW, torsoH);
-
-    // Lighter belly
-    ctx.fillStyle = utils.rgb(utils.lighten(FUR_MID, 20), 0.5);
-    utils.fillEllipse(ctx, torsoX, torsoY + 4 * s, torsoW * 0.45, torsoH * 0.55);
-
-    // Fur texture overlay
-    utils.drawFurTexture(ctx,
-      torsoX - torsoW, torsoY - torsoH,
-      torsoW * 2, torsoH * 2,
-      FUR_MID,
-      Math.PI * 0.15
-    );
-
-    // End soft outline
-    utils.softOutlineEnd(ctx);
-
-    // Rim light on torso
-    utils.zoneEntityRimLight(ctx, torsoX, torsoY, torsoW, torsoH);
-
-    // ── Arms ────────────────────────────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const isRight = side === 1;
-      const armPhase = act === 'walk' ? phase + (isRight ? Math.PI : 0) : 0;
-      const shoulderX = torsoX + side * 11 * s;
-      const shoulderY = torsoY - 6 * s;
-
-      let elbowX: number, elbowY: number, handX: number, handY: number;
-
-      if (isRight && act === 'attack') {
-        // Lunge: claw extended forward
-        const swingT = lungeFwd;
-        elbowX = shoulderX + side * 5 * s + swingT * 4 * s;
-        elbowY = shoulderY + 5 * s - swingT * 4 * s;
-        handX = elbowX + side * 5 * s + swingT * 3 * s;
-        handY = elbowY + 4 * s - swingT * 3 * s;
-      } else {
-        elbowX = shoulderX + side * 3 * s + Math.sin(armPhase) * 2 * s;
-        elbowY = shoulderY + 9 * s - Math.abs(Math.sin(armPhase)) * 2 * s;
-        handX = elbowX + side * 2 * s - Math.sin(armPhase) * 1.5 * s;
-        handY = elbowY + 8 * s + Math.sin(armPhase) * 1.5 * s;
-      }
-
-      utils.drawLimb(ctx, [
-        { x: shoulderX, y: shoulderY },
-        { x: elbowX, y: elbowY },
-        { x: handX, y: handY },
-      ], 5 * s, FUR_MID);
-
-      // Claws
-      ctx.strokeStyle = utils.rgb(CLAW_COLOR);
-      ctx.lineWidth = 1 * s;
-      ctx.lineCap = 'round';
-      for (let c = -2; c <= 2; c++) {
-        const baseAngle = isRight ? 0.4 : -0.4;
-        const clawAngle = baseAngle + c * 0.25 + (isRight && act === 'attack' ? -0.5 : 0);
-        ctx.beginPath();
-        ctx.moveTo(handX + c * 1.2 * s, handY);
-        ctx.lineTo(
-          handX + c * 1.2 * s + Math.cos(clawAngle) * 3 * s,
-          handY + Math.sin(clawAngle) * 2.5 * s + 1 * s
-        );
-        ctx.stroke();
-      }
-    }
-
-    // ── Head ────────────────────────────────────────────────────────────────
-    const headX = torsoX + bodyOffsetX * 0.1;
-    const headY = torsoY - 18 * s + bodyOffsetY * 0.2;
-
-    // Neck
-    ctx.fillStyle = utils.rgb(FUR_MID);
+    ctx.restore();
+    // Cheek ruff flaring back behind the jaw
+    tuft(ctx, vec(-3.6, 1.6), 2.45, 6, 3, L.mane, 3);
+    // Cranium
+    const skull = [vec(-5.4, -0.4), vec(-4, -4.6), vec(0.6, -5.8), vec(4.6, -4), vec(5.8, -1.6), vec(4.4, 2.6), vec(0.6, 3.4), vec(-4, 3)];
+    cel(ctx, () => blobPath(ctx, skull), L.fur, { band: 1.4 });
+    // Muzzle (snout) with a wrinkled snarl ridge
+    const snout = [vec(2.2, -2.8), vec(6, -2.6 - p.fx * 0.4), vec(10.6, -1.2), vec(11.2, 0.6), vec(10.4, 1.9), vec(4, 2.4), vec(2, 1.2)];
+    cel(ctx, () => polyPath(ctx, snout), L.pale, { band: 0.8 });
+    ctx.strokeStyle = L.furLine;
+    ctx.lineWidth = 0.4;
     ctx.beginPath();
-    ctx.moveTo(torsoX - 5 * s, torsoY - 8 * s);
-    ctx.lineTo(torsoX + 5 * s, torsoY - 8 * s);
-    ctx.lineTo(headX + 4 * s, headY + 4 * s);
-    ctx.lineTo(headX - 4 * s, headY + 4 * s);
+    for (let i = 0; i < 2 + Math.round(p.fx); i++) {
+      ctx.moveTo(5.4 + i * 1.3, -2.4);
+      ctx.lineTo(5.8 + i * 1.3, -1.6);
+    }
+    ctx.stroke();
+    // Upper gum line + fangs
+    ctx.fillStyle = L.gum;
+    ctx.beginPath();
+    ctx.moveTo(3, 1.6);
+    ctx.lineTo(10.6, 1.6);
+    ctx.lineTo(10, 2.6);
+    ctx.lineTo(3.4, 2.8);
     ctx.closePath();
     ctx.fill();
-
-    // Skull base
-    const headGrad = ctx.createRadialGradient(headX - 2 * s, headY - 3 * s, 0, headX, headY, 9 * s);
-    headGrad.addColorStop(0, utils.rgb(FUR_LIGHT));
-    headGrad.addColorStop(1, utils.rgb(FUR_DARK));
-    ctx.fillStyle = headGrad;
-    utils.fillEllipse(ctx, headX, headY, 9 * s, 8 * s);
-
-    // Muzzle — two overlapping ellipses for protruding snout
-    ctx.fillStyle = utils.rgb(FUR_MID);
-    utils.fillEllipse(ctx, headX + 5 * s, headY + 2 * s, 5.5 * s, 3.5 * s);
-    ctx.fillStyle = utils.rgb(utils.darken(FUR_MID, 10));
-    utils.fillEllipse(ctx, headX + 6 * s, headY + 3.5 * s, 3.5 * s, 2.5 * s);
-
+    ctx.fillStyle = '#f4efe0';
+    for (const [x, l] of [[4, 1.6], [6, 1.1], [8.4, 1.9], [9.6, 1]] as const) {
+      ctx.beginPath();
+      ctx.moveTo(x, 2);
+      ctx.lineTo(x + 0.45, 2 + l);
+      ctx.lineTo(x + 0.9, 2);
+      ctx.fill();
+    }
     // Nose
-    ctx.fillStyle = '#1a0a00';
-    utils.fillEllipse(ctx, headX + 8 * s, headY + 1.5 * s, 2 * s, 1.4 * s);
-
-    // Snarl / fangs
-    ctx.fillStyle = '#f8f0e0';
+    cel(ctx, () => ellipsePath(ctx, vec(10.8, -0.9), 1.3, 1), tone(0x1a1620), { band: 0.3, stroke: 0.35 });
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(10.2, -1.5, 0.6, 0.4);
+    // Heavy, angry brow + glowing eye
+    ctx.fillStyle = '#140e18';
     ctx.beginPath();
-    ctx.moveTo(headX + 5 * s, headY + 3.5 * s);
-    ctx.lineTo(headX + 4 * s, headY + 6.5 * s);
-    ctx.lineTo(headX + 6 * s, headY + 5.5 * s);
-    ctx.lineTo(headX + 7.5 * s, headY + 6.5 * s);
-    ctx.lineTo(headX + 8.5 * s, headY + 4 * s);
+    ctx.ellipse(3.1, -2.4, 1.8, 1.1, -0.35, 0, Math.PI * 2);
     ctx.fill();
-
-    // Predatory amber eyes — diamond shape
-    for (const side of [-1, 1]) {
-      const ex = headX + side * 3 * s - 1 * s;
-      const ey = headY - 1 * s;
-      // Amber eye
-      ctx.fillStyle = '#ffaa00';
+    ctx.fillStyle = L.eyeCore;
+    ctx.beginPath();
+    ctx.ellipse(3.3, -2.3, 1.25, 0.7, -0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#140e18';
+    ctx.fillRect(3.3, -2.9, 0.45, 1.2);
+    cel(ctx, () => polyPath(ctx, [vec(0.6, -4.4), vec(5.8, -3.2), vec(5.4, -2.2), vec(1, -3.2)]), L.fur, { band: 0.3, stroke: 0.35 });
+    if (L.scars) {
+      ctx.strokeStyle = 'rgba(214,168,176,0.9)';
+      ctx.lineWidth = 0.5;
       ctx.beginPath();
-      ctx.moveTo(ex, ey - 2 * s);
-      ctx.lineTo(ex + 1.5 * s, ey);
-      ctx.lineTo(ex, ey + 2 * s);
-      ctx.lineTo(ex - 1.5 * s, ey);
-      ctx.closePath();
-      ctx.fill();
-      // Slit pupil
-      ctx.fillStyle = '#150800';
-      utils.fillEllipse(ctx, ex, ey, 0.4 * s, 1.5 * s);
-      // Reflection
-      ctx.fillStyle = 'rgba(255,220,100,0.5)';
-      utils.fillCircle(ctx, ex - 0.5 * s, ey - 0.8 * s, 0.4 * s);
+      ctx.moveTo(1.4, -5.2);
+      ctx.lineTo(4.6, 0.8);
+      ctx.moveTo(6.6, -2.8);
+      ctx.lineTo(8.4, 0.6);
+      ctx.stroke();
     }
-
-    // Ears — pointed with pink inner
-    for (const side of [-1, 1]) {
-      const earBaseX = headX + side * 6 * s;
-      const earBaseY = headY - 5 * s;
-      const earTipX = earBaseX + side * 3 * s;
-      const earTipY = earBaseY - 9 * s + earTwitch * side * 3 * s;
-      ctx.fillStyle = utils.rgb(FUR_MID);
-      ctx.beginPath();
-      ctx.moveTo(earBaseX - side * 2 * s, earBaseY);
-      ctx.lineTo(earTipX, earTipY);
-      ctx.lineTo(earBaseX + side * 2 * s, earBaseY - 2 * s);
-      ctx.closePath();
-      ctx.fill();
-      // Pink inner
-      ctx.fillStyle = 'rgba(220,120,130,0.6)';
-      ctx.beginPath();
-      ctx.moveTo(earBaseX - side * 0.5 * s, earBaseY - 1 * s);
-      ctx.lineTo(earTipX, earTipY + 2 * s);
-      ctx.lineTo(earBaseX + side * 0.5 * s, earBaseY - 2 * s);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    // Fur texture on head
-    utils.drawFurTexture(ctx, headX - 10 * s, headY - 12 * s, 20 * s, 20 * s, FUR_MID, Math.PI * 0.5);
-
+    // Near ear
+    cel(ctx, () => polyPath(ctx, [vec(-3.8, -3), vec(-5.6 - twitch * 4, -11.6), vec(-0.6, -5)]), L.fur, { band: 0.8 });
+    ctx.fillStyle = L.gum;
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(-3.4, -4);
+    ctx.lineTo(-5 - twitch * 4, -9.8);
+    ctx.lineTo(-1.8, -5.2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.restore();
-  },
+  }
+
+  function tail(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+    const ph = t * Math.PI * 2;
+    const c = Math.cos(p.lean * 0.3);
+    const s = Math.sin(p.lean * 0.3);
+    const anchor = vec(sk.pelvis.x - 4 * c, sk.pelvis.y - 4 * s - 1);
+    const chain = clothChain(anchor, 15 * b, 6, 0.55 + p.flow * 0.6, 1.4, ph);
+    const left: V[] = [];
+    const right: V[] = [];
+    for (let i = 0; i < chain.length; i++) {
+      const k = i / (chain.length - 1);
+      const a = chain[Math.max(0, i - 1)];
+      const bb = chain[Math.min(chain.length - 1, i + 1)];
+      const { n } = perp(a, bb);
+      const r = (2.2 + Math.sin(k * Math.PI) * 2.4) * (1 - k * 0.55) * b;
+      left.push(vec(chain[i].x + n.x * r, chain[i].y + n.y * r));
+      right.push(vec(chain[i].x - n.x * r, chain[i].y - n.y * r));
+    }
+    const tip = chain[chain.length - 1];
+    const outline = [...left, vec(tip.x - 1.5, tip.y + 1.5), ...right.reverse()];
+    cel(ctx, () => blobPath(ctx, outline), L.fur, { band: 1.2 });
+    // Pale tip
+    const k0 = chain.length - 3;
+    cel(ctx, () => blobPath(ctx, [left[k0], left[k0 + 1], left[k0 + 2], vec(tip.x - 1.5, tip.y + 1.5), ...right.slice(0, 3)]), L.pale, { band: 0.6 });
+  }
+
+  const SKIN: HumanSkin = {
+    prop: PROP,
+    back: tail,
+    armFar(ctx, sk, p) { arm(ctx, sk.shF, sk.elF, sk.handF, L.furFar, p.fx, false); },
+    legFar(ctx, sk) { leg(ctx, sk, false); },
+    legNear(ctx, sk) { leg(ctx, sk, true); },
+    torso,
+    head,
+    armNear(ctx, sk, p) { arm(ctx, sk.shN, sk.elN, sk.handN, L.fur, p.fx, true); },
+    weapon() { /* claws are drawn with the paws */ },
+  };
+
+  const READY: HumanPose = basePose({
+    root: vec(CENTER_X - 5, 68.5),
+    lean: 0.85,
+    head: -0.32,
+    footN: vec(CENTER_X - 0.5, GROUND_Y),
+    footF: vec(CENTER_X - 11, GROUND_Y),
+    handN: vec(CENTER_X + 15, 76),
+    handF: vec(CENTER_X + 9, 78),
+    flow: 0.2,
+    ...spec.ready,
+  });
+  const R = READY;
+  const P = (o: Partial<HumanPose>): HumanPose => ({ ...R, ...o });
+  const ox = (v: V, dx: number, dy: number): V => vec(v.x + dx, v.y + dy);
+
+  const ATTACK: Key<HumanPose>[] = spec.attack === 'swipe'
+    ? [
+      { at: 0, pose: R },
+      // Rear back, near claw cocked high behind the head
+      { at: 0.33, ease: 'out', pose: P({
+        root: ox(R.root, -3, -1.5), lean: R.lean - 0.42, head: R.head + 0.18,
+        handN: vec(CENTER_X - 7, 44), handF: vec(CENTER_X + 12, 60),
+        footN: ox(R.footN, 1, 0), stretch: 0.06, flow: 0.1, fx: 0.35,
+      }) },
+      // Lunge: claw whips over the top
+      { at: 0.67, ease: 'in', pose: P({
+        root: ox(R.root, 2, 0), lean: R.lean - 0.05, head: R.head - 0.05,
+        handN: vec(CENTER_X + 17, 43), handF: vec(CENTER_X + 6, 70),
+        footN: ox(R.footN, 5, 0), flow: 0.45, fx: 0.75,
+      }) },
+      // (between frames: shapes the claw arc for the smear)
+      { at: 0.84, pose: P({
+        root: ox(R.root, 4, 1), lean: R.lean + 0.1, head: R.head - 0.07,
+        handN: vec(CENTER_X + 29, 58), handF: vec(CENTER_X + 1, 67),
+        footN: ox(R.footN, 8, 0), flow: 0.6, fx: 0.9,
+      }) },
+      // Contact: raked down and through, far arm flung back
+      { at: 1, ease: 'linear', pose: P({
+        root: ox(R.root, 5.5, 2), lean: R.lean + 0.28, head: R.head - 0.08,
+        handN: vec(CENTER_X + 27, 78), handF: vec(CENTER_X - 4, 64),
+        footN: ox(R.footN, 10, 0), footF: ox(R.footF, 2, 0), flow: 0.7, fx: 1, stretch: -0.04,
+      }) },
+    ]
+    : [
+      { at: 0, pose: R },
+      // Rise up tall, both claws raised overhead, roaring
+      { at: 0.33, ease: 'out', pose: P({
+        root: ox(R.root, -3, -3), lean: R.lean - 0.55, head: R.head + 0.05,
+        handN: vec(CENTER_X + 2, 43.5), handF: vec(CENTER_X - 5, 45.5),
+        footN: ox(R.footN, 1, 0), stretch: 0.08, flow: 0.1, fx: 0.6,
+      }) },
+      { at: 0.67, ease: 'in', pose: P({
+        root: ox(R.root, 1.5, -1), lean: R.lean - 0.1, head: R.head,
+        handN: vec(CENTER_X + 18, 47), handF: vec(CENTER_X + 12, 46),
+        footN: ox(R.footN, 5, 0), flow: 0.4, fx: 0.8,
+      }) },
+      { at: 0.84, pose: P({
+        root: ox(R.root, 3.5, 0.5), lean: R.lean + 0.1, head: R.head - 0.05,
+        handN: vec(CENTER_X + 28, 56), handF: vec(CENTER_X + 23, 55),
+        footN: ox(R.footN, 7, 0), flow: 0.6, fx: 0.9,
+      }) },
+      // Both claws crash down together
+      { at: 1, ease: 'linear', pose: P({
+        root: ox(R.root, 5, 3), lean: R.lean + 0.32, head: R.head - 0.1,
+        handN: vec(CENTER_X + 26, 83), handF: vec(CENTER_X + 20, 85),
+        footN: ox(R.footN, 9, 0), footF: ox(R.footF, 2, 0), flow: 0.7, fx: 1, stretch: -0.06,
+      }) },
+    ];
+
+  const gen = humanoidTracks({
+    key: spec.key, frameW: spec.frameW, frameH: spec.frameH, scale: spec.scale,
+    skin: SKIN, ready: R, attack: 'claw', deathDir: -1,
+  });
+  // Death: stagger, drop to the knees, then keel over onto its back.
+  const DEATH: Key<HumanPose>[] = [
+    gen.death[0],
+    { at: 0.33, pose: P({
+      ...gen.death[0].pose, root: ox(R.root, -3, 5), lean: R.lean - 0.6, head: R.head - 0.3,
+      handN: ox(R.root, 8, -12), handF: ox(R.root, -2, -14), flow: 0.4, fx: 0.6,
+    }) },
+    { at: 0.67, ease: 'in', pose: P({
+      root: vec(R.root.x - 3, GROUND_Y - 9), lean: -0.1, head: -0.3, spin: -0.5,
+      footN: ox(R.footN, -2, 0), footF: ox(R.footF, 1, 0),
+      handN: ox(R.root, 10, -6), handF: ox(R.root, -2, -8), flow: 0.3,
+    }) },
+    { at: 1, ease: 'out', pose: P({
+      root: vec(R.root.x + 1, GROUND_Y - 7 * b), lean: 0, head: -0.25, spin: -1.45, pivot: 0,
+      footN: vec(R.root.x + 6, GROUND_Y + 8.5), footF: vec(R.root.x - 1, GROUND_Y + 9.5),
+      handN: vec(R.root.x - 3, GROUND_Y - 18.5), handF: vec(R.root.x - 5, GROUND_Y - 14.5), flow: 0.05,
+    }) },
+  ];
+  const HURT: Key<HumanPose>[] = [
+    { at: 0, pose: P({
+      root: ox(R.root, -4, 0.5), lean: R.lean - 0.4, head: R.head - 0.35,
+      handN: ox(R.handN, -5, -5), handF: ox(R.handF, -4, -6), footF: ox(R.footF, -1.5, 0), flow: 0.6, fx: 0.7, stretch: -0.03,
+    }) },
+    { at: 1, pose: P({
+      root: ox(R.root, -2, 0.3), lean: R.lean - 0.15, head: R.head - 0.12,
+      handN: ox(R.handN, -2, -2), handF: ox(R.handF, -1.5, -2), flow: 0.4, fx: 0.4,
+    }) },
+  ];
+
+  function idle(t: number): HumanPose {
+    const ph = t * Math.PI * 2;
+    const breath = Math.sin(ph);
+    return P({
+      root: ox(R.root, 0, breath * 0.7),
+      stretch: -breath * 0.03,
+      lean: R.lean + breath * 0.03,
+      head: R.head + Math.sin(ph - 0.7) * 0.07,
+      handN: ox(R.handN, Math.sin(ph + 0.4) * 0.6, breath * 0.9),
+      handF: ox(R.handF, Math.sin(ph - 0.4) * 0.6, Math.sin(ph - 0.6) * 0.9),
+      flow: R.flow + Math.sin(ph + 1) * 0.18,
+      fx: Math.max(0, Math.sin(ph * 2)) * 0.15,
+    });
+  }
+
+  function walk(t: number): HumanPose {
+    const g = gait(t, { stride: 7.5, lift: 4.5, bob: 2, rootY: R.root.y + 0.8, footSpread: 1 });
+    const ph = t * Math.PI * 2;
+    const mid = (R.footN.x + R.footF.x) / 2 - CENTER_X;
+    return P({
+      root: vec(R.root.x + 1, g.rootY),
+      lean: R.lean + 0.1 + Math.sin(ph * 2) * 0.03,
+      head: R.head - 0.05 - Math.sin(ph * 2) * 0.05,
+      footN: vec(g.footN.x + mid + 1, g.footN.y),
+      footF: vec(g.footF.x + mid + 1, g.footF.y),
+      handN: vec(R.handN.x + 1 - g.swing * 4.5, R.handN.y + 1 - Math.max(0, g.swing) * 2),
+      handF: vec(R.handF.x + 1 + g.swing * 4, R.handF.y + 1 - Math.max(0, -g.swing) * 2),
+      flow: 0.55 + Math.sin(ph * 2) * 0.12,
+    });
+  }
+
+  function pose(act: MonsterAction, t: number): HumanPose {
+    switch (act) {
+      case 'idle': return idle(t);
+      case 'walk': return walk(t);
+      case 'attack': return samplePoseTrack(ATTACK, t);
+      case 'hurt': return samplePoseTrack(HURT, t);
+      case 'death': return samplePoseTrack(DEATH, t);
+    }
+  }
+
+  function clawTips(p: HumanPose, far: boolean): { tip: V; base: V } {
+    const sk = solveSkeleton(p, PROP);
+    const hand = spun(p, far ? sk.handF : sk.handN, sk);
+    const el = spun(p, far ? sk.elF : sk.elN, sk);
+    const d = perp(el, hand).u;
+    return { tip: vec(hand.x + d.x * (clawLen + 2), hand.y + d.y * (clawLen + 2)), base: hand };
+  }
+
+  function fx(ctx: CanvasRenderingContext2D, p: HumanPose, act: MonsterAction, t: number): void {
+    const sk = solveSkeleton(p, PROP);
+    if (act === 'attack' && t > 0.5) {
+      for (const far of spec.attack === 'maul' ? [true, false] : [false]) {
+        const tips: V[] = [];
+        const bases: V[] = [];
+        for (let i = 5; i >= 0; i--) {
+          const s = clawTips(samplePoseTrack(ATTACK, Math.max(0, t - i * 0.07)), far);
+          tips.push(s.tip);
+          bases.push(s.base);
+        }
+        smear(ctx, tips, bases, 0xe8f0ff, 0.45 * p.fx);
+        // Three parallel rake streaks along the claw path
+        for (let c = 0; c < 3; c++) {
+          const off = (c - 1) * 1.6;
+          ctx.strokeStyle = `rgba(255,255,255,${0.75 * p.fx})`;
+          ctx.lineWidth = 0.8;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          tips.forEach((q, i) => {
+            const x = q.x + off;
+            const y = q.y - off * 0.6;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+        }
+      }
+    }
+    if (act === 'death' && t > 0.6) return;
+    // Glowing eye
+    const a = sk.headAng - FACE_TILT;
+    const e = vec(3.3 * b * 0.96, -2.3 * b * 0.96);
+    const eye = spun(p, vec(
+      sk.head.x + e.x * Math.cos(a) - e.y * Math.sin(a),
+      sk.head.y + e.x * Math.sin(a) + e.y * Math.cos(a),
+    ), sk);
+    glow(ctx, eye, 3 + p.fx * 1.5, L.eye, 0.55 + p.fx * 0.3);
+  }
+
+  return rigMonster<HumanPose>({
+    key: spec.key,
+    frameW: spec.frameW,
+    frameH: spec.frameH,
+    scale: spec.scale,
+    pose,
+    draw: (ctx, p, _act, t) => { drawHumanoid(ctx, p, SKIN, t); },
+    shadow: (p) => ({
+      x: Math.abs(p.spin) > 1 ? p.root.x + (p.spin > 0 ? 8 : -8) : p.root.x + 2,
+      r: (spec.shadowR ?? 13) * (Math.abs(p.spin) > 1 ? 1.4 : 1),
+      lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)),
+    }),
+    fx,
+  });
+}
+
+// ── Twilight werewolf ───────────────────────────────────────────────────
+
+export const WEREWOLF_LOOK: WolfLook = {
+  fur: tone(0x75676a, { light: 0.3 }),
+  furFar: tone(0x4d4250, { light: 0.15 }),
+  mane: tone(0x4f4458, { light: 0.25 }),
+  pale: tone(0xc4b49c, { light: 0.35, shadow: 0.38 }),
+  pants: tone(0x4d3e6a, { light: 0.2 }),
+  claw: tone(0xeee6d2, { light: 0.4, shadow: 0.3 }),
+  nose: '#1a1620',
+  gum: '#8a2a3a',
+  eye: 0xffc23a,
+  eyeCore: '#ffe48a',
+  furLine: 'rgba(30,22,36,0.55)',
 };
+
+export const WerewolfDrawer = werewolfDrawer({
+  key: 'monster_werewolf',
+  // Wide for the hunched body, tail and claw swipe; width doesn't move the sprite in-game.
+  frameW: 88,
+  frameH: 64,
+  scale: 1.42,
+  look: WEREWOLF_LOOK,
+  bulk: 1,
+  attack: 'swipe',
+});
