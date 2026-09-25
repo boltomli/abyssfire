@@ -50,7 +50,7 @@ import { LoreByZone } from '../data/loreCollectibles';
 import type { LoreEntry } from '../data/loreCollectibles';
 import { NPCDefinitions } from '../data/npcs';
 import { AllQuests } from '../data/quests/all_quests';
-import type { MapData, ClassDefinition, ItemInstance, SaveData, HiddenArea, SubDungeonEntrance, StoryDecoration, SubDungeonMapData } from '../data/types';
+import type { MapData, ClassDefinition, ItemInstance, SaveData, HiddenArea, SubDungeonEntrance, StoryDecoration, SubDungeonMapData, SkillDefinition } from '../data/types';
 import { AllSubDungeons, SubDungeonMiniBosses } from '../data/subDungeons';
 import { DungeonSystem } from '../systems/DungeonSystem';
 import type { DungeonRunState, DungeonFloorConfig } from '../systems/DungeonSystem';
@@ -1814,18 +1814,40 @@ export class ZoneScene extends Phaser.Scene {
       EventBus.emit(GameEvents.PLAYER_MANA_CHANGED, { mana: this.player.mana, maxMana: this.player.maxMana });
     }
 
+    let releaseDelay: number;
     if (skill.buff || skill.aoe || skill.range > 2) {
-      this.player.playCast();
+      releaseDelay = this.player.playCast();
     } else {
       const animTarget = this.findPreferredSkillTarget();
       if (animTarget) {
-        this.player.playAttack(animTarget.sprite.x, animTarget.sprite.y);
+        releaseDelay = this.player.playAttack(animTarget.sprite.x, animTarget.sprite.y);
       } else {
-        this.player.playCast();
+        releaseDelay = this.player.playCast();
       }
     }
 
+    // Blinks stay instant so they work as escapes; everything else resolves
+    // on the animation's release/contact beat so VFX and damage land together.
+    if (skillId === 'teleport' || skillId === 'shadow_step' || releaseDelay <= 0) {
+      this.releaseSkill(skillId, skill, level, target, time, scaledManaCost);
+      return;
+    }
+    this.time.delayedCall(releaseDelay, () => {
+      if (this.player.hp <= 0 || this.isTransitioning) return;
+      // The original target may have died during the wind-up; retarget.
+      const liveTarget = target && target.isAlive() ? target : this.findPreferredSkillTarget();
+      this.releaseSkill(skillId, skill, level, liveTarget, this.time.now, scaledManaCost);
+    });
+  }
 
+  private releaseSkill(
+    skillId: string,
+    skill: SkillDefinition,
+    level: number,
+    target: Monster | null,
+    time: number,
+    scaledManaCost: number,
+  ): void {
     // ── Teleport: instant reposition to walkable tile near target ──
     if (skillId === 'teleport') {
       const pointer = this.input.activePointer;
@@ -2016,29 +2038,42 @@ export class ZoneScene extends Phaser.Scene {
           this.player.sprite.x, this.player.sprite.y);
       }
     } else if (target) {
-      const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), target.toCombatEntity(), skill, level, this.player.skillLevels);
-      // Combustion: +50% damage on burning targets
-      let finalDmg = result.damage;
-      if (skillId === 'combustion' && this.statusEffects.hasEffect(target.id, 'burn')) {
-        finalDmg = Math.floor(finalDmg * 1.5);
-      }
-      target.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
-      this.applySteal(result);
-      this.showDamageText(target.sprite.x, target.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
-      // Apply status effects from skill damage type
-      this.applySkillStatusEffect(target, skill, finalDmg, time);
-      if (!target.isAlive()) this.onMonsterKilled(target);
-      this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
-        target.sprite.x, target.sprite.y);
-      if (this.vfx) {
-        const impactColor = skill.damageType !== 'physical' ? 0xff6600 : 0xf1c40f;
-        this.vfx.skillImpactBloom(target.sprite.x, target.sprite.y - 16, impactColor);
-      }
-      if (this.trails && (skill.damageType !== 'physical' || skill.damageMultiplier > 1.5)) {
-        const scorchType = skillId.includes('fire') || skillId === 'meteor' ? 'fire'
-          : skillId.includes('ice') || skillId === 'blizzard' ? 'ice'
-          : 'lightning';
-        this.trails.stampGround(target.sprite.x, target.sprite.y, scorchType);
+      const fromX = this.player.sprite.x;
+      const fromY = this.player.sprite.y;
+      this.skillEffects.play(skillId, fromX, fromY, target.sprite.x, target.sprite.y);
+      const applyHit = (): void => {
+        const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), target.toCombatEntity(), skill, level, this.player.skillLevels);
+        // Combustion: +50% damage on burning targets
+        let finalDmg = result.damage;
+        if (skillId === 'combustion' && this.statusEffects.hasEffect(target.id, 'burn')) {
+          finalDmg = Math.floor(finalDmg * 1.5);
+        }
+        target.takeDamage(finalDmg, fromX, fromY, { isCrit: result.isCrit });
+        this.applySteal(result);
+        this.showDamageText(target.sprite.x, target.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
+        // Apply status effects from skill damage type
+        this.applySkillStatusEffect(target, skill, finalDmg, this.time.now);
+        if (!target.isAlive()) this.onMonsterKilled(target);
+        if (this.vfx) {
+          const impactColor = skill.damageType !== 'physical' ? 0xff6600 : 0xf1c40f;
+          this.vfx.skillImpactBloom(target.sprite.x, target.sprite.y - 16, impactColor);
+        }
+        if (this.trails && (skill.damageType !== 'physical' || skill.damageMultiplier > 1.5)) {
+          const scorchType = skillId.includes('fire') || skillId === 'meteor' ? 'fire'
+            : skillId.includes('ice') || skillId === 'blizzard' ? 'ice'
+            : 'lightning';
+          this.trails.stampGround(target.sprite.x, target.sprite.y, scorchType);
+        }
+      };
+      // Projectiles deal damage on arrival, not on launch.
+      const travelMs = this.skillEffects.getProjectileTravelMs(skillId, fromX, fromY, target.sprite.x, target.sprite.y);
+      if (travelMs > 0) {
+        this.time.delayedCall(travelMs, () => {
+          if (!target.isAlive() || this.player.hp <= 0 || this.isTransitioning) return;
+          applyHit();
+        });
+      } else {
+        applyHit();
       }
     }
   }
@@ -2099,6 +2134,11 @@ export class ZoneScene extends Phaser.Scene {
       this.player.toCombatEntity(eq), target.toCombatEntity(),
       undefined, 1, undefined, forceCrit,
     );
+    if (result.isDodged) {
+      // Target sidestepped: show a whiff, no flash or impact.
+      this.showDamageText(target.sprite.x, target.sprite.y, 0, false, true);
+      return;
+    }
     const weight = target.takeDamage(result.damage, fromX, fromY, { isCrit: result.isCrit });
     this.applySteal(result);
     this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
@@ -2167,7 +2207,7 @@ export class ZoneScene extends Phaser.Scene {
     const color = CLASS_IMPACT_COLORS[this.player.classData.id] ?? 0xfff2c0;
     this.vfx.impactBurst(target.sprite.x, target.sprite.y - 18, angle, weight, color);
     if (weight === 'kill' && target.definition.elite) {
-      this.vfx.slowMotion(280, 0.3);
+      this.vfx.slowMotion(200, 0.4);
     }
   }
 
@@ -4934,11 +4974,11 @@ export class ZoneScene extends Phaser.Scene {
       poison: '#66ff66', arcane: '#cc66ff',
     };
     if (isDodged) { text = 'MISS'; color = '#7f8c8d'; size = fs(14); }
-    else if (isPlayer) { text = `-${damage}`; color = isCrit ? '#ff4444' : '#e74c3c'; if (isCrit) size = fs(28); }
+    else if (isPlayer) { text = `-${damage}`; color = isCrit ? '#ff4444' : '#e74c3c'; if (isCrit) size = fs(24); }
     else {
       text = `${damage}`;
       color = isCrit ? '#ffd700' : (damageType && elementColors[damageType]) || '#ffffff';
-      if (isCrit) size = fs(32);
+      if (isCrit) size = fs(26);
     }
 
     // Stack numbers that spawn on the same spot in quick succession so
@@ -4986,8 +5026,8 @@ export class ZoneScene extends Phaser.Scene {
     }
 
     // Pop: overshoot then settle — sells the impact of the number itself.
-    const peak = isCrit ? 1.75 : 1.2;
-    const rest = isCrit ? 1.2 : 1;
+    const peak = isCrit ? 1.5 : 1.2;
+    const rest = isCrit ? 1.1 : 1;
     t.setScale(isCrit ? 0.35 : 0.5);
     if (isCrit) t.setAngle(-8);
     this.tweens.add({

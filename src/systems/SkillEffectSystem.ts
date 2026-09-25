@@ -1204,6 +1204,21 @@ export class SkillEffectSystem {
   }
 
   // ── Play a skill effect ──────────────────────────────────
+  /**
+   * Flight time (ms) of a single-target skill's projectile, or 0 when the
+   * skill hits instantly. Callers delay damage by this so numbers and hit
+   * reactions land when the projectile does.
+   */
+  getProjectileTravelMs(skillId: string, casterX: number, casterY: number, targetX: number, targetY: number): number {
+    const dist = Phaser.Math.Distance.Between(casterX, casterY - 16, targetX, targetY - 16);
+    switch (skillId) {
+      case 'fireball': return Math.max(300, Math.min(600, dist * 1.5));
+      case 'ice_arrow':
+      case 'poison_arrow': return Math.max(250, Math.min(500, dist * 1.5));
+      default: return 0;
+    }
+  }
+
   play(
     skillId: string,
     casterX: number,
@@ -1833,8 +1848,7 @@ export class SkillEffectSystem {
 
   private effectFireball(cx: number, cy: number, tx: number, ty: number): void {
     const sx = cx, sy = cy - 16, ex = tx, ey = ty - 16;
-    const dist = Phaser.Math.Distance.Between(sx, sy, ex, ey);
-    const dur = Math.max(300, Math.min(600, dist * 1.5));
+    const dur = this.getProjectileTravelMs('fireball', cx, cy, tx, ty);
 
     // Fireball core
     const core = this.scene.add.circle(sx, sy, 8, 0xffaa00, 1).setDepth(EFFECT_DEPTH).setBlendMode('ADD' as unknown as Phaser.BlendModes);
@@ -2119,7 +2133,7 @@ export class SkillEffectSystem {
   private effectIceArrow(cx: number, cy: number, tx: number, ty: number): void {
     const sx = cx, sy = cy - 16, ex = tx, ey = ty - 16;
     const dist = Phaser.Math.Distance.Between(sx, sy, ex, ey);
-    const dur = Math.max(250, Math.min(500, dist * 1.5));
+    const dur = this.getProjectileTravelMs('ice_arrow', cx, cy, tx, ty);
     const angle = Phaser.Math.RadToDeg(Math.atan2(ey - sy, ex - sx));
 
     // Ice arrow projectile
@@ -2596,7 +2610,7 @@ export class SkillEffectSystem {
   private effectPoisonArrow(cx: number, cy: number, tx: number, ty: number): void {
     const sx = cx, sy = cy - 16, ex = tx, ey = ty - 16;
     const dist = Phaser.Math.Distance.Between(sx, sy, ex, ey);
-    const dur = Math.max(250, Math.min(500, dist * 1.5));
+    const dur = this.getProjectileTravelMs('poison_arrow', cx, cy, tx, ty);
     const angle = Phaser.Math.RadToDeg(Math.atan2(ey - sy, ex - sx));
 
     // Poison-tipped arrow projectile

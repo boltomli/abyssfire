@@ -792,11 +792,11 @@ export class CharacterAnimator {
 
   // ── Cast Animation ────────────────────────────────────────────────────
 
-  playCast(): void {
-    if (this.dead) return;
+  /** Play a cast. Returns ms until the spell releases (the charge peak). */
+  playCast(): number {
+    if (this.dead) return 0;
     if (this.hasFrameAnims) {
-      this.playFrameCast();
-      return;
+      return this.playFrameCast();
     }
     this.cancelTweens();
     this.prevState = this.state;
@@ -849,11 +849,12 @@ export class CharacterAnimator {
         });
       },
     });
+    return Math.round(chargeMs);
   }
 
-  private playFrameCast(): void {
+  private playFrameCast(): number {
     const sprite = this.getSpriteChild();
-    if (!sprite) return;
+    if (!sprite) return 0;
 
     this.cancelTweens();
     this.clearFrameMotion();
@@ -904,6 +905,7 @@ export class CharacterAnimator {
         });
       },
     });
+    return Math.round(chargeMs);
   }
 
   playDodge(directionX: number, directionY: number): void {
@@ -1066,7 +1068,7 @@ export class CharacterAnimator {
     // Don't let a flinch cancel our own committed swing or dodge — just
     // jolt the sprite so the hit still reads.
     if (this.state === 'attack' || this.state === 'cast' || this.state === 'dodge') {
-      this.jolt(sourceX, sourceY, strength);
+      this.jolt(strength);
       return;
     }
 
@@ -1280,18 +1282,13 @@ export class CharacterAnimator {
     });
   }
 
-  /** Flinch without leaving the current action (hit while swinging). */
-  private jolt(sourceX: number, sourceY: number, strength: number): void {
-    const sprite = this.getSpriteChild();
-    if (!sprite) return;
-    const dx = this.container.x - sourceX;
-    const dist = Math.hypot(dx, this.container.y - sourceY) || 1;
-    const push = Math.min(5, 2.5 * strength) * (dx / dist);
-    const startX = sprite.x;
-    sprite.x = startX + push;
-    this.scene.time.delayedCall(60, () => {
-      if (sprite.active && Math.abs(sprite.x - (startX + push)) < 0.01) sprite.x = startX;
-    });
+  /**
+   * Flinch without leaving the current action (hit while swinging): a pain
+   * tint plus a short micro-freeze. Position is owned by the action's tweens.
+   */
+  private jolt(strength: number): void {
+    if (this.config.hurtFlash && !this.flashTimer) this.tintFlash(0xff6b6b, 90);
+    this.triggerHitFreeze(Math.min(40, 20 * strength));
   }
 
   // ── Private Helpers ──────────────────────────────────────────────────

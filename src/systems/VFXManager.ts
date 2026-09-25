@@ -273,13 +273,13 @@ export class VFXManager {
     const big = weight === 'crit' || weight === 'kill';
 
     // Core flash
-    const core = scene.add.circle(x, y, r * 0.55, 0xffffff, 0.95)
+    const core = scene.add.circle(x, y, Math.min(10, r * 0.5), 0xffffff, 0.95)
       .setDepth(IMPACT_DEPTH + 1).setBlendMode(Phaser.BlendModes.ADD).setScale(0.35);
     scene.tweens.add({
       targets: core, scale: 1.3, alpha: 0, duration: big ? 150 : 110, ease: 'Quad.easeOut',
       onComplete: () => core.destroy(),
     });
-    const halo = scene.add.circle(x, y, r, color, 0.45)
+    const halo = scene.add.circle(x, y, r, color, 0.35)
       .setDepth(IMPACT_DEPTH).setBlendMode(Phaser.BlendModes.ADD).setScale(0.5);
     scene.tweens.add({
       targets: halo, scale: 1.25, alpha: 0, duration: big ? 220 : 160, ease: 'Cubic.easeOut',
@@ -300,11 +300,11 @@ export class VFXManager {
     const spread = big ? 1.25 : 0.9;
     for (let i = 0; i < profile.sparks; i++) {
       const a = angle + (Math.random() - 0.5) * spread;
-      const len = (big ? 9 : 6) + Math.random() * (big ? 9 : 5);
-      const tint = i % 3 === 0 ? 0xffffff : color;
-      const spark = scene.add.rectangle(x, y, len, big ? 2 : 1.5, tint, 1)
+      const len = (big ? 14 : 10) + Math.random() * (big ? 12 : 8);
+      const tint = i % 2 === 0 ? 0xffffff : color;
+      const spark = scene.add.rectangle(x, y, len, big ? 2.5 : 2, tint, 1)
         .setDepth(IMPACT_DEPTH + 1).setBlendMode(Phaser.BlendModes.ADD).setRotation(a);
-      const dist = (big ? 26 : 16) + Math.random() * (big ? 30 : 18);
+      const dist = (big ? 30 : 20) + Math.random() * (big ? 34 : 22);
       scene.tweens.add({
         targets: spark,
         x: x + Math.cos(a) * dist,

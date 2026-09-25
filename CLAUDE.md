@@ -87,6 +87,12 @@ Central pub/sub for decoupled communication. Events defined in `GameEvents` enum
 ### Map Data
 Each zone (`src/data/maps/`) defines: tile grid, spawn points, NPC positions, exits, decorations. `MapGenerator` can procedurally enhance maps. Tiles: 0=grass, 1=dirt, 2=stone, 3=water, 4=wall, 5=camp.
 
+### Combat Feel (hit timing & feedback)
+- Damage lands on the animation's **contact beat**, not at input time: `CharacterAnimator.playAttack()` / `playCast()` return the ms until the blow connects / the spell releases (derived from the sheet's attack frames via `AnimConfig.attackContact`), and `ZoneScene` resolves the hit in a `time.delayedCall`. Projectile skills and ranged monsters apply damage on arrival (`SkillEffectSystem.getProjectileTravelMs`).
+- `src/systems/HitFeedback.ts` classifies every hit (`tick`/`light`/`normal`/`heavy`/`crit`/`kill`) and `HIT_PROFILES` drives hit-stop, white flash, recoil, shake and the `VFXManager.impactBurst` — tune feel there, not per call site.
+- `Monster.takeDamage(amount, fromX, fromY, { isCrit, isTick })` plays the target-side reaction and returns the weight; pass `isTick` for DoTs.
+- Generated sprite sheets wrap into a grid ≤ 4096px (`computeSheetGrid`) — never emit a single-row strip wider than that.
+
 ### Loot System (D2-style)
 Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4) -> Legendary (orange, fixed) -> Set (green). Affixes have tiers 1-5 scaling with zone difficulty.
 

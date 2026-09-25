@@ -424,8 +424,9 @@ export class Player {
     return this.animator.playAttack(targetX, targetY, { attackIntervalMs: this.attackSpeed });
   }
 
-  playCast(): void {
-    this.animator.playCast();
+  /** Returns ms until the spell releases. */
+  playCast(): number {
+    return this.animator.playCast();
   }
 
   playHurt(sourceX: number, sourceY: number, strength: number = 1): void {
