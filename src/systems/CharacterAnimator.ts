@@ -1321,7 +1321,8 @@ export class CharacterAnimator {
 
   private cancelTweens(): void {
     for (const tween of this.tweens) {
-      if (tween && tween.isPlaying()) {
+      // Include tweens paused by hit-stop, or they'd linger in the manager.
+      if (tween && (tween.isPlaying() || tween.isPaused())) {
         tween.stop();
         tween.destroy();
       }

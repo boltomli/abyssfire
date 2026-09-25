@@ -5002,6 +5002,7 @@ export class ZoneScene extends Phaser.Scene {
     const poolIdx = this.floatingTextPool.findIndex(obj => !obj.active);
     if (poolIdx !== -1) {
       t = this.floatingTextPool[poolIdx];
+      this.tweens.killTweensOf(t);
       t.setActive(true).setVisible(true);
       t.setPosition(startX, startY);
       t.setText(text);
