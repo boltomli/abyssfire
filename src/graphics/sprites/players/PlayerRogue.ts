@@ -456,6 +456,7 @@ export const PlayerRogueDrawer: EntityDrawer = {
   frameW: 96,
   frameH: 96,
   totalFrames: PLAYER_TOTAL_FRAMES,
+  inked: true,
 
   drawFrame(ctx, frame, action, w, h) {
     const act = action as PlayerAction;

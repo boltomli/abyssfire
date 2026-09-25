@@ -53,6 +53,11 @@ export interface EntityDrawer {
   readonly frameW: number;       // before TEXTURE_SCALE
   readonly frameH: number;       // before TEXTURE_SCALE
   readonly totalFrames: number;
+  /**
+   * True when the drawer already applies the ink outline itself (rigged
+   * characters). Otherwise the sheet generator runs the shared ink pass.
+   */
+  readonly inked?: boolean;
 
   drawFrame(
     ctx: CanvasRenderingContext2D,
@@ -75,9 +80,9 @@ export function buildFrameSizeRegistry(): FrameSizeRegistry {
     player_mage: { frameWidth: 96, frameHeight: 96 },
     player_rogue: { frameWidth: 96, frameHeight: 96 },
     // Monsters (various sizes, 20 frames)
-    monster_slime: { frameWidth: 48, frameHeight: 40 },
-    monster_goblin: { frameWidth: 48, frameHeight: 56 },
-    monster_goblin_chief: { frameWidth: 60, frameHeight: 68 },
+    monster_slime: { frameWidth: 72, frameHeight: 40 },
+    monster_goblin: { frameWidth: 72, frameHeight: 56 },
+    monster_goblin_chief: { frameWidth: 84, frameHeight: 68 },
     monster_skeleton: { frameWidth: 44, frameHeight: 64 },
     monster_zombie: { frameWidth: 44, frameHeight: 60 },
     monster_werewolf: { frameWidth: 52, frameHeight: 64 },

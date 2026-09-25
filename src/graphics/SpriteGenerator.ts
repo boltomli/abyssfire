@@ -10,7 +10,9 @@ import {
   getPlayerActionFrameRange,
   computeSheetGrid,
   sheetFrameOrigin,
+  type SheetGrid,
 } from './sprites/types';
+import { inkLegacyFrame } from './sprites/rig/Rig';
 import { SlimeDrawer } from './sprites/monsters/Slime';
 import { SkeletonDrawer } from './sprites/monsters/Skeleton';
 import { WerewolfDrawer } from './sprites/monsters/Werewolf';
@@ -1039,6 +1041,38 @@ export class SpriteGenerator {
     }
   }
 
+  /** Draw one sheet cell, clipped to its bounds, optionally through the ink pass. */
+  private drawCell(
+    ctx: CanvasRenderingContext2D,
+    grid: SheetGrid,
+    index: number,
+    fw: number,
+    fh: number,
+    ink: boolean,
+    draw: (c: CanvasRenderingContext2D) => void,
+  ): void {
+    const cell = sheetFrameOrigin(grid, index);
+    if (ink) {
+      const [tmp, tctx] = this.utils.createCanvas(fw, fh);
+      tctx.save();
+      draw(tctx);
+      tctx.restore();
+      ctx.save();
+      ctx.translate(cell.x, cell.y);
+      inkLegacyFrame(ctx, tmp, fw, fh, { inkPx: Math.max(2, Math.min(3, fh / 60)) });
+      ctx.restore();
+      return;
+    }
+    ctx.save();
+    ctx.translate(cell.x, cell.y);
+    // Clip to the cell so strokes can't bleed into neighbouring frames.
+    ctx.beginPath();
+    ctx.rect(0, 0, fw, fh);
+    ctx.clip();
+    draw(ctx);
+    ctx.restore();
+  }
+
   private generateFromDrawer(drawer: EntityDrawer): void {
     if (this.shouldSkipGeneration(drawer.key)) return;
 
@@ -1061,17 +1095,12 @@ export class SpriteGenerator {
           ['death', DEATH_START, DEATH_COUNT],
         ];
 
+    // Rigged drawers ink themselves; legacy ones get the shared ink pass.
+    const legacy = !drawer.inked;
     for (const [action, start, count] of actions) {
       for (let f = 0; f < count; f++) {
-        const cell = sheetFrameOrigin(grid, start + f);
-        ctx.save();
-        ctx.translate(cell.x, cell.y);
-        // Clip to the cell so strokes can't bleed into neighbouring frames.
-        ctx.beginPath();
-        ctx.rect(0, 0, fw, fh);
-        ctx.clip();
-        drawer.drawFrame(ctx, f, action, fw, fh, this.utils);
-        ctx.restore();
+        this.drawCell(ctx, grid, start + f, fw, fh, legacy,
+          c => drawer.drawFrame(c, f, action, fw, fh, this.utils));
       }
     }
 
@@ -1112,17 +1141,11 @@ export class SpriteGenerator {
       ['talking', NPC_TALK_START, NPC_TALK_COUNT],
     ];
 
+    const legacy = !drawer.inked;
     for (const [action, start, count] of actions) {
       for (let f = 0; f < count; f++) {
-        const cell = sheetFrameOrigin(grid, start + f);
-        ctx.save();
-        ctx.translate(cell.x, cell.y);
-        // Clip to the cell so strokes can't bleed into neighbouring frames.
-        ctx.beginPath();
-        ctx.rect(0, 0, fw, fh);
-        ctx.clip();
-        drawer.drawFrame(ctx, f, action as any, fw, fh, this.utils);
-        ctx.restore();
+        this.drawCell(ctx, grid, start + f, fw, fh, legacy,
+          c => drawer.drawFrame(c, f, action as any, fw, fh, this.utils));
       }
     }
 

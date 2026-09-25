@@ -464,6 +464,53 @@ export function renderRigFrame(
   ctx.restore();
 }
 
+/**
+ * Give a legacy (non-rig) sprite frame the same ink silhouette and rim light
+ * as rigged characters. Legacy drawers bake a soft glow into their pixels,
+ * so the outline traces an alpha-thresholded mask instead of raw alpha.
+ */
+export function inkLegacyFrame(
+  ctx: CanvasRenderingContext2D,
+  src: HTMLCanvasElement,
+  w: number,
+  h: number,
+  opts: { inkPx?: number; ink?: string; rim?: string } = {},
+): void {
+  const [mask, mx] = scratch('lmask', w, h);
+  const sctx = src.getContext('2d')!;
+  const img = sctx.getImageData(0, 0, w, h);
+  const out = mx.createImageData(w, h);
+  for (let i = 3; i < img.data.length; i += 4) {
+    if (img.data[i] > 110) out.data[i] = 255;
+  }
+  mx.putImageData(out, 0, 0);
+
+  const inkPx = opts.inkPx ?? 2.6;
+  const [ring, rx] = scratch('lring', w, h);
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    rx.drawImage(mask, Math.cos(a) * inkPx, Math.sin(a) * inkPx);
+  }
+  rx.globalCompositeOperation = 'source-in';
+  rx.fillStyle = opts.ink ?? '#120c18';
+  rx.fillRect(0, 0, w, h);
+  rx.globalCompositeOperation = 'destination-out';
+  rx.drawImage(mask, 0, 0);
+
+  // Rim: mask minus itself shifted down-right, tinted, clipped to the body.
+  const [rim, rmx] = scratch('lrim', w, h);
+  rmx.drawImage(mask, 0, 0);
+  rmx.globalCompositeOperation = 'destination-out';
+  rmx.drawImage(mask, inkPx * 0.9, inkPx * 0.9);
+  rmx.globalCompositeOperation = 'source-in';
+  rmx.fillStyle = opts.rim ?? 'rgba(255,236,200,0.4)';
+  rmx.fillRect(0, 0, w, h);
+
+  ctx.drawImage(ring, 0, 0);
+  ctx.drawImage(src, 0, 0);
+  ctx.drawImage(rim, 0, 0);
+}
+
 /** Soft contact shadow on the ground, shrinking as the body leaves it. */
 export function groundShadow(ctx: CanvasRenderingContext2D, x: number, rx: number, lift: number): void {
   const k = Math.max(0.45, 1 - lift / 24);
