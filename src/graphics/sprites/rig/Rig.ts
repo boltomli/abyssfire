@@ -339,7 +339,10 @@ function scratch(name: string, w: number, h: number): [HTMLCanvasElement, Canvas
     c.height = h;
     canvasCache.set(key, c);
   }
-  const x = c.getContext('2d')!;
+  // CPU-backed like the sheet canvases (DrawUtils.createCanvas): mixing
+  // GPU scratch canvases with a willReadFrequently sheet forces a GPU→CPU
+  // readback on every composite, which made sheet generation ~15× slower.
+  const x = c.getContext('2d', { willReadFrequently: true })!;
   x.setTransform(1, 0, 0, 1, 0, 0);
   x.globalAlpha = 1;
   x.globalCompositeOperation = 'source-over';
@@ -429,7 +432,7 @@ export function renderRigFrame(
   // Ink outline: stamp the silhouette around a ring, tint it, body on top.
   const [out, ox] = scratch('out', w, h);
   const inkW = (finish.inkWidth ?? 1.1) * s;
-  const steps = 12;
+  const steps = 8;
   for (let i = 0; i < steps; i++) {
     const a = (i / steps) * Math.PI * 2;
     ox.drawImage(body, Math.cos(a) * inkW, Math.sin(a) * inkW);
@@ -487,8 +490,8 @@ export function inkLegacyFrame(
 
   const inkPx = opts.inkPx ?? 2.6;
   const [ring, rx] = scratch('lring', w, h);
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
     rx.drawImage(mask, Math.cos(a) * inkPx, Math.sin(a) * inkPx);
   }
   rx.globalCompositeOperation = 'source-in';
