@@ -1,22 +1,585 @@
 // src/graphics/sprites/players/PlayerWarrior.ts
+//
+// 渊火骑士 — plate-armoured knight in a crimson tabard and cape, plumed great
+// helm with an ember-lit visor, broadsword and heater shield. Rigged 3/4
+// view facing right; every action is keyframed on the shared humanoid rig.
 import type { EntityDrawer, PlayerAction } from '../types';
+import { PLAYER_ACTION_FRAME_COUNTS, PLAYER_TOTAL_FRAMES } from '../types';
 import {
-  PLAYER_ACTION_FRAME_COUNTS,
-  PLAYER_TOTAL_FRAMES,
-} from '../types';
-import type { DrawUtils } from '../../DrawUtils';
-import { samplePose, sinePulse, smoothstep, walkBob, walkStride } from './PlayerMotion';
+  CENTER_X,
+  GROUND_Y,
+  along,
+  blobPath,
+  capsulePath,
+  cel,
+  clothChain,
+  ellipsePath,
+  frameTime,
+  glow,
+  groundShadow,
+  inBone,
+  lerpV,
+  limb,
+  polyPath,
+  renderRigFrame,
+  samplePoseTrack,
+  smear,
+  tone,
+  vec,
+  type Key,
+  type V,
+} from '../rig/Rig';
+import {
+  basePose,
+  drawHumanoid,
+  gait,
+  solveSkeleton,
+  spun,
+  type HumanPose,
+  type HumanSkin,
+  type Skeleton,
+} from '../rig/Humanoid';
+import { getCurrentZonePalette, standardOutlineBlur } from '../../ZonePalette';
 
-const ARMOR_BASE   = 0x2a3542;
-const ARMOR_LIGHT  = 0x3e4c5c;
-const ARMOR_DARK   = 0x1b222b;
-const SKIN         = 0x7f6345;
-const SKIN_DARK    = 0x634c2e;
-const BLADE_COLOR  = 0x8a8a9a;
-const GUARD_COLOR  = 0x41352a;
-const SHIELD_BASE  = 0x3e4c5c;
-const SHIELD_DARK  = 0x2a3542;
-const SHIELD_TRIM  = 0xb8860b;
+// ── Palette ─────────────────────────────────────────────────────────────
+const STEEL = tone(0x9aa6ba, { light: 0.45 });
+const STEEL_FAR = tone(0x6c7688, { light: 0.25 });
+const IRON = tone(0x4b5366);
+const IRON_FAR = tone(0x363c4b);
+const GOLD = tone(0xd9a640, { light: 0.5 });
+const CRIMSON = tone(0xa82230);
+const CRIMSON_IN = tone(0x62131d, { light: 0.15 });
+const LEATHER = tone(0x5e3a22);
+const BLADE = tone(0xc9d3e2, { light: 0.6, shadow: 0.3 });
+const EMBER = 0xff8a2a;
+
+const BLADE_LEN = 27;
+/** Figure size within the 96-unit frame. */
+const WARRIOR_SCALE = 1.18;
+
+// ── Skin ────────────────────────────────────────────────────────────────
+
+function sabaton(ctx: CanvasRenderingContext2D, ankle: V, sole: V, t: typeof STEEL): void {
+  cel(ctx, () => polyPath(ctx, [
+    vec(ankle.x - 3, ankle.y - 1.5),
+    vec(ankle.x + 2.2, ankle.y - 2.2),
+    vec(sole.x + 6.5, sole.y - 1.6),
+    vec(sole.x + 6.8, sole.y),
+    vec(sole.x - 3.2, sole.y),
+  ]), t, { band: 1 });
+}
+
+function leg(ctx: CanvasRenderingContext2D, hip: V, knee: V, ankle: V, sole: V, far: boolean): void {
+  const plate = far ? STEEL_FAR : STEEL;
+  const under = far ? IRON_FAR : IRON;
+  limb(ctx, hip, knee, 4.3, 3.6, under);
+  // Cuisse plate over the front of the thigh
+  cel(ctx, () => capsulePath(ctx, lerpV(hip, knee, 0.15), lerpV(hip, knee, 0.85), 3.8, 3.1), plate, { band: 1.2 });
+  limb(ctx, knee, ankle, 3.4, 2.6, plate);
+  // Knee cop: steel poleyn with a gold rivet
+  cel(ctx, () => ellipsePath(ctx, vec(knee.x + 0.9, knee.y), 3, 2.5), plate, { band: 0.9 });
+  ctx.fillStyle = far ? GOLD.shade : GOLD.base;
+  ctx.fillRect(knee.x + 0.4, knee.y - 0.5, 1.1, 1.1);
+  sabaton(ctx, ankle, sole, plate);
+}
+
+function arm(ctx: CanvasRenderingContext2D, sh: V, el: V, hand: V, far: boolean): void {
+  const plate = far ? STEEL_FAR : STEEL;
+  const under = far ? IRON_FAR : IRON;
+  limb(ctx, sh, el, 3.4, 3, under);
+  limb(ctx, lerpV(sh, el, 0.35), el, 3.2, 2.9, plate);
+  limb(ctx, el, hand, 3, 2.6, plate);
+  cel(ctx, () => ellipsePath(ctx, el, 2.4, 2.4), under, { band: 0.7 });
+}
+
+function fist(ctx: CanvasRenderingContext2D, hand: V, far: boolean): void {
+  cel(ctx, () => ellipsePath(ctx, hand, 2.8, 2.6), far ? IRON_FAR : IRON, { band: 0.9 });
+  ctx.fillStyle = far ? STEEL_FAR.light : STEEL.light;
+  ctx.fillRect(hand.x - 1.6, hand.y - 1.8, 2.6, 0.9);
+}
+
+function pauldron(ctx: CanvasRenderingContext2D, sh: V, lean: number, far: boolean): void {
+  const plate = far ? STEEL_FAR : STEEL;
+  ctx.save();
+  ctx.translate(sh.x, sh.y);
+  ctx.rotate(lean * 0.6);
+  // Three layered lames, top one biggest.
+  for (let i = 2; i >= 0; i--) {
+    const y = i * 2.4;
+    cel(ctx, () => ellipsePath(ctx, vec(0.3, y), 5.6 - i * 0.7, 3.6 - i * 0.4), i === 0 ? plate : (far ? IRON_FAR : IRON), { band: 1 });
+  }
+  ctx.strokeStyle = GOLD.base;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.ellipse(0.3, 0, 5.2, 3.2, 0, Math.PI * 0.05, Math.PI * 0.95);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function cape(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+  const anchor = along(sk.neck, p.lean - 1.45, 4.2);
+  const chain = clothChain(vec(anchor.x, anchor.y + 1.5), 25, 6, p.flow, 1, t * Math.PI * 2);
+  const left: V[] = [];
+  const right: V[] = [];
+  chain.forEach((pt, i) => {
+    const k = i / (chain.length - 1);
+    const half = 3 + k * 4.5;
+    left.push(vec(pt.x - half * 0.9, pt.y));
+    right.push(vec(pt.x + half * 0.6, pt.y + k * 0.8));
+  });
+  const outline = [...left, ...right.reverse()];
+  cel(ctx, () => blobPath(ctx, outline), CRIMSON_IN, { band: 1.4 });
+  // Gold hem along the bottom
+  const a = left[left.length - 1];
+  const b = right[0];
+  ctx.strokeStyle = GOLD.shade;
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y - 0.8);
+  ctx.lineTo(b.x, b.y - 0.8);
+  ctx.stroke();
+}
+
+function tabard(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number, front: boolean): void {
+  const belt = along(sk.pelvis, p.lean, 1.5);
+  const sway = Math.sin(t * Math.PI * 2) * 0.6 - p.flow * 3;
+  if (front) {
+    const top = vec(belt.x + 3.2, belt.y);
+    const pts = [
+      vec(top.x - 3.4, top.y),
+      vec(top.x + 3.6, top.y),
+      vec(top.x + 3.8 + sway * 0.5, top.y + 13),
+      vec(top.x + 0.2 + sway, top.y + 15.5),
+      vec(top.x - 3.4 + sway * 0.7, top.y + 13.5),
+    ];
+    cel(ctx, () => polyPath(ctx, pts), CRIMSON, { band: 1.1 });
+    ctx.strokeStyle = GOLD.base;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(pts[2].x - 0.4, pts[2].y - 0.8);
+    ctx.lineTo(pts[3].x, pts[3].y - 1);
+    ctx.lineTo(pts[4].x + 0.4, pts[4].y - 0.8);
+    ctx.stroke();
+  } else {
+    const top = vec(belt.x - 3, belt.y);
+    cel(ctx, () => polyPath(ctx, [
+      vec(top.x - 3, top.y),
+      vec(top.x + 2.5, top.y),
+      vec(top.x + 2 + sway, top.y + 13),
+      vec(top.x - 3.8 + sway * 1.2, top.y + 12),
+    ]), CRIMSON_IN, { band: 1 });
+  }
+}
+
+function cuirass(ctx: CanvasRenderingContext2D, sk: Skeleton): void {
+  inBone(ctx, sk.neck, sk.pelvis, (len) => {
+    // Mail skirt under the plate
+    cel(ctx, () => polyPath(ctx, [
+      vec(-6.5, len - 5), vec(6.8, len - 5), vec(7.8, len + 3.2), vec(-7, len + 3.4),
+    ]), IRON, { band: 1 });
+    ctx.strokeStyle = IRON.shade;
+    ctx.lineWidth = 0.35;
+    for (let y = len - 3; y < len + 3; y += 1.3) {
+      ctx.beginPath();
+      ctx.moveTo(-6.5, y);
+      ctx.lineTo(7.3, y + 0.2);
+      ctx.stroke();
+    }
+    // Breastplate — pigeon chest, narrowing waist
+    const chest = [
+      vec(-6.8, 0.5), vec(0, -1), vec(7.2, 1.8), vec(9, 7.5),
+      vec(6.8, len - 3), vec(-5.6, len - 3), vec(-7.6, 7),
+    ];
+    cel(ctx, () => blobPath(ctx, chest), STEEL, { band: 1.8, hi: 0.8 });
+    // Central ridge highlight
+    ctx.strokeStyle = STEEL.light;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(4.2, 1.5);
+    ctx.quadraticCurveTo(6.6, 7, 4.4, len - 4);
+    ctx.stroke();
+    // Gold-trimmed fauld
+    cel(ctx, () => polyPath(ctx, [vec(-6, len - 4.2), vec(7.2, len - 4.2), vec(7.6, len - 1.8), vec(-6.2, len - 1.8)]), IRON, { band: 0.7 });
+    ctx.fillStyle = GOLD.base;
+    ctx.fillRect(-6, len - 4.4, 13.4, 0.8);
+    // Belt with buckle
+    cel(ctx, () => polyPath(ctx, [vec(-6.4, len - 1.8), vec(7.8, len - 1.8), vec(8, len + 0.6), vec(-6.6, len + 0.6)]), LEATHER, { band: 0.6 });
+    cel(ctx, () => polyPath(ctx, [vec(4, len - 2.3), vec(7, len - 2.3), vec(7, len + 1.1), vec(4, len + 1.1)]), GOLD, { band: 0.5 });
+    // Gorget
+    cel(ctx, () => ellipsePath(ctx, vec(0.8, -0.2), 5.2, 2.4), IRON, { band: 0.8 });
+    // Ember sigil on the chest
+    ctx.fillStyle = 'rgba(255,138,42,0.85)';
+    ctx.beginPath();
+    ctx.moveTo(5.2, 4.2);
+    ctx.quadraticCurveTo(6.6, 6.3, 5.4, 8.4);
+    ctx.quadraticCurveTo(4.3, 6.8, 5.2, 4.2);
+    ctx.fill();
+  });
+}
+
+function helm(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+  ctx.save();
+  ctx.translate(sk.head.x, sk.head.y);
+  ctx.rotate(sk.headAng);
+  // Plume streaming back from the crest
+  const sway = Math.sin(t * Math.PI * 2) * 0.8 + p.flow * 3;
+  const plume = [
+    vec(-1, -7.8), vec(2, -9.6), vec(-3, -10.4 - sway * 0.2), vec(-9 - sway, -8.5),
+    vec(-13 - sway * 1.4, -4 + sway * 0.3), vec(-9 - sway, -5.2), vec(-4, -6.2),
+  ];
+  cel(ctx, () => blobPath(ctx, plume), CRIMSON, { band: 1.2 });
+  // Helm shell
+  const shell = [
+    vec(-6.6, -1.5), vec(-5.4, -6.4), vec(0.2, -8.4), vec(5.6, -6.6),
+    vec(7.4, -1.6), vec(7.2, 4.6), vec(1.6, 7.6), vec(-5.4, 6.4),
+  ];
+  cel(ctx, () => blobPath(ctx, shell), STEEL, { band: 1.9, hi: 0.9 });
+  // Brow band
+  ctx.fillStyle = GOLD.base;
+  ctx.beginPath();
+  ctx.moveTo(-6.6, -2.8);
+  ctx.quadraticCurveTo(1, -4.4, 7.5, -2.9);
+  ctx.lineTo(7.4, -1.7);
+  ctx.quadraticCurveTo(1, -3.2, -6.6, -1.6);
+  ctx.closePath();
+  ctx.fill();
+  // T-visor slit
+  ctx.fillStyle = '#0c0a12';
+  ctx.fillRect(1.2, -0.9, 6.4, 1.7);
+  ctx.fillRect(4.1, -0.9, 1.5, 5.4);
+  // Ember glow in the slit
+  ctx.fillStyle = `rgba(255,${150 + Math.round(p.fx * 60)},60,${0.75 + p.fx * 0.25})`;
+  ctx.fillRect(3.2, -0.5, 3.4, 0.9);
+  // Breaths
+  ctx.fillStyle = IRON.shade;
+  for (let i = 0; i < 3; i++) ctx.fillRect(1.6 + i * 1.1, 3 + i * 0.3, 0.6, 0.6);
+  // Rivets
+  ctx.fillStyle = STEEL.light;
+  ctx.fillRect(-4.6, 1.8, 0.8, 0.8);
+  ctx.fillRect(-4.2, 4, 0.8, 0.8);
+  ctx.restore();
+}
+
+function sword(ctx: CanvasRenderingContext2D, hand: V, angle: number, fx: number): void {
+  ctx.save();
+  ctx.translate(hand.x, hand.y);
+  ctx.rotate(angle);
+  // Blade (points toward local −y)
+  const blade = [vec(-1.5, -2.2), vec(1.5, -2.2), vec(1.2, -BLADE_LEN + 4), vec(0, -BLADE_LEN), vec(-1.2, -BLADE_LEN + 4)];
+  cel(ctx, () => polyPath(ctx, blade), BLADE, { band: 0.8, hi: 0.5 });
+  ctx.strokeStyle = 'rgba(70,80,100,0.8)';
+  ctx.lineWidth = 0.45;
+  ctx.beginPath();
+  ctx.moveTo(0, -3);
+  ctx.lineTo(0, -BLADE_LEN + 5);
+  ctx.stroke();
+  if (fx > 0.05) {
+    ctx.fillStyle = `rgba(255,170,80,${fx * 0.55})`;
+    ctx.beginPath();
+    polyPath(ctx, blade);
+    ctx.fill();
+  }
+  // Crossguard with down-swept quillons
+  cel(ctx, () => polyPath(ctx, [
+    vec(-4.8, -1.2), vec(-3.8, -2.6), vec(3.8, -2.6), vec(4.8, -1.2), vec(3.8, -0.6), vec(-3.8, -0.6),
+  ]), GOLD, { band: 0.5 });
+  // Grip + pommel
+  cel(ctx, () => capsulePath(ctx, vec(0, -0.6), vec(0, 3.6), 0.95, 0.95), LEATHER, { band: 0.4 });
+  cel(ctx, () => ellipsePath(ctx, vec(0, 4.6), 1.5, 1.5), GOLD, { band: 0.5 });
+  ctx.fillStyle = '#ff7a26';
+  ctx.fillRect(-0.5, 4.1, 1, 1);
+  ctx.restore();
+}
+
+function shield(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose): void {
+  const c = vec(sk.handF.x + 2.2, sk.handF.y + 1.2);
+  ctx.save();
+  ctx.translate(c.x, c.y);
+  ctx.rotate(p.off);
+  ctx.scale(0.82, 1); // turned three-quarters toward the viewer
+  const outline = [
+    vec(-6.8, -8.6), vec(0, -9.8), vec(6.8, -8.6), vec(6.6, 0.5), vec(3.6, 6.6), vec(0, 10.2), vec(-3.6, 6.6), vec(-6.6, 0.5),
+  ];
+  cel(ctx, () => blobPath(ctx, outline), GOLD, { band: 1.1 });
+  const inner = outline.map(pt => vec(pt.x * 0.8, pt.y * 0.82 + 0.1));
+  cel(ctx, () => blobPath(ctx, inner), CRIMSON, { band: 1.5 });
+  // Flame emblem
+  ctx.fillStyle = GOLD.base;
+  ctx.beginPath();
+  ctx.moveTo(0, -5.4);
+  ctx.quadraticCurveTo(3.4, -1.2, 2.4, 2.4);
+  ctx.quadraticCurveTo(1.6, 4.8, 0, 5.6);
+  ctx.quadraticCurveTo(-1.6, 4.8, -2.4, 2.4);
+  ctx.quadraticCurveTo(-2.8, -0.4, -1, -2.2);
+  ctx.quadraticCurveTo(-0.6, 0.4, 0.4, 0.8);
+  ctx.quadraticCurveTo(1.4, -2, 0, -5.4);
+  ctx.fill();
+  ctx.fillStyle = '#ffcf6b';
+  ctx.beginPath();
+  ctx.ellipse(0.2, 2.8, 1, 1.7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Top highlight
+  ctx.strokeStyle = 'rgba(255,240,210,0.45)';
+  ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(-5.6, -7.6);
+  ctx.quadraticCurveTo(0, -8.8, 5.6, -7.6);
+  ctx.stroke();
+  ctx.restore();
+}
+
+const WARRIOR_SKIN: HumanSkin = {
+  prop: {
+    thigh: 12.5, shin: 12, upperArm: 10, foreArm: 9.5,
+    torso: 16.5, neck: 7.2, ankle: 2.6,
+    hipN: vec(2.2, 0), hipF: vec(-2.6, -0.4),
+    shN: vec(1.6, 4), shF: vec(-4.6, 3),
+  },
+  back(ctx, sk, p, t) {
+    cape(ctx, sk, p, t);
+    tabard(ctx, sk, p, t, false);
+  },
+  armFar(ctx, sk, p) {
+    pauldron(ctx, sk.shF, p.lean, true);
+    arm(ctx, sk.shF, sk.elF, sk.handF, true);
+    fist(ctx, sk.handF, true);
+  },
+  legFar(ctx, sk) {
+    leg(ctx, sk.hipF, sk.kneeF, sk.footF, sk.soleF, true);
+  },
+  legNear(ctx, sk) {
+    leg(ctx, sk.hipN, sk.kneeN, sk.footN, sk.soleN, false);
+  },
+  torso(ctx, sk, p, t) {
+    cuirass(ctx, sk);
+    tabard(ctx, sk, p, t, true);
+  },
+  head(ctx, sk, p, t) {
+    helm(ctx, sk, p, t);
+  },
+  offFront(ctx, sk, p) {
+    shield(ctx, sk, p);
+  },
+  armNear(ctx, sk, p) {
+    arm(ctx, sk.shN, sk.elN, sk.handN, false);
+    pauldron(ctx, sk.shN, p.lean, false);
+  },
+  weapon(ctx, sk, p) {
+    sword(ctx, sk.handN, p.wpn, p.fx);
+    fist(ctx, sk.handN, false);
+  },
+};
+
+// ── Animation ───────────────────────────────────────────────────────────
+
+const READY: HumanPose = basePose({
+  root: vec(CENTER_X - 1, 64.6),
+  lean: 0.07,
+  head: -0.05,
+  footN: vec(CENTER_X + 6, GROUND_Y),
+  footF: vec(CENTER_X - 6.5, GROUND_Y),
+  handN: vec(CENTER_X + 7.5, 64.5),
+  handF: vec(CENTER_X + 3.5, 58),
+  wpn: 1.95,
+  off: 0.08,
+  flow: 0.12,
+});
+
+function pose(over: Partial<HumanPose>): HumanPose {
+  return { ...READY, ...over };
+}
+
+const HIT = pose({
+  root: vec(CENTER_X - 3.5, 65.8), lean: -0.34, head: -0.38,
+  footN: vec(CENTER_X + 6.5, GROUND_Y), footF: vec(CENTER_X - 8, GROUND_Y),
+  handN: vec(CENTER_X + 2, 62), wpn: 1.2, handF: vec(CENTER_X, 55), off: -0.25,
+  flow: 0.45, stretch: -0.04,
+});
+
+const ATTACK: Key<HumanPose>[] = [
+  { at: 0, pose: READY },
+  { at: 0.28, ease: 'out', pose: pose({
+    root: vec(CENTER_X - 3, 66.6), lean: -0.24, head: 0.04,
+    footN: vec(CENTER_X + 8.5, GROUND_Y), footF: vec(CENTER_X - 8, GROUND_Y),
+    handN: vec(CENTER_X - 5, 39.5), wpn: -0.9, handF: vec(CENTER_X + 6, 57), off: -0.12,
+    flow: 0.25, stretch: 0.035,
+  }) },
+  { at: 0.43, ease: 'in', pose: pose({
+    root: vec(CENTER_X + 0.5, 66.8), lean: 0.1, head: 0.05,
+    footN: vec(CENTER_X + 10.5, GROUND_Y), footF: vec(CENTER_X - 8, GROUND_Y),
+    handN: vec(CENTER_X + 8, 40.5), wpn: 0.75, handF: vec(CENTER_X + 2, 58),
+    flow: 0.35, fx: 0.7, stretch: 0.02,
+  }) },
+  { at: 0.571, ease: 'linear', pose: pose({
+    root: vec(CENTER_X + 4, 68), lean: 0.4, head: 0.1,
+    footN: vec(CENTER_X + 13, GROUND_Y), footF: vec(CENTER_X - 7.5, GROUND_Y),
+    handN: vec(CENTER_X + 17, 63), wpn: 2.25, handF: vec(CENTER_X - 1.5, 61), off: 0.2,
+    flow: 0.55, fx: 1, stretch: -0.035,
+  }) },
+  { at: 0.71, ease: 'out', pose: pose({
+    root: vec(CENTER_X + 3.5, 68.4), lean: 0.44, head: 0.08,
+    footN: vec(CENTER_X + 13, GROUND_Y), footF: vec(CENTER_X - 7.5, GROUND_Y),
+    handN: vec(CENTER_X + 13, 70), wpn: 2.5, handF: vec(CENTER_X, 61.5),
+    flow: 0.45, fx: 0.35,
+  }) },
+  { at: 0.86, pose: pose({
+    root: vec(CENTER_X + 1, 66.6), lean: 0.22, handN: vec(CENTER_X + 10, 66.5), wpn: 2.25,
+    footN: vec(CENTER_X + 8, GROUND_Y), flow: 0.25,
+  }) },
+  { at: 1, pose: READY },
+];
+
+const CAST: Key<HumanPose>[] = [
+  { at: 0, pose: READY },
+  { at: 0.36, ease: 'out', pose: pose({
+    root: vec(CENTER_X - 1, 67.4), lean: -0.06, head: -0.2,
+    footN: vec(CENTER_X + 7.5, GROUND_Y), footF: vec(CENTER_X - 7.5, GROUND_Y),
+    handN: vec(CENTER_X + 5, 42), wpn: 0.12, handF: vec(CENTER_X - 7, 57), off: -0.35,
+    flow: 0.18, fx: 0.9, stretch: 0.04,
+  }) },
+  { at: 0.5, ease: 'in', pose: pose({
+    root: vec(CENTER_X + 2.5, 67), lean: 0.3, head: 0.05,
+    footN: vec(CENTER_X + 11, GROUND_Y), footF: vec(CENTER_X - 7, GROUND_Y),
+    handN: vec(CENTER_X + 17, 52), wpn: 1.45, handF: vec(CENTER_X - 5, 59),
+    flow: 0.5, fx: 1,
+  }) },
+  { at: 0.72, pose: pose({
+    root: vec(CENTER_X + 2, 67), lean: 0.24, handN: vec(CENTER_X + 15, 54), wpn: 1.55,
+    footN: vec(CENTER_X + 11, GROUND_Y), footF: vec(CENTER_X - 7, GROUND_Y), handF: vec(CENTER_X - 4, 59),
+    flow: 0.3, fx: 0.5,
+  }) },
+  { at: 1, pose: READY },
+];
+
+const HURT: Key<HumanPose>[] = [
+  { at: 0, pose: HIT },
+  { at: 0.33, pose: pose({ ...HIT, root: vec(CENTER_X - 4, 67.2), lean: -0.26, head: -0.22, flow: 0.35 }) },
+  { at: 1, pose: READY },
+];
+
+const TUCK = (x: number, y: number, spin: number): HumanPose => pose({
+  root: vec(x, y), spin, pivot: 0.5, lean: 0.7, head: 0.5,
+  footN: vec(x + 6, y + 10), footF: vec(x + 3, y + 11),
+  handN: vec(x + 7, y - 1), wpn: 2.6, handF: vec(x + 6, y - 5), off: 0.6,
+  flow: 0.75, stretch: -0.08,
+});
+
+const DODGE: Key<HumanPose>[] = [
+  { at: 0, pose: pose({
+    root: vec(CENTER_X, 72), pivot: 0.5, lean: 0.55, head: 0.25,
+    footN: vec(CENTER_X + 8, GROUND_Y), footF: vec(CENTER_X - 6, GROUND_Y),
+    handN: vec(CENTER_X + 9, 69), wpn: 2.4, handF: vec(CENTER_X + 8, 63), off: 0.3, flow: 0.35,
+  }) },
+  { at: 0.2, pose: TUCK(CENTER_X - 1, 73, 1.3) },
+  { at: 0.4, ease: 'linear', pose: TUCK(CENTER_X, 71, 2.9) },
+  { at: 0.6, ease: 'linear', pose: TUCK(CENTER_X + 0.5, 72, 4.5) },
+  { at: 0.8, pose: pose({
+    root: vec(CENTER_X + 2, 71), spin: 6.0, pivot: 0.5, lean: 0.4, head: 0.1,
+    footN: vec(CENTER_X + 9, GROUND_Y), footF: vec(CENTER_X - 4, GROUND_Y),
+    handN: vec(CENTER_X + 10, 67), wpn: 2.2, handF: vec(CENTER_X + 7, 61), flow: 0.45,
+  }) },
+  { at: 1, pose: { ...READY, spin: Math.PI * 2, pivot: 0.5 } },
+];
+
+const DEATH: Key<HumanPose>[] = [
+  { at: 0, pose: HIT },
+  { at: 0.2, pose: pose({ ...HIT, root: vec(CENTER_X - 5, 68), lean: -0.42, head: -0.45, handN: vec(CENTER_X - 1, 64), wpn: 1.8 }) },
+  { at: 0.45, pose: pose({
+    root: vec(CENTER_X - 3, 76.5), lean: 0.2, head: 0.4,
+    footN: vec(CENTER_X + 5, GROUND_Y), footF: vec(CENTER_X - 7, GROUND_Y),
+    handN: vec(CENTER_X + 3, 80), wpn: 2.7, handF: vec(CENTER_X - 1, 74), off: 0.4, flow: 0.2,
+  }) },
+  { at: 0.7, ease: 'in', pose: pose({
+    root: vec(CENTER_X - 3, 82), spin: -0.95, lean: -0.1, head: -0.3,
+    footN: vec(CENTER_X + 2, 104), footF: vec(CENTER_X - 3, 103),
+    handN: vec(CENTER_X + 4, 76), wpn: 2.6, handF: vec(CENTER_X - 2, 74), flow: 0.6,
+  }) },
+  { at: 1, ease: 'out', pose: pose({
+    root: vec(CENTER_X - 1, 86.5), spin: -1.52, lean: 0, head: -0.25,
+    footN: vec(CENTER_X + 1, 111), footF: vec(CENTER_X - 1.5, 110.5),
+    handN: vec(CENTER_X + 4, 80), wpn: 3.1, handF: vec(CENTER_X - 2, 78), off: 0.9, flow: 0.05,
+  }) },
+];
+
+function idlePose(t: number): HumanPose {
+  const ph = t * Math.PI * 2;
+  const b = Math.sin(ph);
+  return pose({
+    root: vec(READY.root.x, READY.root.y + b * 0.55),
+    stretch: b * -0.012,
+    head: READY.head + Math.sin(ph - 0.6) * 0.03,
+    handN: vec(READY.handN.x, READY.handN.y + b * 0.45),
+    handF: vec(READY.handF.x, READY.handF.y + Math.sin(ph - 0.5) * 0.55),
+    wpn: READY.wpn + Math.sin(ph - 0.3) * 0.03,
+    flow: 0.12 + Math.sin(ph) * 0.05,
+  });
+}
+
+function walkPose(t: number): HumanPose {
+  const g = gait(t, { stride: 7, lift: 4.2, bob: 1.4, rootY: 64.9, footSpread: 1.2 });
+  const ph = t * Math.PI * 2;
+  return pose({
+    root: vec(CENTER_X, g.rootY),
+    lean: 0.11,
+    head: -0.06,
+    footN: g.footN,
+    footF: g.footF,
+    handN: vec(CENTER_X + 6.5 - g.swing * 3.2, 64.5 + Math.abs(g.swing) * 0.6),
+    wpn: 1.95 - g.swing * 0.12,
+    handF: vec(CENTER_X + 3.5 + g.swing * 1.8, 58 - Math.abs(Math.sin(ph)) * 0.8),
+    flow: 0.38 + Math.sin(ph * 2) * 0.08,
+    stretch: Math.abs(Math.sin(ph)) * 0.015,
+  });
+}
+
+function warriorPose(act: PlayerAction, t: number): HumanPose {
+  switch (act) {
+    case 'idle': return idlePose(t);
+    case 'walk': return walkPose(t);
+    case 'attack': return samplePoseTrack(ATTACK, t);
+    case 'cast': return samplePoseTrack(CAST, t);
+    case 'hurt': return samplePoseTrack(HURT, t);
+    case 'dodge': return samplePoseTrack(DODGE, t);
+    case 'death': return samplePoseTrack(DEATH, t);
+  }
+}
+
+function swordTip(p: HumanPose): { tip: V; base: V } {
+  const sk = solveSkeleton(p, WARRIOR_SKIN.prop);
+  const hand = spun(p, sk.handN, sk);
+  const ang = p.wpn + p.spin;
+  return { tip: along(hand, ang, BLADE_LEN), base: along(hand, ang, 5) };
+}
+
+function drawFx(ctx: CanvasRenderingContext2D, act: PlayerAction, t: number, p: HumanPose): void {
+  const track = act === 'attack' ? ATTACK : act === 'cast' ? CAST : null;
+  if (track && p.fx > 0.3) {
+    const tips: V[] = [];
+    const bases: V[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const sp = samplePoseTrack(track, Math.max(0, t - i * 0.022));
+      const { tip, base } = swordTip(sp);
+      tips.push(tip);
+      bases.push(base);
+    }
+    smear(ctx, tips, bases, act === 'cast' ? EMBER : 0xdfe8ff, 0.55 * p.fx);
+  }
+  if (act === 'cast' && p.fx > 0.05) {
+    const { tip, base } = swordTip(p);
+    glow(ctx, lerpV(base, tip, 0.55), 11 * p.fx, EMBER, 0.55 * p.fx);
+    glow(ctx, tip, 6 * p.fx, 0xffd08a, 0.8 * p.fx);
+    // Embers spiralling up the blade
+    for (let i = 0; i < 6; i++) {
+      const k = (i / 6 + t * 1.7) % 1;
+      const pt = lerpV(base, tip, k);
+      glow(ctx, vec(pt.x + Math.sin(i * 2.1 + t * 9) * 2.6, pt.y - k * 2), 1.6, 0xffb060, 0.9 * p.fx);
+    }
+  }
+  // Visor ember
+  const sk = solveSkeleton(p, WARRIOR_SKIN.prop);
+  const visor = spun(p, along(sk.head, sk.headAng + Math.PI / 2, 4.4), sk);
+  if (act !== 'death' || t < 0.6) glow(ctx, vec(visor.x, visor.y - 0.2), 3.2, EMBER, 0.45 + p.fx * 0.3);
+}
 
 export const PlayerWarriorDrawer: EntityDrawer = {
   key: 'player_warrior',
@@ -25,471 +588,20 @@ export const PlayerWarriorDrawer: EntityDrawer = {
   frameH: 96,
   totalFrames: PLAYER_TOTAL_FRAMES,
 
-  drawFrame(ctx, frame, action, w, h, utils) {
+  drawFrame(ctx, frame, action, w, h) {
     const act = action as PlayerAction;
-    const s = h / 96;
-
     const count = PLAYER_ACTION_FRAME_COUNTS[act];
-    const localFrame = frame % count;
-    const t = count > 1 ? localFrame / (count - 1) : 0;
-    const phase = (localFrame / count) * Math.PI * 2;
-
-    let alpha = 1;
-    let bodyOffsetY = 0;
-    let globalRotation = 0;
-    let swordSwing = 0;
-    let shieldRaise = 0;
-    let lunge = 0;
-    let castGlow = 0;
-    let crouch = 0;
-    let stance = 0;
-    let motionEnergy = 0;
-
-    switch (act) {
-      case 'idle':
-        // Slow armored breathing with a guarded weight shift.
-        bodyOffsetY = Math.sin(phase) * 0.9 * s;
-        shieldRaise = 0.08 + Math.sin(phase - 0.5) * 0.05;
-        lunge = Math.sin(phase * 0.5) * 0.035;
-        stance = 0.12;
-        break;
-      case 'walk':
-        // Deliberate heel-to-toe march, heavy without feeling rigid.
-        bodyOffsetY = -walkBob(phase) * 2.2 * s;
-        lunge = 0.12 + Math.sin(phase * 2) * 0.05;
-        shieldRaise = 0.12 + Math.max(0, Math.sin(phase)) * 0.08;
-        globalRotation = Math.sin(phase) * 0.018;
-        stance = 0.08;
-        break;
-      case 'attack':
-        // Readable five-beat overhead strike: guard, windup, snap, follow, recover.
-        swordSwing = samplePose(t, [
-          { at: 0, value: 0.08 },
-          { at: 0.24, value: 0 },
-          { at: 0.56, value: 1 },
-          { at: 0.76, value: 1.08 },
-          { at: 1, value: 0.18 },
-        ]);
-        lunge = samplePose(t, [
-          { at: 0, value: 0 },
-          { at: 0.24, value: -0.18 },
-          { at: 0.58, value: 0.78 },
-          { at: 0.8, value: 0.42 },
-          { at: 1, value: 0 },
-        ]);
-        bodyOffsetY = samplePose(t, [
-          { at: 0, value: 0 },
-          { at: 0.24, value: 2 * s },
-          { at: 0.58, value: -3.5 * s },
-          { at: 1, value: 0 },
-        ]);
-        shieldRaise = samplePose(t, [
-          { at: 0, value: 0.15 },
-          { at: 0.3, value: 0.55 },
-          { at: 0.62, value: 0.1 },
-          { at: 1, value: 0.15 },
-        ]);
-        stance = 0.18 + sinePulse(t) * 0.2;
-        motionEnergy = sinePulse(Math.max(0, (t - 0.28) / 0.58));
-        break;
-      case 'hurt':
-        // Impact compression followed by a quick recovery behind the shield.
-        crouch = sinePulse(t);
-        bodyOffsetY = crouch * 4.5 * s;
-        shieldRaise = 0.35 + crouch * 0.65;
-        lunge = -crouch * 0.28;
-        globalRotation = -crouch * 0.045;
-        alpha = 0.72 + smoothstep(t) * 0.28;
-        stance = 0.3;
-        break;
-      case 'dodge':
-        // Low shield-first shoulder roll silhouette.
-        crouch = sinePulse(t);
-        bodyOffsetY = crouch * 7.5 * s;
-        lunge = samplePose(t, [
-          { at: 0, value: -0.08 },
-          { at: 0.4, value: 0.75 },
-          { at: 0.72, value: 0.5 },
-          { at: 1, value: 0 },
-        ]);
-        shieldRaise = 0.62 + crouch * 0.38;
-        swordSwing = 0.16 - crouch * 0.08;
-        globalRotation = crouch * 0.1;
-        stance = 0.34 - crouch * 0.12;
-        motionEnergy = crouch * 0.55;
-        alpha = 1 - crouch * 0.12;
-        break;
-      case 'death':
-        globalRotation = smoothstep(t) * Math.PI * 0.5;
-        bodyOffsetY = smoothstep(t) * h * 0.4;
-        shieldRaise = Math.max(0, 1 - t * 2) * 0.4;
-        swordSwing = samplePose(t, [
-          { at: 0, value: 0.1 },
-          { at: 0.4, value: 0.55 },
-          { at: 1, value: 0.85 },
-        ]);
-        alpha = 1 - smoothstep(t) * 0.82;
-        break;
-      case 'cast':
-        // Emberheart charge travels from shield to blade, then releases.
-        castGlow = samplePose(t, [
-          { at: 0, value: 0 },
-          { at: 0.4, value: 0.62 },
-          { at: 0.68, value: 1 },
-          { at: 1, value: 0.12 },
-        ]);
-        shieldRaise = samplePose(t, [
-          { at: 0, value: 0.35 },
-          { at: 0.42, value: 0.9 },
-          { at: 0.72, value: 0.55 },
-          { at: 1, value: 0.2 },
-        ]);
-        swordSwing = samplePose(t, [
-          { at: 0, value: 0.08 },
-          { at: 0.48, value: 0.28 },
-          { at: 0.72, value: 0.52 },
-          { at: 1, value: 0.12 },
-        ]);
-        bodyOffsetY = -sinePulse(t) * 2 * s;
-        crouch = sinePulse(Math.min(1, t * 1.5)) * 0.18;
-        motionEnergy = castGlow * 0.35;
-        break;
-    }
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    const cx = w / 2;
-    const baseY = h * 0.95;
-
-    ctx.translate(cx, baseY + bodyOffsetY);
-    ctx.rotate(globalRotation);
-    ctx.translate(-cx, -(baseY + bodyOffsetY));
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    utils.fillEllipse(
-      ctx,
-      cx - lunge * 1.5 * s,
-      baseY + 1 * s,
-      (16 + stance * 5) * s,
-      Math.max(2.2, 3.5 - crouch) * s,
+    const loop = act === 'idle' || act === 'walk';
+    const t = frameTime(frame % count, count, loop);
+    const p = warriorPose(act, t);
+    const palette = getCurrentZonePalette();
+    const lift = Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y));
+    renderRigFrame(
+      ctx, w, h,
+      c => { drawHumanoid(c, p, WARRIOR_SKIN, t); },
+      { glowColor: palette.playerOutlineColor, glowBlur: standardOutlineBlur(w, h), scale: WARRIOR_SCALE },
+      c => groundShadow(c, p.root.x + 1, 15, lift),
+      c => drawFx(c, act, t, p),
     );
-
-    if (motionEnergy > 0.12) {
-      ctx.save();
-      ctx.globalAlpha = alpha * motionEnergy * 0.34;
-      ctx.strokeStyle = castGlow > 0 ? '#ff9d45' : '#d8e0ef';
-      ctx.lineWidth = (2.5 + motionEnergy * 2) * s;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.arc(cx + 7 * s, baseY - 45 * s, 21 * s, -Math.PI * 0.9, Math.PI * 0.32);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // ── Legs / Greaves ─────────────────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const legPhase = act === 'walk' ? phase + (side === -1 ? 0 : Math.PI) : 0;
-      const stride = act === 'walk' ? walkStride(legPhase) : { swing: 0, lift: 0 };
-      const hipX = cx + side * (9 + stance * 3) * s + lunge * 2 * s;
-      const hipY = baseY - 28 * s + bodyOffsetY + crouch * 2 * s;
-      // Knee leads the foot while it's lifted; planted foot slides back.
-      const kneeX = hipX + side * (1 + stance) * s + stride.swing * 3.5 * s + stride.lift * 2 * s;
-      const kneeY = hipY + (13 - crouch * 2 - stride.lift * 2.5) * s;
-      const footX = hipX + side * (2 + stance * 1.4) * s + stride.swing * 5 * s;
-      const footY = baseY - 2 * s - stride.lift * 4 * s;
-
-      utils.drawLimb(ctx, [
-        { x: hipX, y: hipY },
-        { x: kneeX, y: kneeY },
-        { x: footX, y: footY },
-      ], 7 * s, ARMOR_DARK);
-
-      // Greave plate
-      utils.drawMetalSurface(ctx, footX - 5.5 * s, footY - 11 * s, 11 * s, 11 * s, ARMOR_LIGHT);
-      // Boot
-      utils.drawMetalSurface(ctx, footX - 6 * s, footY - 2 * s, 12 * s, 5 * s, ARMOR_BASE);
-      // Boot toe cap highlight
-      ctx.fillStyle = utils.rgb(ARMOR_LIGHT, 0.5);
-      ctx.fillRect(footX + 3 * s, footY - 2 * s, 3 * s, 2.5 * s);
-    }
-
-    // ── Torso (STOCKY, WIDE) ────────────────────────────────────────────
-    const torsoX = cx + lunge * 6 * s;
-    const torsoY = baseY - 52 * s + bodyOffsetY + crouch * 2.5 * s;
-
-    // Body armor (plate chest) — wide, beefy
-    utils.drawMetalSurface(ctx, torsoX - 16 * s, torsoY - 14 * s, 32 * s, 30 * s, ARMOR_BASE);
-    // Volume gradient for chest depth
-    utils.volumeGradient(ctx, torsoX - 16 * s, torsoY - 14 * s, 32 * s, 30 * s,
-      'rgba(42,53,66,0)', 'rgba(0,0,0,0.3)', 'rgba(255,255,255,0.08)');
-    // Chest highlight plate
-    utils.drawMetalSurface(ctx, torsoX - 12 * s, torsoY - 12 * s, 24 * s, 18 * s, ARMOR_LIGHT);
-    // Chest center crease
-    ctx.strokeStyle = utils.rgb(ARMOR_DARK, 0.6);
-    ctx.lineWidth = 1 * s;
-    ctx.beginPath();
-    ctx.moveTo(torsoX, torsoY - 12 * s);
-    ctx.lineTo(torsoX, torsoY + 6 * s);
-    ctx.stroke();
-    // Pectoral lines
-    ctx.strokeStyle = utils.rgb(ARMOR_DARK, 0.3);
-    ctx.lineWidth = 0.8 * s;
-    ctx.beginPath();
-    ctx.moveTo(torsoX - 10 * s, torsoY - 4 * s);
-    ctx.quadraticCurveTo(torsoX, torsoY - 1 * s, torsoX + 10 * s, torsoY - 4 * s);
-    ctx.stroke();
-    // Pauldron left (large, imposing)
-    utils.drawMetalSurface(ctx, torsoX - 22 * s, torsoY - 16 * s, 12 * s, 10 * s, ARMOR_LIGHT);
-    // Pauldron right
-    utils.drawMetalSurface(ctx, torsoX + 10 * s, torsoY - 16 * s, 12 * s, 10 * s, ARMOR_LIGHT);
-    // Pauldron rivets
-    ctx.fillStyle = utils.rgb(ARMOR_DARK, 0.6);
-    for (const px of [torsoX - 20 * s, torsoX - 16 * s, torsoX + 12 * s, torsoX + 16 * s]) {
-      utils.fillCircle(ctx, px, torsoY - 14 * s, 1 * s);
-    }
-    // Chain mail cross-hatch at shoulder joints
-    ctx.strokeStyle = utils.rgb(ARMOR_DARK, 0.35);
-    ctx.lineWidth = 0.5 * s;
-    for (const sx of [torsoX - 17 * s, torsoX + 14 * s]) {
-      for (let i = 0; i < 5; i++) {
-        ctx.beginPath();
-        ctx.moveTo(sx + i * 1.5 * s, torsoY - 12 * s);
-        ctx.lineTo(sx + i * 1.5 * s, torsoY - 7 * s);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(sx, torsoY - 12 * s + i * 1.5 * s);
-        ctx.lineTo(sx + 6 * s, torsoY - 12 * s + i * 1.5 * s);
-        ctx.stroke();
-      }
-    }
-    // Belt / waist armor
-    utils.drawMetalSurface(ctx, torsoX - 14 * s, torsoY + 14 * s, 28 * s, 6 * s, ARMOR_DARK);
-    ctx.fillStyle = utils.rgb(GUARD_COLOR);
-    ctx.fillRect(torsoX - 2.5 * s, torsoY + 14 * s, 5 * s, 6 * s);
-
-    // ── Arms (THICK, armored) ───────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const isRight = side === 1;
-      // Arms counter-swing against the same-side leg.
-      const armPhase = act === 'walk' ? phase + (isRight ? 0 : Math.PI) : 0;
-      const shoulderX = torsoX + side * 16 * s;
-      const shoulderY = torsoY - 10 * s;
-
-      let elbowX: number, elbowY: number, handX: number, handY: number;
-
-      if (isRight && act === 'attack') {
-        const swing = swordSwing * Math.PI * 0.75;
-        const armLen1 = 12 * s;
-        const armLen2 = 10 * s;
-        const baseAngle = -Math.PI * 0.6 + swing;
-        elbowX = shoulderX + Math.cos(baseAngle) * armLen1;
-        elbowY = shoulderY + Math.sin(baseAngle) * armLen1;
-        // Elbow bent on the wind-up, arm locks straight through contact.
-        const foreAngle = baseAngle + Math.PI * 0.3 * (1 - Math.min(1, swordSwing));
-        handX = elbowX + Math.cos(foreAngle) * armLen2;
-        handY = elbowY + Math.sin(foreAngle) * armLen2;
-      } else if (
-        !isRight
-        && (
-          act === 'hurt'
-          || act === 'cast'
-          || act === 'dodge'
-          || (act === 'attack' && shieldRaise > 0.2)
-        )
-      ) {
-        const raiseAmt = shieldRaise * 10 * s;
-        elbowX = shoulderX - 6 * s;
-        elbowY = shoulderY + 6 * s - raiseAmt;
-        handX = elbowX + 2 * s;
-        handY = elbowY + 6 * s - raiseAmt * 0.5;
-      } else {
-        elbowX = shoulderX + side * 4 * s + Math.sin(armPhase) * 3 * s;
-        elbowY = shoulderY + 10 * s;
-        handX = elbowX + side * 3 * s + Math.sin(armPhase) * 3.5 * s;
-        handY = elbowY + 10 * s - Math.abs(Math.sin(armPhase)) * 1.5 * s;
-      }
-
-      // Upper arm plate — thicker
-      utils.drawLimb(ctx, [
-        { x: shoulderX, y: shoulderY },
-        { x: elbowX, y: elbowY },
-        { x: handX, y: handY },
-      ], 7 * s, ARMOR_BASE);
-      // Elbow joint
-      ctx.fillStyle = utils.rgb(ARMOR_DARK, 0.6);
-      utils.fillCircle(ctx, elbowX, elbowY, 4 * s);
-
-      // Gauntlet — bigger
-      utils.drawMetalSurface(ctx, handX - 4 * s, handY - 4 * s, 8 * s, 8 * s, ARMOR_LIGHT);
-
-      // ── Kite Shield (left arm) ─────────────────────────────────────────
-      if (!isRight) {
-        const shX = handX - 1 * s;
-        const shY = handY - 8 * s;
-        // Pentagon shape
-        ctx.fillStyle = utils.rgb(SHIELD_BASE);
-        ctx.beginPath();
-        ctx.moveTo(shX, shY - 10 * s);                        // top
-        ctx.lineTo(shX + 8 * s, shY - 10 * s);                // top-right
-        ctx.lineTo(shX + 10 * s, shY - 2 * s);               // right
-        ctx.lineTo(shX + 5 * s, shY + 6 * s);                // bottom-right point
-        ctx.lineTo(shX - 2 * s, shY + 6 * s);                // bottom-left point
-        ctx.lineTo(shX - 4 * s, shY - 2 * s);                // left
-        ctx.closePath();
-        ctx.fill();
-        // Shield dark bevel
-        ctx.strokeStyle = utils.rgb(SHIELD_DARK, 0.8);
-        ctx.lineWidth = 1.2 * s;
-        ctx.stroke();
-        // Trim
-        ctx.fillStyle = utils.rgb(SHIELD_TRIM, 0.6);
-        ctx.beginPath();
-        ctx.moveTo(shX + 1 * s, shY - 8 * s);
-        ctx.lineTo(shX + 7 * s, shY - 8 * s);
-        ctx.lineTo(shX + 9 * s, shY - 2 * s);
-        ctx.lineTo(shX + 4.5 * s, shY + 4 * s);
-        ctx.lineTo(shX - 1 * s, shY + 4 * s);
-        ctx.lineTo(shX - 3 * s, shY - 2 * s);
-        ctx.closePath();
-        ctx.lineWidth = 0.5 * s;
-        ctx.strokeStyle = utils.rgb(SHIELD_TRIM, 0.5);
-        ctx.stroke();
-        // Emblem: cross
-        const crossX = shX + 3 * s;
-        const crossY = shY - 3 * s;
-        ctx.fillStyle = utils.rgb(SHIELD_DARK, 0.7);
-        ctx.fillRect(crossX - 0.5 * s, crossY - 4 * s, 2 * s, 8 * s);
-        ctx.fillRect(crossX - 3 * s, crossY - 0.5 * s, 7 * s, 2 * s);
-        // Shield highlight
-        ctx.fillStyle = 'rgba(255,255,255,0.10)';
-        utils.fillEllipse(ctx, shX + 2 * s, shY - 5 * s, 3 * s, 3 * s);
-      }
-
-      // ── Longsword (right hand) ─────────────────────────────────────────
-      if (isRight) {
-        const swX = handX + side * 2 * s;
-        const swY = handY;
-        // Blade extends in the swing direction
-        // During swings the blade extends the forearm line: straight up at
-        // the top of the wind-up, forward-down at contact.
-        const bladeAngle = act === 'attack'
-          ? -Math.PI * 0.5 + swordSwing * Math.PI * 0.75
-          : act === 'cast' || act === 'dodge'
-            ? -Math.PI * 0.6 + swordSwing * Math.PI * 0.75 - Math.PI * 0.5
-            : -Math.PI * 0.5;
-        const bladeLen = 22 * s;
-        const tipX = swX + Math.cos(bladeAngle) * bladeLen;
-        const tipY = swY + Math.sin(bladeAngle) * bladeLen;
-
-        // Blade glow for cast
-        if (castGlow > 0) {
-          ctx.save();
-          ctx.globalAlpha = castGlow * 0.5;
-          ctx.strokeStyle = '#8a5ac0';
-          ctx.lineWidth = 6 * s;
-          ctx.lineCap = 'round';
-          ctx.beginPath();
-          ctx.moveTo(swX, swY);
-          ctx.lineTo(tipX, tipY);
-          ctx.stroke();
-          ctx.globalAlpha = alpha;
-          ctx.restore();
-        }
-
-        // Soft metallic glow on sword
-        utils.zonePlayerOutline(ctx, w, h);
-
-        // Blade
-        ctx.strokeStyle = utils.rgb(BLADE_COLOR);
-        ctx.lineWidth = 2.5 * s;
-        ctx.lineCap = 'butt';
-        ctx.beginPath();
-        ctx.moveTo(swX, swY);
-        ctx.lineTo(tipX, tipY);
-        ctx.stroke();
-        // Blade edge highlight
-        ctx.strokeStyle = 'rgba(220,220,240,0.5)';
-        ctx.lineWidth = 0.8 * s;
-        ctx.beginPath();
-        ctx.moveTo(swX - 0.5 * s, swY);
-        ctx.lineTo(tipX - 0.5 * s, tipY);
-        ctx.stroke();
-
-        utils.softOutlineEnd(ctx);
-
-        // Crossguard (rect perpendicular to blade)
-        const perpAngle = bladeAngle + Math.PI * 0.5;
-        const gLen = 6 * s;
-        ctx.strokeStyle = utils.rgb(GUARD_COLOR);
-        ctx.lineWidth = 3.5 * s;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(swX + Math.cos(perpAngle) * gLen, swY + Math.sin(perpAngle) * gLen);
-        ctx.lineTo(swX - Math.cos(perpAngle) * gLen, swY - Math.sin(perpAngle) * gLen);
-        ctx.stroke();
-
-        // Pommel
-        ctx.fillStyle = utils.rgb(ARMOR_LIGHT);
-        utils.fillCircle(ctx, swX - Math.cos(bladeAngle) * 3 * s, swY - Math.sin(bladeAngle) * 3 * s, 2.5 * s);
-      }
-    }
-
-    // ── Head ───────────────────────────────────────────────────────────────
-    const headX = torsoX + lunge * 2 * s;
-    const headY = torsoY - 20 * s;
-
-    // Neck
-    ctx.fillStyle = utils.rgb(SKIN_DARK);
-    ctx.fillRect(headX - 3 * s, torsoY - 14 * s, 6 * s, 5 * s);
-
-    // Helm dome
-    const helmGrad = ctx.createRadialGradient(headX - 3 * s, headY - 4 * s, 0, headX, headY, 11 * s);
-    helmGrad.addColorStop(0, utils.rgb(utils.lighten(ARMOR_LIGHT, 30)));
-    helmGrad.addColorStop(0.5, utils.rgb(ARMOR_LIGHT));
-    helmGrad.addColorStop(1, utils.rgb(ARMOR_DARK));
-    ctx.fillStyle = helmGrad;
-    utils.fillEllipse(ctx, headX, headY - 2 * s, 10 * s, 10 * s);
-
-    // Rim light on helm
-    utils.zonePlayerRimLight(ctx, headX, headY - 2 * s, 10 * s, 10 * s);
-
-    // Visor / face opening — skin visible
-    const faceGrad = ctx.createLinearGradient(headX - 5 * s, headY + 1 * s, headX + 5 * s, headY + 6 * s);
-    faceGrad.addColorStop(0, utils.rgb(SKIN_DARK));
-    faceGrad.addColorStop(0.5, utils.rgb(SKIN));
-    faceGrad.addColorStop(1, utils.rgb(SKIN_DARK));
-    ctx.fillStyle = faceGrad;
-    ctx.fillRect(headX - 5 * s, headY + 1 * s, 10 * s, 5 * s);
-
-    // Nose guard (vertical rect down center of face opening)
-    utils.drawMetalSurface(ctx, headX - 1.2 * s, headY - 2 * s, 2.4 * s, 8 * s, ARMOR_LIGHT);
-
-    // Helm cheek guards
-    utils.drawMetalSurface(ctx, headX - 10 * s, headY + 1 * s, 6 * s, 5 * s, ARMOR_BASE);
-    utils.drawMetalSurface(ctx, headX + 4 * s, headY + 1 * s, 6 * s, 5 * s, ARMOR_BASE);
-
-    // Helm crest ridge
-    ctx.fillStyle = utils.rgb(ARMOR_LIGHT, 0.7);
-    ctx.beginPath();
-    ctx.moveTo(headX - 2 * s, headY - 10 * s);
-    ctx.lineTo(headX + 2 * s, headY - 10 * s);
-    ctx.lineTo(headX + 1.5 * s, headY - 2 * s);
-    ctx.lineTo(headX - 1.5 * s, headY - 2 * s);
-    ctx.closePath();
-    ctx.fill();
-
-    // Eyes (glinting through visor)
-    for (const side of [-1, 1]) {
-      const ex = headX + side * 2.5 * s;
-      const ey = headY + 3 * s;
-      ctx.fillStyle = utils.rgb(SKIN_DARK);
-      utils.fillEllipse(ctx, ex, ey, 1.5 * s, 1.2 * s);
-      ctx.fillStyle = 'rgba(180,160,120,0.6)';
-      utils.fillCircle(ctx, ex, ey, 0.7 * s);
-    }
-
-    ctx.restore();
   },
 };
