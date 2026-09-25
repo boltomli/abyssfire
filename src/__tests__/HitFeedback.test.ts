@@ -125,3 +125,14 @@ describe('walk cycle kinematics', () => {
     expect(walkBob(Math.PI / 2)).toBeCloseTo(0);
   });
 });
+
+describe('frame size registry', () => {
+  it('matches every generated character drawer (external art must use the same layout)', async () => {
+    const { SpriteGenerator } = await import('../graphics/SpriteGenerator');
+    for (const [key, { frameWidth, frameHeight }] of Object.entries(buildFrameSizeRegistry())) {
+      const size = SpriteGenerator.getCharacterFrameSize(key);
+      expect(size, key).not.toBeNull();
+      expect({ w: size!.frameW, h: size!.frameH }, key).toEqual({ w: frameWidth, h: frameHeight });
+    }
+  });
+});

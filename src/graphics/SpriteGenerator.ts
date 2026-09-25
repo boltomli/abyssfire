@@ -401,6 +401,12 @@ export class SpriteGenerator {
     new SpriteGenerator(scene).generateFromStaticDrawer(drawer);
   }
 
+  /** Frame size (pre-TEXTURE_SCALE) of a generated character sheet, if known. */
+  static getCharacterFrameSize(key: string): { frameW: number; frameH: number } | null {
+    const drawer = ENTITY_DRAWER_BY_KEY.get(key) ?? NPC_DRAWER_BY_KEY.get(key);
+    return drawer ? { frameW: drawer.frameW, frameH: drawer.frameH } : null;
+  }
+
   static hasNPCSprite(spriteKey: string): boolean {
     return NPC_DRAWER_BY_KEY.has(spriteKey);
   }
