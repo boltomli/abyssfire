@@ -81,7 +81,14 @@ export class StoryDirector {
     const chapter = CHAPTERS.find(c => c.zoneId === this.h.mapId);
     const id = `chapter_${this.h.mapId}`;
     if (chapter && !this.h.story.has(id)) {
-      this.enqueue(id, async () => { await (await this.stage()).playChapter(chapter); });
+      this.enqueue(id, async () => {
+        this.setCinematic(true);
+        try {
+          await (await this.stage()).playChapter(chapter);
+        } finally {
+          this.setCinematic(false);
+        }
+      });
       return true;
     }
     return false;
