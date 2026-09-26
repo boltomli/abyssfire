@@ -3,6 +3,7 @@
  * This is the source of truth; zh-TW is auto-generated from this.
  */
 import type { LocaleData } from '../types';
+import { QUEST_STORY_ZH } from './questStory';
 
 const zhCN: LocaleData = {
   // ─── Boot Scene ───
@@ -933,8 +934,8 @@ const zhCN: LocaleData = {
   'data.quest.q_herb_gathering.desc': '村里的药师急需草药来治疗伤者，帮忙在平原上采集一些。',
   'data.quest.q_lost_pendant.name': '遗失的挂坠',
   'data.quest.q_lost_pendant.desc': '一位村民的传家挂坠被哥布林抢走了，击败哥布林找回挂坠。',
-  'data.quest.q_bandit_trouble.name': '路匪横行',
-  'data.quest.q_bandit_trouble.desc': '平原上的哥布林开始抢劫过路商人，去商路附近清剿它们。',
+  'data.quest.q_bandit_trouble.name': '哥布林劫掠者',
+  'data.quest.q_bandit_trouble.desc': '成群的哥布林埋伏在南部的道路上，劫掠来往的旅人和货车。清剿这些劫掠者，让道路重新安全。',
   'data.quest.q_rare_mushroom.name': '珍稀蘑菇',
   'data.quest.q_rare_mushroom.desc': '平原湿地中生长着珍稀的魔力蘑菇，药师愿意高价收购。',
   'data.quest.q_explore_forest.name': '暮色侦察',
@@ -948,9 +949,9 @@ const zhCN: LocaleData = {
   'data.quest.q_seal_dark_source.name': '封印黑暗之源',
   'data.quest.q_seal_dark_source.desc': '隐士说亡灵源于森林深处的黑暗能量源，前去找到并净化它。',
   'data.quest.q_collect_wolf_pelts.name': '狼皮收集',
-  'data.quest.q_collect_wolf_pelts.desc': '铁匠需要上好的狼皮来制作护甲，击败狼人收集它们的皮毛。',
-  'data.quest.q_spider_nest.name': '蛛巢清剿',
-  'data.quest.q_spider_nest.desc': '森林中的蛛巢附近聚集了大量骷髅守卫，清除这些威胁。',
+  'data.quest.q_collect_wolf_pelts.desc': '狼人在森林中游荡，它们厚实的毛皮是御寒的上好材料。猎杀狼人并剥下它们的毛皮。',
+  'data.quest.q_spider_nest.name': '骸骨墓穴',
+  'data.quest.q_spider_nest.desc': '古老墓地里的骸骨在夜里爬出坟墓，惊扰亡者的安宁。击碎这些骷髅，让墓穴重归寂静。',
   'data.quest.q_lost_scout.name': '失踪的斥候',
   'data.quest.q_lost_scout.desc': '一名斥候在森林南部失踪了。前去搜索并清除附近的亡灵。',
   'data.quest.q_ancient_relic.name': '古代遗物',
@@ -962,15 +963,15 @@ const zhCN: LocaleData = {
   'data.quest.q_kill_gargoyles.name': '石翼之灾',
   'data.quest.q_kill_gargoyles.desc': '石像鬼盘踞在山脉的高处，威胁着所有过往的旅人。',
   'data.quest.q_collect_dwarf_relics.name': '矮人遗物',
-  'data.quest.q_collect_dwarf_relics.desc': '收集散落在遗迹中的矮人工艺品，也许铁匠可以利用它们。',
+  'data.quest.q_collect_dwarf_relics.desc': '矮人的铸锭被石魔像吞进了肚里，符文碎片嵌在石像鬼身上。夺回这些遗物，铁匠用得上。',
   'data.quest.q_reforge_artifact.name': '重铸神器',
-  'data.quest.q_reforge_artifact.desc': '矮人长老需要特殊材料来重铸古代神器，帮他收集秘银核心。',
-  'data.quest.q_kill_stone_guardian.name': '石之守卫',
-  'data.quest.q_kill_stone_guardian.desc': '矮人遗迹最深处的石之守卫依然忠诚地守护着宝藏，击败它。',
+  'data.quest.q_reforge_artifact.desc': '重铸神器需要秘银核心，山里的巨魔和石魔像体内都藏着这种东西。',
+  'data.quest.q_kill_stone_guardian.name': '山巅巨魔',
+  'data.quest.q_kill_stone_guardian.desc': '一头巨魔占据了矮人王座厅，把那里当成了自己的巢穴。击败它，夺回矮人的王座。',
   'data.quest.q_crystal_mining.name': '水晶矿脉',
   'data.quest.q_crystal_mining.desc': '山脉中发现了珍贵的水晶矿脉，采集水晶用于武器附魔。',
-  'data.quest.q_mountain_bandits.name': '山贼窝点',
-  'data.quest.q_mountain_bandits.desc': '石巨人占据了曾经的商路，清除它们恢复通行。',
+  'data.quest.q_mountain_bandits.name': '失控的石像',
+  'data.quest.q_mountain_bandits.desc': '矮人刻在石像上的守护符文已经失控，石魔像开始攻击一切靠近的人。摧毁它们，让符文学者能安全研究。',
   'data.quest.q_trapped_miners.name': '被困矿工',
   'data.quest.q_trapped_miners.desc': '一群矿工被困在塌方的矿洞中，清除洞口的石像鬼解救他们。',
   'data.quest.q_dragon_egg.name': '龙蛋之谜',
@@ -986,27 +987,27 @@ const zhCN: LocaleData = {
   'data.quest.q_seal_fire_rift.name': '封印火焰裂隙',
   'data.quest.q_seal_fire_rift.desc': '沙漠深处有一道火焰裂隙，击败守护它的凤凰来封印它。',
   'data.quest.q_water_supply.name': '水源补给',
-  'data.quest.q_water_supply.desc': '沙漠中水比金子还贵，从击败的怪物身上搜集水囊。',
+  'data.quest.q_water_supply.desc': '沙漠中水比金子还贵。西边的沙地下埋着商队遗落的水囊，把它们挖出来。',
   'data.quest.q_scorpion_venom.name': '蝎毒采集',
   'data.quest.q_scorpion_venom.desc': '沙漠蝎子的毒液可以提炼成强效毒药，击败它们采集蝎毒。',
   'data.quest.q_buried_treasure.name': '沙下宝藏',
   'data.quest.q_buried_treasure.desc': '传说沙漠深处埋藏着古老文明的宝藏，前去探索遗迹。',
-  'data.quest.q_mirage_beasts.name': '海市蜃楼之兽',
-  'data.quest.q_mirage_beasts.desc': '沙漠热浪中出现了由火焰凝聚而成的魔兽，消灭这些异变体。',
+  'data.quest.q_mirage_beasts.name': '游荡的烈焰',
+  'data.quest.q_mirage_beasts.desc': '火元素在绿洲附近游荡，它们经过的地方泉水被蒸干。驱散这些烈焰，保住沙漠里仅存的水源。',
   'data.quest.q_explore_abyss.name': '深渊之门',
   'data.quest.q_explore_abyss.desc': '深渊裂隙已经开启，勇士必须探索这片被恶魔污染的领域。',
   'data.quest.q_kill_demons.name': '恶魔驱逐',
   'data.quest.q_kill_demons.desc': '深渊中的恶魔必须被消灭，否则它们将涌入凡间。',
   'data.quest.q_collect_demon_essence.name': '恶魔精华',
-  'data.quest.q_collect_demon_essence.desc': '收集恶魔精华来封印深渊裂隙，阻止更多恶魔入侵。',
+  'data.quest.q_collect_demon_essence.desc': '击杀深渊中的恶魔，收集它们的精华来封印裂隙，阻止更多恶魔入侵。',
   'data.quest.q_forge_seal.name': '锻造封印',
-  'data.quest.q_forge_seal.desc': '收集封印碎片来锻造封印深渊的钥匙。',
+  'data.quest.q_forge_seal.desc': '封印碎片散落在英雄纪念碑附近的废墟里，收集它们来锻造封印深渊的钥匙。',
   'data.quest.q_kill_abyss_lord.name': '深渊领主',
   'data.quest.q_kill_abyss_lord.desc': '深渊领主是一切灾厄的根源，击败它来拯救这个世界！',
   'data.quest.q_corrupted_souls.name': '堕落之魂',
   'data.quest.q_corrupted_souls.desc': '小恶魔在裂隙中四处游荡，清除它们减轻深渊的腐蚀。',
   'data.quest.q_void_crystals.name': '虚空水晶',
-  'data.quest.q_void_crystals.desc': '深渊中结晶的虚空能量可以用来强化封印，尽可能多收集。',
+  'data.quest.q_void_crystals.desc': '深渊的恶魔体内凝结着虚空水晶，可以用来强化封印。猎杀它们收集水晶。',
   'data.quest.q_fallen_hero.name': '陨落英雄',
   'data.quest.q_fallen_hero.desc': '深渊中有一处英雄纪念碑和陨落神殿，探索它们寻找前人的遗志。',
   'data.quest.q_demon_weaponry.name': '恶魔兵器',
@@ -1050,6 +1051,7 @@ const zhCN: LocaleData = {
   'data.questTarget.succubus': '魅魔',
   'data.questTarget.demon_lord': '深渊领主',
   'data.questTarget.mat_slime_gel': '史莱姆凝胶',
+  'data.questTarget.mat_wolf_pelt': '狼人毛皮',
   'data.questTarget.mat_herb': '翡翠草药',
   'data.questTarget.mat_pendant': '传家挂坠',
   'data.questTarget.mat_mushroom': '魔力蘑菇',
@@ -1664,6 +1666,8 @@ const zhCN: LocaleData = {
   'ui.questCard.accept': '接受',
   'ui.questCard.turnIn': '交付',
   'ui.questCard.viewStory': '查看故事',
+  'ui.questCard.chooseReward': '选择一件奖励',
+  'ui.questCard.choicePreview': '可选奖励：{slots}（交付时按职业生成）',
 
   // ═══════════════════════════════════════════════════════════════════════
   // UI — Homestead Panel
@@ -1868,6 +1872,8 @@ const zhCN: LocaleData = {
 
   // ─── Quest Explore / Investigate ───
   'zone.quest.exploreFound': '发现: {targetName}',
+  'zone.quest.rewardItem': '获得任务奖励：{name}',
+  'zone.quest.returnTo': '返回 {npc} 交付任务',
   'zone.quest.clueFound': '发现线索: {targetName}',
 
   // ─── Dungeon System ───
@@ -2068,10 +2074,22 @@ const zhCN: LocaleData = {
   'sys.questCard.rewardGold': '{gold} 金币',
   'sys.questCard.rewardItems': '{count} 物品',
   'sys.questCard.rewardPet': '宠物',
+  'sys.questCard.rewardChoice': '{count} 选 1 装备',
+  'sys.questCard.choice.weapon': '武器',
+  'sys.questCard.choice.armor': '护甲',
+  'sys.questCard.choice.helmet': '头盔',
+  'sys.questCard.choice.gloves': '手套',
+  'sys.questCard.choice.boots': '靴子',
+  'sys.questCard.choice.belt': '腰带',
+  'sys.questCard.choice.jewelry': '饰品',
+  'sys.questCard.choice.offhand': '副手',
 
   // ─── QuestTrackerHUD ───
   'sys.tracker.completed': '已完成 - 返回NPC交付',
   'sys.tracker.doneCount': '{done}/{total} 完成',
+
+  // ─── Quest NPC lines (offer / turn-in) ───
+  ...QUEST_STORY_ZH,
 };
 
 export default zhCN;

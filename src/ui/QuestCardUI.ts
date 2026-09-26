@@ -7,8 +7,9 @@
  */
 
 import { QUEST_TYPE_LABELS } from '../systems/QuestSystem';
-import type { QuestDefinition, QuestProgress, QuestReward, QuestObjective } from '../data/types';
+import type { QuestDefinition, QuestProgress, QuestReward, QuestObjective, QuestRewardChoice } from '../data/types';
 import { t } from '../i18n';
+import { getQuestDesc, getQuestName, getQuestStory, getQuestTargetName } from '../i18n/gameAccessors';
 
 /**
  * Extended objective-type labels.
@@ -46,6 +47,10 @@ export interface QuestCardData {
   cardAction: 'accept' | 'turn_in';
   /** Whether this NPC has a dialogue tree worth showing behind a lore button. */
   hasLore: boolean;
+  /** What the NPC says at this moment (offer on accept, thanks on turn-in); '' if unwritten. */
+  story: string;
+  /** Labels of the pick-one equipment rewards, e.g. ['武器', '护甲']. */
+  choiceLabels: string[];
 }
 
 export interface QuestObjectiveDisplay {
@@ -87,15 +92,15 @@ export function gatherNpcQuests(
   for (const qid of npcQuestIds) {
     const quest = questMap.get(qid);
     if (!quest) continue;
-    if (quest.level > playerLevel + 5) continue;
 
     const prog = progressMap.get(qid);
 
-    // Turn-in: completed, not yet turned in
+    // Turn-in: completed, not yet turned in (never level-gated)
     if (prog && prog.status === 'completed') {
       turnIn.push({ quest, progress: prog, cardAction: 'turn_in' });
       continue;
     }
+    if (quest.level > playerLevel + 5) continue;
 
     // Available: no progress yet, or failed + re-acceptable
     if (!prog) {
@@ -152,8 +157,10 @@ export function buildQuestCardData(
 
   return {
     questId: quest.id,
-    name: quest.name,
-    description: quest.description,
+    name: getQuestName(quest.id, quest.name),
+    description: getQuestDesc(quest.id, quest.description),
+    story: getQuestStory(quest.id, cardAction === 'accept' ? 'offer' : 'complete'),
+    choiceLabels: (quest.rewards.choices ?? []).map(rewardChoiceLabel),
     typeBadge: QUEST_TYPE_LABELS[quest.type] ?? quest.type,
     category: quest.category,
     objectives,
@@ -169,7 +176,12 @@ export function buildQuestCardData(
 export function formatObjectiveLabel(obj: QuestObjective): string {
   const labels = getObjectiveTypeLabels();
   const typeLabel = labels[obj.type] ?? obj.type;
-  return `${typeLabel} ${obj.targetName}`;
+  return `${typeLabel} ${getQuestTargetName(obj.targetId, obj.targetName)}`;
+}
+
+/** Display label for a reward-choice slot. */
+export function rewardChoiceLabel(choice: QuestRewardChoice): string {
+  return t(`sys.questCard.choice.${choice}`);
 }
 
 /** Format reward summary line. */
@@ -179,6 +191,9 @@ export function formatRewardSummary(rewards: QuestReward): string {
   if (rewards.gold > 0) parts.push(t('sys.questCard.rewardGold', { gold: rewards.gold }));
   if (rewards.items && rewards.items.length > 0) {
     parts.push(t('sys.questCard.rewardItems', { count: rewards.items.length }));
+  }
+  if (rewards.choices && rewards.choices.length > 0) {
+    parts.push(t('sys.questCard.rewardChoice', { count: rewards.choices.length }));
   }
   if (rewards.petReward) parts.push(t('sys.questCard.rewardPet'));
   return parts.join('  ');

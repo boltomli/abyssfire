@@ -671,6 +671,8 @@ export class UIScene extends Phaser.Scene {
     // Quest events — force immediate tracker refresh
     this.subscriptions.on(EventBus, GameEvents.QUEST_ACCEPTED, this.handleQuestTrackerDirty, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_COMPLETED, this.handleQuestTrackerDirty, this);
+    this.subscriptions.on(EventBus, GameEvents.QUEST_PROGRESS, this.handleQuestTrackerDirty, this);
+    this.subscriptions.on(EventBus, GameEvents.QUEST_TRACKED_CHANGED, this.handleQuestTrackerDirty, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_TURNED_IN, this.handleQuestTrackerDirty, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_FAILED, this.handleQuestTrackerDirty, this);
   }
@@ -711,7 +713,7 @@ export class UIScene extends Phaser.Scene {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private handleNpcInteract(data: any): void {
-    if (data.dialogueTree && data.questSystem) {
+    if (data.questSystem) {
       // Try compact quest card first — show if there are available or turn-in quests
       const questSystem = data.questSystem;
       const npcDef = NPCDefinitions[data.npcId];
@@ -729,7 +731,8 @@ export class UIScene extends Phaser.Scene {
         }
       }
       // No actionable quests — fall through to dialogue tree for story/lore
-      this.openDialogueTree(data);
+      if (data.dialogueTree) this.openDialogueTree(data);
+      else this.openDialogue(data);
     } else if (data.dialogueTree) {
       this.openDialogueTree(data);
     } else {
@@ -2457,31 +2460,40 @@ export class UIScene extends Phaser.Scene {
       this.minimap.strokeCircle(dpCol * sx, dpRow * sy, 4 * DPR);
     }
 
-    // Quest NPC markers on minimap
+    // Quest NPC markers on minimap: gold = ready to turn in, pale gold = new quest
     if (this.zone?.questSystem) {
-      for (const camp of mapData.camps) {
-        for (const npcId of camp.npcs) {
-          const npcDef = NPCDefinitions[npcId];
-          if (!npcDef || npcDef.type !== 'quest' || !npcDef.quests) continue;
-          let hasAvailable = false;
-          let hasCompleted = false;
-          for (const qid of npcDef.quests) {
-            const prog = this.zone.questSystem.progress.get(qid);
-            if (prog && prog.status === 'completed') hasCompleted = true;
-          }
-          if (!hasCompleted) {
-            const avail = this.zone.questSystem.getAvailableQuests(npcDef.quests, this.player.level);
-            for (const q of avail) {
-              const qProg = this.zone.questSystem.progress.get(q.id);
-              if (!qProg || (qProg.status === 'failed' && q.reacceptable)) { hasAvailable = true; break; }
-            }
-          }
-          if (hasCompleted || hasAvailable) {
-            const color = hasCompleted ? 0xf1c40f : 0xf1c40f;
-            this.minimap.fillStyle(color);
-            this.minimap.fillCircle(camp.col * sx, camp.row * sy, 2.5 * DPR);
-          }
+      const qs = this.zone.questSystem;
+      const npcSpots: { col: number; row: number; npcId: string }[] = [
+        ...mapData.camps.flatMap((camp: { col: number; row: number; npcs: string[] }) => camp.npcs.map(npcId => ({ col: camp.col, row: camp.row, npcId }))),
+        ...(mapData.fieldNpcs ?? []),
+      ];
+      for (const spot of npcSpots) {
+        const npcDef = NPCDefinitions[spot.npcId];
+        if (!npcDef?.quests?.length) continue;
+        const turnIn = npcDef.quests.some(qid => qs.progress.get(qid)?.status === 'completed');
+        const available = !turnIn && qs.getAvailableQuests(npcDef.quests, this.player.level).length > 0;
+        if (!turnIn && !available) continue;
+        const r = (turnIn ? 3.2 : 2.4) * DPR;
+        this.minimap.fillStyle(0x000000, 0.7);
+        this.minimap.fillCircle(spot.col * sx, spot.row * sy, r + 1.2 * DPR);
+        this.minimap.fillStyle(turnIn ? 0xffd23a : 0xf5e6a8, 1);
+        this.minimap.fillCircle(spot.col * sx, spot.row * sy, r);
+      }
+
+      // Guide target: where the tracked quest wants you to go
+      const guide = this.zone.questWorld?.guideTarget;
+      if (guide) {
+        const gx = guide.col * sx, gy = guide.row * sy, gr = 4.5 * DPR;
+        const star: { x: number; y: number }[] = [];
+        for (let i = 0; i < 10; i++) {
+          const a = -Math.PI / 2 + (i * Math.PI) / 5;
+          const rr = i % 2 === 0 ? gr : gr * 0.45;
+          star.push({ x: gx + Math.cos(a) * rr, y: gy + Math.sin(a) * rr });
         }
+        this.minimap.fillStyle(0x1a0f04, 0.9);
+        this.minimap.fillCircle(gx, gy, gr + 1.5 * DPR);
+        this.minimap.fillStyle(guide.reason === 'turn_in' ? 0xffd23a : 0xffb347, 1);
+        this.minimap.fillPoints(star, true);
       }
 
       // Monster dots on minimap (red = aggro, orange = nearby)
@@ -2616,6 +2628,7 @@ export class UIScene extends Phaser.Scene {
     audioManager.playSFX('click');
 
     let currentIndex = 0;
+    let selectedChoice = 0;
     const total = entries.length;
 
     const renderCard = () => {
@@ -2664,14 +2677,35 @@ export class UIScene extends Phaser.Scene {
         fontSize: fs(11), color: UI_COLORS.textSoft, fontFamily: FONT,
       }).setOrigin(0.5, 0.5));
 
-      // ── Description (measured, so long text never overlaps the objectives) ──
+      const entry = entries[currentIndex];
+      const isTurnIn = entry.cardAction === 'turn_in';
+
+      // ── NPC voice: the quest's offer / thanks, framed as speech ──
       let curY = badgeY + px(16);
-      const descT = this.add.text(px(20), curY, cardData.description, {
-        fontSize: fs(12), color: '#c8bca8', fontFamily: FONT, lineSpacing: px(2),
-        wordWrap: { width: pw - px(40), useAdvancedWrap: true },
-      });
-      card.add(descT);
-      curY += descT.height + px(14);
+      if (cardData.story) {
+        const speechT = this.add.text(px(34), curY + px(8), `“${cardData.story}”`, {
+          fontSize: fs(12.5), color: '#f0dfb8', fontFamily: FONT, fontStyle: 'italic', lineSpacing: px(3),
+          wordWrap: { width: pw - px(68), useAdvancedWrap: true },
+        });
+        const speechBg = this.add.graphics();
+        speechBg.fillStyle(0x1a120a, 0.85);
+        speechBg.fillRoundedRect(px(20), curY, pw - px(40), speechT.height + px(16), px(6));
+        speechBg.fillStyle(0xc9a257, 0.9);
+        speechBg.fillRect(px(20), curY + px(6), px(3), speechT.height + px(4));
+        card.add(speechBg);
+        card.add(speechT);
+        curY += speechT.height + px(24);
+      }
+
+      // ── Description (measured, so long text never overlaps the objectives) ──
+      if (!isTurnIn || !cardData.story) {
+        const descT = this.add.text(px(20), curY, cardData.description, {
+          fontSize: fs(12), color: '#c8bca8', fontFamily: FONT, lineSpacing: px(2),
+          wordWrap: { width: pw - px(40), useAdvancedWrap: true },
+        });
+        card.add(descT);
+        curY += descT.height + px(14);
+      }
 
       // ── Objectives ──
       card.add(addSectionHeader(this, px(20), curY, pw - px(40), btnLabel(t('ui.questCard.objectives')).replace(/[:：]\s*$/, '')));
@@ -2696,7 +2730,7 @@ export class UIScene extends Phaser.Scene {
       curY += px(12);
 
       // ── Rewards ──
-      const rewardText = formatRewardSummary(entries[currentIndex].quest.rewards);
+      const rewardText = formatRewardSummary(entry.quest.rewards);
       const rwLabel = this.add.text(px(20), curY, t('ui.questCard.rewards'), {
         fontSize: fs(12), color: UI_COLORS.heading, fontFamily: FONT, fontStyle: 'bold',
       });
@@ -2706,70 +2740,104 @@ export class UIScene extends Phaser.Scene {
         wordWrap: { width: pw - px(48) - rwLabel.width, useAdvancedWrap: true },
       });
       card.add(rwText);
-      curY += Math.max(rwLabel.height, rwText.height) + px(12);
+      curY += Math.max(rwLabel.height, rwText.height) + px(10);
+
+      // Fixed items (potions, gems…) as small slots
+      const fixedIds = entry.quest.rewards.items ?? [];
+      const choiceItems = isTurnIn && this.zone ? this.zone.getQuestRewardChoices(entry.quest.id) : [];
+      const slotSz = px(40);
+      if (fixedIds.length > 0) {
+        fixedIds.forEach((itemId, i) => {
+          const base = getItemBase(itemId);
+          const cx = px(20) + slotSz / 2 + i * (slotSz + px(6));
+          card.add(addSlot(this, cx, curY + slotSz / 2, slotSz, 'normal'));
+          card.add(this.add.image(cx, curY + slotSz / 2, ensureItemIcon(this, base?.icon ?? 'c_hp', itemId))
+            .setDisplaySize(slotSz - px(6), slotSz - px(6)));
+        });
+        curY += slotSz + px(10);
+      }
+
+      // Pick-one equipment rewards
+      if (isTurnIn && choiceItems.length > 0) {
+        card.add(this.add.text(pw / 2, curY, t('ui.questCard.chooseReward'), {
+          fontSize: fs(11.5), color: UI_COLORS.textSoft, fontFamily: FONT,
+        }).setOrigin(0.5, 0));
+        curY += px(18);
+        const bigSz = px(52), gap = px(14);
+        const rowW = choiceItems.length * bigSz + (choiceItems.length - 1) * gap;
+        const highlight = this.add.graphics();
+        card.add(highlight);
+        const drawHighlight = (): void => {
+          highlight.clear();
+          const hx = (pw - rowW) / 2 + selectedChoice * (bigSz + gap);
+          highlight.lineStyle(px(2.5), 0xffe08a, 1);
+          highlight.strokeRoundedRect(hx - px(4), curY - px(4), bigSz + px(8), bigSz + px(8), px(6));
+        };
+        choiceItems.forEach((item, i) => {
+          const cx = (pw - rowW) / 2 + i * (bigSz + gap) + bigSz / 2;
+          const { slot, objects } = this.createItemSlot(cx, curY + bigSz / 2, bigSz, item);
+          card.add(objects);
+          slot.on('pointerover', (p: Phaser.Input.Pointer) => this.showItemTooltip(item, p.x, p.y));
+          slot.on('pointerout', () => this.hideItemTooltip());
+          slot.on('pointerdown', () => { selectedChoice = i; audioManager.playSFX('click'); drawHighlight(); });
+          const label = cardData.choiceLabels[i] ?? '';
+          card.add(this.add.text(cx, curY + bigSz + px(6), label, {
+            fontSize: fs(10.5), color: UI_COLORS.muted, fontFamily: FONT,
+          }).setOrigin(0.5, 0));
+        });
+        drawHighlight();
+        curY += bigSz + px(26);
+      } else if (!isTurnIn && cardData.choiceLabels.length > 0) {
+        card.add(this.add.text(px(20), curY, t('ui.questCard.choicePreview', { slots: cardData.choiceLabels.join(' / ') }), {
+          fontSize: fs(11.5), color: '#b9a6e8', fontFamily: FONT,
+        }));
+        curY += px(22);
+      }
 
       // ── Navigation (multiple quests) ──
       if (total > 1) {
         const navY = curY + px(12);
-        card.add(this.makeButton(px(60), navY, px(44), px(26), '◀', () => { currentIndex--; renderCard(); }, { disabled: currentIndex <= 0, fontSize: 12 }));
+        card.add(this.makeButton(px(60), navY, px(44), px(26), '◀', () => { currentIndex--; selectedChoice = 0; renderCard(); }, { disabled: currentIndex <= 0, fontSize: 12 }));
         card.add(this.add.text(pw / 2, navY, `${currentIndex + 1}/${total}`, {
           fontSize: fs(12), color: UI_COLORS.textSoft, fontFamily: FONT, fontStyle: 'bold',
         }).setOrigin(0.5));
-        card.add(this.makeButton(pw - px(60), navY, px(44), px(26), '▶', () => { currentIndex++; renderCard(); }, { disabled: currentIndex >= total - 1, fontSize: 12 }));
+        card.add(this.makeButton(pw - px(60), navY, px(44), px(26), '▶', () => { currentIndex++; selectedChoice = 0; renderCard(); }, { disabled: currentIndex >= total - 1, fontSize: 12 }));
         curY += px(34);
       }
 
       // ── Action Button ──
-      const isAccept = cardData.cardAction === 'accept';
-      const btnLabelText = isAccept ? t('ui.questCard.accept') : t('ui.questCard.turnIn');
+      const btnLabelText = isTurnIn ? t('ui.questCard.turnIn') : t('ui.questCard.accept');
       const bW = px(180), bH = px(36);
       const actionBtn = this.makeButton(pw / 2, curY + bH / 2, bW, bH, btnLabelText, () => undefined, {
-        variant: isAccept ? 'success' : 'primary', fontSize: 15, bold: true,
+        variant: isTurnIn ? 'primary' : 'success', fontSize: 15, bold: true,
       });
       const actionBg = actionBtn.bg;
       card.add(actionBtn);
       curY += bH + px(10);
 
       actionBg.on('pointerdown', () => {
-        const entry = entries[currentIndex];
+        this.hideItemTooltip();
         const questSystem = rawData.questSystem;
-
-        if (entry.cardAction === 'accept') {
+        const questName = getQuestName(entry.quest.id, entry.quest.name);
+        if (!isTurnIn) {
           questSystem.acceptQuest(entry.quest.id);
-        } else {
-          // Turn-in: grant rewards via ZoneScene approach
-          const reward = questSystem.turnInQuest(entry.quest.id);
-          if (reward) {
-            const player = rawData.player;
-            if (player) {
-              player.addExp(reward.exp);
-              player.gold += reward.gold;
-            }
-            // Grant item rewards
-            if (reward.items && reward.items.length > 0 && this.zone) {
-              for (const itemId of reward.items) {
-                const item = this.zone.lootSystem.createItem(itemId, player?.level ?? 1, 'normal');
-                if (item) {
-                  item.identified = true;
-                  this.zone.inventorySystem.addItem(item);
-                }
-              }
-            }
-            if (reward.petReward && rawData.homesteadSystem) {
-              rawData.homesteadSystem.addPet(reward.petReward);
-            }
-            if (rawData.achievementSystem) {
-              rawData.achievementSystem.update('quest');
-            }
-          }
+          // Newly accepted quests become the guided one.
+          questSystem.setTracked(entry.quest.id);
+          this.showQuestToast(buildToastMessage('accept', questName), 'accept');
+          this.closeQuestCard();
+          return;
         }
-
-        // Toast confirmation
-        const toastMsg = buildToastMessage(entry.cardAction, entry.quest.name);
-        this.showQuestToast(toastMsg, entry.cardAction);
-
-        // Auto-dismiss
+        if (!this.zone?.turnInQuest(entry.quest.id, selectedChoice)) return;
+        this.showQuestToast(buildToastMessage('turn_in', questName), 'turn_in');
         this.closeQuestCard();
+        // Chain on: if this NPC now has something new (the next chapter), offer it right away.
+        const npcQuestIds = NPCDefinitions[rawData.npcId]?.quests ?? [];
+        const next = gatherNpcQuests(npcQuestIds, questSystem.quests, questSystem.progress, this.player.level);
+        if (next.length > 0) {
+          this.time.delayedCall(450, () => {
+            if (!this.questCardPanel && !this.dialoguePanel) this.openQuestCard(next, npcName, hasDialogueTree, rawData);
+          });
+        }
       });
 
       // ── View Lore Button (optional) ──
@@ -5273,13 +5341,18 @@ export class UIScene extends Phaser.Scene {
   private refreshQuestTracker(): void {
     if (!this.zone?.questSystem) return;
 
-    const active = this.zone.questSystem.getActiveQuests();
+    // Guided quest first, then quests in this zone, then the rest.
+    const zoneId = this.zone.currentMapId;
+    const guidedId = this.zone.questSystem.getGuidedQuest(zoneId)?.quest.id ?? '';
+    const rank = (e: { quest: { id: string; zone: string } }): number =>
+      e.quest.id === guidedId ? 0 : e.quest.zone === zoneId ? 1 : 2;
+    const active = this.zone.questSystem.getActiveQuests().sort((a, b) => rank(a) - rank(b));
     const state = buildTrackerState(active);
     this.questTrackerState = state;
 
     // Build signature including expanded state for change detection
     const expandedSig = [...this.questTrackerExpanded].sort().join(',');
-    const signature = buildTrackerSignature(state) + '|E:' + expandedSig;
+    const signature = buildTrackerSignature(state) + '|E:' + expandedSig + '|G:' + guidedId;
     if (signature === this.lastQuestTrackerSignature) return;
     this.lastQuestTrackerSignature = signature;
 
@@ -5294,7 +5367,8 @@ export class UIScene extends Phaser.Scene {
       // Quest title line
       const tag = entry.category === 'main' ? t('ui.questTracker.mainTag') : t('ui.questTracker.sideTag');
       const completionMark = entry.isCompleted ? ' ✓' : '';
-      const titleText = `${tag} ${entry.name}${completionMark}`;
+      const guideMark = entry.questId === guidedId ? '➤ ' : '';
+      const titleText = `${guideMark}${tag} ${entry.name}${completionMark}`;
 
       let titleObj = this.questTrackerTexts[textIdx];
       if (!titleObj) {
@@ -5310,6 +5384,8 @@ export class UIScene extends Phaser.Scene {
           // Find the quest ID from the text's data
           const qid = titleObj.getData('questId') as string;
           if (qid) {
+            // Clicking a quest also points the guide arrow at it.
+            this.zone?.questSystem.setTracked(qid);
             if (this.questTrackerExpanded.has(qid)) {
               this.questTrackerExpanded.delete(qid);
             } else {

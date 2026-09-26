@@ -3,6 +3,7 @@
  * Final fallback in the fallback chain: zh-TW → zh-CN → en → key path.
  */
 import type { LocaleData } from '../types';
+import { QUEST_STORY_EN } from './questStory';
 
 const en: LocaleData = {
   // ─── Boot Scene ───
@@ -786,8 +787,8 @@ const en: LocaleData = {
   'data.quest.q_herb_gathering.desc': 'The village herbalist urgently needs herbs to treat the wounded. Gather some on the plains.',
   'data.quest.q_lost_pendant.name': 'Lost Pendant',
   'data.quest.q_lost_pendant.desc': "A villager's heirloom pendant was stolen by goblins. Defeat them to recover it.",
-  'data.quest.q_bandit_trouble.name': 'Bandit Trouble',
-  'data.quest.q_bandit_trouble.desc': 'Goblins on the plains have started robbing passing merchants. Clear them from the trade route.',
+  'data.quest.q_bandit_trouble.name': 'Goblin Raiders',
+  'data.quest.q_bandit_trouble.desc': 'Goblin bands lie in ambush along the southern road, robbing travelers and wagons. Clear out the raiders and make the road safe again.',
   'data.quest.q_rare_mushroom.name': 'Rare Mushroom',
   'data.quest.q_rare_mushroom.desc': 'Rare magic mushrooms grow in the wetlands. The herbalist will pay well for them.',
   'data.quest.q_explore_forest.name': 'Twilight Reconnaissance',
@@ -801,9 +802,9 @@ const en: LocaleData = {
   'data.quest.q_seal_dark_source.name': 'Seal the Dark Source',
   'data.quest.q_seal_dark_source.desc': 'The hermit says the undead stem from a dark energy source deep in the forest. Find and purify it.',
   'data.quest.q_collect_wolf_pelts.name': 'Wolf Pelt Collection',
-  'data.quest.q_collect_wolf_pelts.desc': 'The blacksmith needs quality wolf pelts for armor. Defeat werewolves to collect them.',
-  'data.quest.q_spider_nest.name': 'Spider Nest Raid',
-  'data.quest.q_spider_nest.desc': 'Skeletons guard the spider nest area. Clear these threats.',
+  'data.quest.q_collect_wolf_pelts.desc': 'Werewolves roam the forest, and their thick pelts make the best protection against the cold. Hunt them and bring back their pelts.',
+  'data.quest.q_spider_nest.name': 'The Bone Crypt',
+  'data.quest.q_spider_nest.desc': 'Skeletons crawl out of the old graveyard every night, disturbing the rest of the dead. Shatter them and let the crypt fall silent again.',
   'data.quest.q_lost_scout.name': 'Missing Scout',
   'data.quest.q_lost_scout.desc': 'A scout went missing in the southern forest. Search for them and clear nearby undead.',
   'data.quest.q_ancient_relic.name': 'Ancient Relic',
@@ -815,15 +816,15 @@ const en: LocaleData = {
   'data.quest.q_kill_gargoyles.name': 'Stone Wing Scourge',
   'data.quest.q_kill_gargoyles.desc': 'Gargoyles perch atop the mountains, threatening all travelers.',
   'data.quest.q_collect_dwarf_relics.name': 'Dwarven Relics',
-  'data.quest.q_collect_dwarf_relics.desc': 'Collect dwarven artifacts scattered in the ruins. The blacksmith may find them useful.',
+  'data.quest.q_collect_dwarf_relics.desc': 'The golems have swallowed the dwarven ingots and the gargoyles wear the rune fragments. Take the relics back; the smith can use them.',
   'data.quest.q_reforge_artifact.name': 'Reforge the Artifact',
-  'data.quest.q_reforge_artifact.desc': 'The dwarven elder needs special materials to reforge an ancient artifact. Help him collect mithril cores.',
-  'data.quest.q_kill_stone_guardian.name': 'Stone Guardian',
-  'data.quest.q_kill_stone_guardian.desc': 'The stone guardian in the deepest ruins still faithfully protects the treasure. Defeat it.',
+  'data.quest.q_reforge_artifact.desc': 'Reforging the artifact needs mithril cores, and the mountain trolls and golems carry them inside.',
+  'data.quest.q_kill_stone_guardian.name': 'Troll of the Summit',
+  'data.quest.q_kill_stone_guardian.desc': 'A troll has taken the dwarven throne room for its den. Defeat it and reclaim the throne of the dwarves.',
   'data.quest.q_crystal_mining.name': 'Crystal Vein',
   'data.quest.q_crystal_mining.desc': 'A precious crystal vein has been found in the mountains. Mine crystals for weapon enchantment.',
-  'data.quest.q_mountain_bandits.name': 'Mountain Stronghold',
-  'data.quest.q_mountain_bandits.desc': 'Stone golems have occupied the old trade route. Clear them to restore passage.',
+  'data.quest.q_mountain_bandits.name': 'Runaway Golems',
+  'data.quest.q_mountain_bandits.desc': 'The guardian runes the dwarves carved into their golems have gone wild, and the golems attack anyone who comes near. Destroy them so the rune scholar can work in peace.',
   'data.quest.q_trapped_miners.name': 'Trapped Miners',
   'data.quest.q_trapped_miners.desc': 'Miners are trapped in a collapsed mine. Clear the gargoyles at the entrance to rescue them.',
   'data.quest.q_dragon_egg.name': 'Dragon Egg Mystery',
@@ -839,27 +840,27 @@ const en: LocaleData = {
   'data.quest.q_seal_fire_rift.name': 'Seal the Fire Rift',
   'data.quest.q_seal_fire_rift.desc': 'A fire rift deep in the desert must be sealed by defeating the phoenix guarding it.',
   'data.quest.q_water_supply.name': 'Water Supply',
-  'data.quest.q_water_supply.desc': 'Water is more precious than gold in the desert. Collect water skins from defeated monsters.',
+  'data.quest.q_water_supply.desc': 'Water is worth more than gold in the desert. Old caravans left waterskins buried in the western sands. Dig them up.',
   'data.quest.q_scorpion_venom.name': 'Scorpion Venom',
   'data.quest.q_scorpion_venom.desc': 'Desert scorpion venom can be refined into a potent poison. Defeat them to collect venom.',
   'data.quest.q_buried_treasure.name': 'Buried Treasure',
   'data.quest.q_buried_treasure.desc': 'Legend speaks of ancient treasure buried deep in the desert. Explore the ruins.',
-  'data.quest.q_mirage_beasts.name': 'Mirage Beasts',
-  'data.quest.q_mirage_beasts.desc': 'Magical beasts formed from flames appear in the desert heat. Destroy these aberrations.',
+  'data.quest.q_mirage_beasts.name': 'Wandering Flames',
+  'data.quest.q_mirage_beasts.desc': 'Fire elementals roam near the oasis, and every spring they pass boils dry. Drive off the flames and save the last water in the desert.',
   'data.quest.q_explore_abyss.name': 'Gate of the Abyss',
   'data.quest.q_explore_abyss.desc': 'The Abyss Rift has opened. The hero must explore this demon-corrupted realm.',
   'data.quest.q_kill_demons.name': 'Demon Expulsion',
   'data.quest.q_kill_demons.desc': 'The demons in the abyss must be destroyed, or they will flood the mortal realm.',
   'data.quest.q_collect_demon_essence.name': 'Demon Essence',
-  'data.quest.q_collect_demon_essence.desc': 'Collect demon essence to seal the rift and stop more demons from invading.',
+  'data.quest.q_collect_demon_essence.desc': 'Slay the demons of the abyss and collect their essence to seal the rift before more pour through.',
   'data.quest.q_forge_seal.name': 'Forge the Seal',
-  'data.quest.q_forge_seal.desc': 'Collect seal fragments to forge the key that will seal the abyss.',
+  'data.quest.q_forge_seal.desc': 'Seal fragments lie scattered in the ruins by the hero memorial. Gather them to forge the key that seals the abyss.',
   'data.quest.q_kill_abyss_lord.name': 'Abyss Lord',
   'data.quest.q_kill_abyss_lord.desc': 'The Abyss Lord is the root of all calamity. Defeat it to save the world!',
   'data.quest.q_corrupted_souls.name': 'Corrupted Souls',
   'data.quest.q_corrupted_souls.desc': "Imps roam the rift. Clear them to lessen the abyss's corruption.",
   'data.quest.q_void_crystals.name': 'Void Crystals',
-  'data.quest.q_void_crystals.desc': 'Crystallized void energy in the abyss can reinforce the seal. Collect as many as possible.',
+  'data.quest.q_void_crystals.desc': 'Void crystals form inside the abyss demons and can strengthen the seal. Hunt them for crystals.',
   'data.quest.q_fallen_hero.name': 'Fallen Hero',
   'data.quest.q_fallen_hero.desc': "A hero's memorial and a fallen shrine lie in the abyss. Explore them to find the predecessors' legacy.",
   'data.quest.q_demon_weaponry.name': 'Demon Weaponry',
@@ -905,6 +906,7 @@ const en: LocaleData = {
   'data.questTarget.succubus': 'Succubus',
   'data.questTarget.demon_lord': 'Demon Lord',
   'data.questTarget.mat_slime_gel': 'Slime Gel',
+  'data.questTarget.mat_wolf_pelt': 'Werewolf Pelt',
   'data.questTarget.mat_herb': 'Emerald Herb',
   'data.questTarget.mat_pendant': 'Heirloom Pendant',
   'data.questTarget.mat_mushroom': 'Magic Mushroom',
@@ -1719,6 +1721,8 @@ const en: LocaleData = {
   'ui.questCard.accept': 'Accept',
   'ui.questCard.turnIn': 'Turn In',
   'ui.questCard.viewStory': 'View Story',
+  'ui.questCard.chooseReward': 'Choose one reward',
+  'ui.questCard.choicePreview': 'Reward choice: {slots} (made for your class on turn-in)',
 
   // ═══════════════════════════════════════════════════════════════════════
   // UI — Homestead Panel
@@ -1923,6 +1927,8 @@ const en: LocaleData = {
 
   // ─── Quest Explore / Investigate ───
   'zone.quest.exploreFound': 'Discovered: {targetName}',
+  'zone.quest.rewardItem': 'Quest reward: {name}',
+  'zone.quest.returnTo': 'Return to {npc} to turn it in',
   'zone.quest.clueFound': 'Found clue: {targetName}',
 
   // ─── Dungeon System ───
@@ -2123,10 +2129,22 @@ const en: LocaleData = {
   'sys.questCard.rewardGold': '{gold} Gold',
   'sys.questCard.rewardItems': '{count} Items',
   'sys.questCard.rewardPet': 'Pet',
+  'sys.questCard.rewardChoice': 'pick 1 of {count} gear',
+  'sys.questCard.choice.weapon': 'Weapon',
+  'sys.questCard.choice.armor': 'Armor',
+  'sys.questCard.choice.helmet': 'Helmet',
+  'sys.questCard.choice.gloves': 'Gloves',
+  'sys.questCard.choice.boots': 'Boots',
+  'sys.questCard.choice.belt': 'Belt',
+  'sys.questCard.choice.jewelry': 'Jewelry',
+  'sys.questCard.choice.offhand': 'Off-hand',
 
   // ─── QuestTrackerHUD ───
   'sys.tracker.completed': 'Complete - Return to NPC',
   'sys.tracker.doneCount': '{done}/{total} Done',
+
+  // ─── Quest NPC lines (offer / turn-in) ───
+  ...QUEST_STORY_EN,
 };
 
 export default en;
