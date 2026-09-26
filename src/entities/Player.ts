@@ -39,6 +39,9 @@ export class Player {
   isMoving: boolean = false;
   moveSpeed: number = 120;
   private currentSpeed = 0;
+  /** ms left of keyboard/stick movement grace: keeps the walk cycle alive between input frames. */
+  private directMoveMs = 0;
+  private directDustMs = 0;
   private readonly acceleration = 8;
   private readonly deceleration = 12;
 
@@ -186,6 +189,21 @@ export class Player {
     this.sprite.setDepth(worldPos.y + 100);
   }
 
+  /**
+   * Continuous movement from keyboard, joystick or gamepad: step to (col, row)
+   * and keep the walk cycle and facing in sync, like path movement does.
+   * (A bare moveTo() is a teleport — the hero would slide in its idle pose.)
+   */
+  moveDirect(col: number, row: number): void {
+    const fromX = this.sprite.x;
+    this.moveTo(col, row);
+    this.path = [];
+    this.isMoving = true;
+    this.directMoveMs = 120;
+    this.animator.setWalk();
+    this.animator.faceToward(this.sprite.x - fromX);
+  }
+
   setPath(newPath: { col: number; row: number }[]): void {
     this.path = newPath;
     this.isMoving = newPath.length > 0;
@@ -233,6 +251,16 @@ export class Player {
   private updateMovement(delta: number): void {
     const dt = delta / 1000;
 
+    if (this.path.length === 0 && this.directMoveMs > 0) {
+      // Keyboard/stick movement is driving the hero this frame.
+      this.directMoveMs -= delta;
+      this.directDustMs -= delta;
+      if (this.directDustMs <= 0) {
+        this.directDustMs = 320;
+        this.spawnFootDust(this.sprite.x, this.sprite.y);
+      }
+      return;
+    }
     if (this.path.length === 0) {
       // Decelerate to stop
       this.currentSpeed = this.currentSpeed * (1 - this.deceleration * dt);

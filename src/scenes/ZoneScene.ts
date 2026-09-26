@@ -1687,7 +1687,7 @@ export class ZoneScene extends Phaser.Scene {
       const newRow = this.player.tileRow + (dy / len) * speed;
       const checkCol = Math.round(newCol), checkRow = Math.round(newRow);
       if (checkCol >= 0 && checkCol < this.mapData.cols && checkRow >= 0 && checkRow < this.mapData.rows && this.mapData.collisions[checkRow][checkCol]) {
-        this.player.moveTo(newCol, newRow);
+        this.player.moveDirect(newCol, newRow);
       }
     }
   }
