@@ -716,6 +716,8 @@ export class ZoneScene extends Phaser.Scene {
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
     if (this.storyDirector?.cinematic) return;
+    // A touch on the joystick / a touch button is not also a tap on the world.
+    if (this.mobileControls?.claimsPointer(pointer)) return;
     if (pointer.rightButtonDown()) {
       this.useTownPortal();
       return;
@@ -2088,7 +2090,16 @@ export class ZoneScene extends Phaser.Scene {
     // ── Teleport: instant reposition to walkable tile near target ──
     if (skillId === 'teleport') {
       const pointer = this.input.activePointer;
-      const tile = worldToTile(pointer.worldX, pointer.worldY);
+      let tile = worldToTile(pointer.worldX, pointer.worldY);
+      // Cast from a touch button: the finger is on the button, not the destination — blink
+      // along the joystick direction, else to the current target.
+      if (this.mobileControls?.claimsPointer(pointer)) {
+        const dir = this.mobileControls.getDirection();
+        const len = Math.hypot(dir.dx, dir.dy);
+        tile = len > 0.2
+          ? { col: this.player.tileCol + (dir.dx / len) * 6, row: this.player.tileRow + (dir.dy / len) * 6 }
+          : target ? { col: target.tileCol, row: target.tileRow } : { col: this.player.tileCol, row: this.player.tileRow };
+      }
       let destCol = Math.round(tile.col);
       let destRow = Math.round(tile.row);
       // Clamp to map bounds

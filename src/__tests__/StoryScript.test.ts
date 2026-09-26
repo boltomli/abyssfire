@@ -8,7 +8,7 @@ import { NPCDefinitions } from '../data/npcs';
 import { getMonsterDef } from '../data/monsters';
 
 /** Keys the playback code reads directly (not referenced from script.ts). */
-const UI_KEYS = ['story.ui.skip', 'story.speaker.villain', 'story.speaker.hero'];
+const UI_KEYS = ['story.ui.skip', 'story.ui.skipTouch', 'story.speaker.villain', 'story.speaker.hero'];
 
 /** Every string that looks like a story key, found anywhere in the script data. */
 function collectKeys(value: unknown, out: Set<string>): Set<string> {

@@ -145,6 +145,7 @@ export function buildTrackerEntry(
  */
 export function buildTrackerState(
   activeQuests: { quest: QuestDefinition; progress: QuestProgress }[],
+  maxVisible: number = MAX_VISIBLE_QUESTS,
 ): TrackerState {
   // Sort: main first, then incomplete before complete
   const sorted = [...activeQuests].sort((a, b) => {
@@ -162,8 +163,8 @@ export function buildTrackerState(
   );
 
   const totalCount = entries.length;
-  const visibleCount = Math.min(totalCount, MAX_VISIBLE_QUESTS);
-  const hasMore = totalCount > MAX_VISIBLE_QUESTS;
+  const visibleCount = Math.min(totalCount, maxVisible);
+  const hasMore = totalCount > maxVisible;
 
   return {
     entries: entries.slice(0, visibleCount),

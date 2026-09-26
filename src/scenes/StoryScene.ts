@@ -12,6 +12,7 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../config';
 import { t } from '../i18n';
+import { isMobileDevice } from '../systems/MobileControlsSystem';
 import type { Chapter, Cutscene, FocusTarget, Speaker, StorySequence, StorySlide } from '../data/story/types';
 
 const W = GAME_WIDTH;
@@ -62,9 +63,11 @@ export class StoryScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-SPACE', () => this.release('next'));
     this.input.keyboard?.on('keydown-ENTER', () => this.release('next'));
     this.input.keyboard?.on('keydown-ESC', () => this.skip());
-    // Tappable skip (mobile has no Esc).
+    // Tappable skip (mobile has no Esc) — thumb-sized (≈ 48 CSS px tall) on touch devices.
+    const touch = isMobileDevice();
     this.skipBtn = this.add.text(W - 22, 22, '', {
-      fontFamily: SANS, fontSize: '14px', color: '#b8a888', backgroundColor: '#00000088', padding: { x: 10, y: 5 },
+      fontFamily: SANS, fontSize: touch ? '28px' : '14px', color: '#b8a888', backgroundColor: '#00000088',
+      padding: touch ? { x: 28, y: 26 } : { x: 10, y: 5 },
     }).setOrigin(1, 0).setDepth(DEPTH + 8).setVisible(false).setInteractive({ useHandCursor: true });
     this.skipBtn.on('pointerdown', () => this.skip());
   }
@@ -75,7 +78,7 @@ export class StoryScene extends Phaser.Scene {
   }
 
   private showSkip(on: boolean): void {
-    this.skipBtn.setText(t('story.ui.skip')).setVisible(on);
+    this.skipBtn.setText(t(isMobileDevice() ? 'story.ui.skipTouch' : 'story.ui.skip')).setVisible(on);
   }
 
   // ── Input plumbing ──────────────────────────────────────────

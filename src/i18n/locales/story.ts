@@ -8,6 +8,7 @@ import type { LocaleData } from '../types';
 export const STORY_ZH: LocaleData = {
   // ─── ui ───
   'story.ui.skip': 'Esc 跳过',
+  'story.ui.skipTouch': '跳过 ▸▸',
 
   // ─── speaker ───
   'story.speaker.villain': '伊格纳罗斯',
@@ -249,6 +250,7 @@ export const STORY_ZH: LocaleData = {
 export const STORY_EN: LocaleData = {
   // ─── ui ───
   'story.ui.skip': 'Esc to skip',
+  'story.ui.skipTouch': 'Skip ▸▸',
 
   // ─── speaker ───
   'story.speaker.villain': 'Ignaroth',
