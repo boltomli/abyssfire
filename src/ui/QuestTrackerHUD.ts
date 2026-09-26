@@ -109,7 +109,7 @@ export function formatTrackerObjective(
   const typeLabel = labels[obj.type] ?? obj.type;
   const done = current >= obj.required;
   return {
-    label: `${typeLabel} ${getQuestTargetName(obj.targetId, obj.targetName)}`,
+    label: `${typeLabel} ${getQuestTargetName(obj.targetId, obj.targetName, obj.labelKey)}`,
     progress: done ? '✓' : `${current}/${obj.required}`,
     done,
   };
@@ -145,6 +145,7 @@ export function buildTrackerEntry(
  */
 export function buildTrackerState(
   activeQuests: { quest: QuestDefinition; progress: QuestProgress }[],
+  maxVisible: number = MAX_VISIBLE_QUESTS,
 ): TrackerState {
   // Sort: main first, then incomplete before complete
   const sorted = [...activeQuests].sort((a, b) => {
@@ -162,8 +163,8 @@ export function buildTrackerState(
   );
 
   const totalCount = entries.length;
-  const visibleCount = Math.min(totalCount, MAX_VISIBLE_QUESTS);
-  const hasMore = totalCount > MAX_VISIBLE_QUESTS;
+  const visibleCount = Math.min(totalCount, maxVisible);
+  const hasMore = totalCount > maxVisible;
 
   return {
     entries: entries.slice(0, visibleCount),

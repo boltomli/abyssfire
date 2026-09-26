@@ -493,10 +493,12 @@ export function addCloseButton(scene: Phaser.Scene, x: number, y: number, onClos
   const nKey = closeTexture(scene, false);
   const hKey = closeTexture(scene, true);
   const img = scene.add.image(x, y, nKey).setInteractive({ useHandCursor: true });
+  // Callers may enlarge the button (touch layouts) by storing a `baseScale` data value.
+  const base = (): number => (img.getData('baseScale') as number | undefined) ?? 1;
   img.on('pointerover', () => img.setTexture(hKey));
-  img.on('pointerout', () => { img.setTexture(nKey); img.setScale(1); });
-  img.on('pointerdown', () => { img.setScale(0.9); onClose(); });
-  img.on('pointerup', () => img.setScale(1));
+  img.on('pointerout', () => { img.setTexture(nKey); img.setScale(base()); });
+  img.on('pointerdown', () => { img.setScale(0.9 * base()); onClose(); });
+  img.on('pointerup', () => img.setScale(base()));
   return img;
 }
 
@@ -627,6 +629,8 @@ export class UiButton extends Phaser.GameObjects.Container {
   private enabled: boolean;
   private customColor?: string;
   private hovered = false;
+  /** Resting label offset (icon buttons put the caption below the icon). */
+  private labelY = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number, w: number, h: number, text: string, opts: ButtonOptions = {}) {
     super(scene, x, y);
@@ -664,7 +668,14 @@ export class UiButton extends Phaser.GameObjects.Container {
     const s: ButtonState = this.enabled ? state : 'disabled';
     this.bg.setTexture(buttonTexture(this.scene, this.bw, this.bh, this.variant, s).key);
     this.label.setColor(s === 'normal' && this.customColor ? this.customColor : buttonTextColor(this.variant, s));
-    this.label.setY(s === 'pressed' ? 1 : 0);
+    this.label.setY(this.labelY + (s === 'pressed' ? 1 : 0));
+  }
+
+  /** Move the label's resting position (e.g. under an icon); press feedback is kept. */
+  setLabelY(y: number): this {
+    this.labelY = y;
+    this.label.setY(y);
+    return this;
   }
 
   setEnabled(v: boolean): this {

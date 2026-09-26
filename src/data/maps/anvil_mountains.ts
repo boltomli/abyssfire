@@ -27,7 +27,7 @@ export const AnvilMountainsMap: MapData = {
     { col: 15, row: 85, monsterId: 'mountain_troll', count: 1 },
     // Q4 — bottom-right quadrant
     { col: 70, row: 60, monsterId: 'stone_golem', count: 6 },
-    { col: 65, row: 90, monsterId: 'mountain_troll', count: 2 },
+    { col: 65, row: 90, monsterId: 'stone_golem', count: 3 },
     { col: 85, row: 78, monsterId: 'stone_golem', count: 4 },
   ],
   camps: [

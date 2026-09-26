@@ -38,6 +38,10 @@ export const GameEvents = {
   QUEST_PROGRESS: 'quest:progress',
   /** The quest shown by the guide arrow changed: { questId | null }. */
   QUEST_TRACKED_CHANGED: 'quest:tracked_changed',
+  /** A story beat started/finished playing: { active: boolean }. */
+  STORY_STATE: 'story:state',
+  /** Show (BossBarState) or hide (null) the boss health bar. */
+  BOSS_BAR: 'story:boss_bar',
   ACHIEVEMENT_UNLOCKED: 'achievement:unlocked',
   HOMESTEAD_UPGRADED: 'homestead:upgraded',
   ITEM_DISCARDED: 'item:discarded',

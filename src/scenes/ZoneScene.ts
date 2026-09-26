@@ -41,6 +41,8 @@ import { audioManager } from '../systems/audio/AudioManager';
 import { applyColorGrading } from '../graphics/ColorGradePipeline';
 import { profileForQuality, resolveRenderQuality } from '../rendering/RenderQuality';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
+import { CHEST_OPEN_FRAME } from '../graphics/sprites/decorations/TreasureChest';
+import { subDungeonGateKey } from '../graphics/sprites/effects/DungeonGates';
 import { CAMP_THEMES } from '../data/camp-themes';
 import { setCurrentZonePalette } from '../graphics/ZonePalette';
 import { AllClasses } from '../data/classes/index';
@@ -64,7 +66,9 @@ import type { UIScene } from './UIScene';
 import { GameSession } from '../game/GameSession';
 import { ZoneTerrain } from '../graphics/terrain/ZoneTerrain';
 import { QuestWorld, questGiverOf } from '../systems/QuestWorld';
+import { StoryDirector } from '../systems/StoryDirector';
 import { generateRewardChoices, isCollectObjective, questDropChance, FALLBACK_COLLECT_CHANCE } from '../systems/QuestRewards';
+import { huntsToSpawn, makeHuntDefinition } from '../systems/QuestHunts';
 
 const TILE_KEYS = ['tile_grass', 'tile_dirt', 'tile_stone', 'tile_water', 'tile_wall', 'tile_camp', 'tile_camp_wall'];
 const CAMPFIRE_RECOVERY_RADIUS = 5;
@@ -92,6 +96,8 @@ function skillImpactColor(skillId: string, damageType: string): number {
 }
 
 const ZONE_SCREEN_UI_DEPTH = 5000;
+/** An escort left this far behind (tiles) catches up next to the player. */
+const ESCORT_CATCH_UP_TILES = 14;
 
 function fs(basePx: number): string {
   return `${Math.round(basePx * DPR)}px`;
@@ -120,6 +126,9 @@ export class ZoneScene extends Phaser.Scene {
   questSystem!: QuestSystem;
   /** Gather nodes, quest pickups and the guide arrow (null in dungeons). */
   questWorld: QuestWorld | null = null;
+  /** Story beats: prologue, chapter cards, cutscenes, boss intros (null in dungeons). */
+  storyDirector: StoryDirector | null = null;
+  private chapterCardPending = false;
   homesteadSystem!: HomesteadSystem;
   achievementSystem!: AchievementSystem;
   saveSystem!: SaveSystem;
@@ -201,6 +210,10 @@ export class ZoneScene extends Phaser.Scene {
   private isPortaling = false;
   /** Mini-boss monster reference per zone (spawned at a fixed position). */
   private miniBossMonster: Monster | null = null;
+  /** Named quest monsters alive in this zone, by hunt id. */
+  private questHuntMonsters = new Map<string, Monster>();
+  /** Quest-spawned monsters (hunts and their packs) never respawn. */
+  private questSpawned = new WeakSet<Monster>();
   /** Set of mini-boss IDs whose pre-fight dialogue has been seen (persisted in save). */
   private miniBossDialogueSeen: Set<string> = new Set();
   /** Whether the mini-boss dialogue is currently being shown. */
@@ -239,6 +252,10 @@ export class ZoneScene extends Phaser.Scene {
   private escortQuestId: string | null = null;
   private escortDestCol = 0;
   private escortDestRow = 0;
+  private escortPath: { col: number; row: number }[] = [];
+  /** The charge waits where the quest says until the hero comes to fetch them. */
+  private escortJoined = false;
+  private escortRepathAt = 0;
 
   /** Defend target sprite + state for active defend quests. */
   private defendTargetSprite: Phaser.GameObjects.Container | null = null;
@@ -447,11 +464,26 @@ export class ZoneScene extends Phaser.Scene {
         player: () => this.player,
         monsters: () => this.monsters,
         npcs: () => this.npcs,
+        escortTile: () => this.getEscortTile(),
       });
+      if (this.session) {
+        this.storyDirector = new StoryDirector({
+          scene: this,
+          story: this.session.story,
+          mapId: this.currentMapId,
+          player: () => this.player,
+          npcs: () => this.npcs,
+          monsters: () => this.monsters,
+          setCinematic: (on) => this.setCinematic(on),
+          save: () => this.autoSave(),
+        });
+      }
     }
     this.spawnPetSprite();
     this.spawnEscortNpc();
     this.spawnDefendTarget();
+    this.questHuntMonsters.clear();
+    this.spawnQuestHunts(false);
     this.buildCampDecorations();
     this.rebuildWorldCaches();
     for (const decor of this.campDecorPositions) {
@@ -583,6 +615,8 @@ export class ZoneScene extends Phaser.Scene {
     this.subscriptions.on(EventBus, GameEvents.SKILL_LEVEL_CHANGED, this.handleSkillLevelChanged, this);
     // Update NPC quest indicators immediately when quest state changes
     this.subscriptions.on(EventBus, GameEvents.QUEST_ACCEPTED, this.updateNPCQuestMarkers, this);
+    this.subscriptions.on(EventBus, GameEvents.QUEST_ACCEPTED, this.handleQuestAcceptedWorld, this);
+    this.subscriptions.on(EventBus, GameEvents.QUEST_PROGRESS, this.handleQuestProgressWorld, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_TURNED_IN, this.updateNPCQuestMarkers, this);
     // React to locale changes for persistent UI elements
     this.subscriptions.on(EventBus, GameEvents.LOCALE_CHANGED, this.handleLocaleChanged, this);
@@ -596,8 +630,21 @@ export class ZoneScene extends Phaser.Scene {
       type: 'system',
     });
 
-    this.showZoneBanner();
+    // A first visit opens with the chapter card instead of the plain banner.
+    this.chapterCardPending = this.storyDirector?.start() ?? false;
+    if (!this.chapterCardPending) this.showZoneBanner();
     this.autoSave();
+  }
+
+  /**
+   * Freeze the world for a story beat: update() stops input, AI and incoming
+   * hits while `storyDirector.cinematic` is set, and UIScene hides the HUD.
+   */
+  private setCinematic(on: boolean): void {
+    if (on) {
+      this.player.path = [];
+      this.player.attackTarget = null;
+    }
   }
 
   /** Update persistent text labels when locale changes. */
@@ -668,6 +715,9 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
+    if (this.storyDirector?.cinematic) return;
+    // A touch on the joystick / a touch button is not also a tap on the world.
+    if (this.mobileControls?.claimsPointer(pointer)) return;
     if (pointer.rightButtonDown()) {
       this.useTownPortal();
       return;
@@ -865,6 +915,7 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
+    if (this.storyDirector?.cinematic) return;
     const recovery = this.getPlayerRecoveryModifiers();
     this.handleKeyboardMovement(delta);
     this.handleSkillInput(time);
@@ -1045,6 +1096,7 @@ export class ZoneScene extends Phaser.Scene {
     this.collectOcclusionTargets();
     this.updateDecorOcclusion(delta);
     this.questWorld?.update(delta);
+    this.storyDirector?.update(delta);
     if (this.terrain) {
       if (this.terrain.hasPending()) {
         this.terrain.flush(4, (c, r) => !!this.tileSprites[r]?.[c], (c, r, key) => { this.tileSprites[r]?.[c]?.setTexture(key); });
@@ -1655,7 +1707,7 @@ export class ZoneScene extends Phaser.Scene {
       const newRow = this.player.tileRow + (dy / len) * speed;
       const checkCol = Math.round(newCol), checkRow = Math.round(newRow);
       if (checkCol >= 0 && checkCol < this.mapData.cols && checkRow >= 0 && checkRow < this.mapData.rows && this.mapData.collisions[checkRow][checkCol]) {
-        this.player.moveTo(newCol, newRow);
+        this.player.moveDirect(newCol, newRow);
       }
     }
   }
@@ -2038,7 +2090,16 @@ export class ZoneScene extends Phaser.Scene {
     // ── Teleport: instant reposition to walkable tile near target ──
     if (skillId === 'teleport') {
       const pointer = this.input.activePointer;
-      const tile = worldToTile(pointer.worldX, pointer.worldY);
+      let tile = worldToTile(pointer.worldX, pointer.worldY);
+      // Cast from a touch button: the finger is on the button, not the destination — blink
+      // along the joystick direction, else to the current target.
+      if (this.mobileControls?.claimsPointer(pointer)) {
+        const dir = this.mobileControls.getDirection();
+        const len = Math.hypot(dir.dx, dir.dy);
+        tile = len > 0.2
+          ? { col: this.player.tileCol + (dir.dx / len) * 6, row: this.player.tileRow + (dir.dy / len) * 6 }
+          : target ? { col: target.tileCol, row: target.tileRow } : { col: this.player.tileCol, row: this.player.tileRow };
+      }
       let destCol = Math.round(tile.col);
       let destRow = Math.round(tile.row);
       // Clamp to map bounds
@@ -2432,6 +2493,7 @@ export class ZoneScene extends Phaser.Scene {
   /** Launch a monster's attack; its damage resolves when the blow (or projectile) lands. */
   private resolveMonsterStrike(monster: Monster): void {
     if (!monster.isAlive() || this.player.hp <= 0 || this.isTransitioning) return;
+    if (this.storyDirector?.cinematic) return;
     // Stunned/rooted mid-swing: the attack is interrupted.
     if (this.statusEffects.isImmobilized(monster.id)) return;
     const ranged = monster.definition.attackRange > 2.5;
@@ -2803,6 +2865,9 @@ export class ZoneScene extends Phaser.Scene {
     this.player.gold += gold;
     EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.event.treasureChest.goldReward', { gold }), type: 'info' });
 
+    // The cache itself: a chest that has just burst open, fading once looted.
+    this.spawnOpenedCacheChest(event.col, event.row);
+
     // Drop items near the event position
     for (const item of items) {
       this.dropLootAtPosition(item, event.col, event.row);
@@ -3136,6 +3201,20 @@ export class ZoneScene extends Phaser.Scene {
     });
   }
 
+  /** Opened treasure-cache chest prop; purely visual, fades after a while. */
+  private spawnOpenedCacheChest(col: number, row: number): void {
+    const { x, y } = cartToIso(col, row);
+    SpriteGenerator.ensureDecoration(this, 'decor_treasure_chest');
+    if (!this.textures.exists('decor_treasure_chest')) return;
+    const meta = SpriteGenerator.getDecorMeta('decor_treasure_chest');
+    const chest = this.add.image(x, y, 'decor_treasure_chest', CHEST_OPEN_FRAME)
+      .setOrigin(0.5, meta?.anchorY ?? 0.85)
+      .setScale(1 / TEXTURE_SCALE)
+      .setDepth(y + 20);
+    this.tweens.add({ targets: chest, alpha: 0, delay: 8000, duration: 1200, onComplete: () => chest.destroy() });
+    EventBus.once(GameEvents.ZONE_EXIT, () => { if (chest.scene) chest.destroy(); });
+  }
+
   /** Helper: drop a loot item at a specific tile position (used by treasure cache events). */
   private dropLootAtPosition(item: ItemInstance, col: number, row: number): void {
     const { x: wx, y: wy } = cartToIso(col, row);
@@ -3147,11 +3226,19 @@ export class ZoneScene extends Phaser.Scene {
     const container = this.add.container(finalX, finalY - 30 * DPR);
     container.setDepth(wy + 50);
 
-    const colors: Record<string, number> = { normal: 0xffffff, magic: 0x4488ff, rare: 0xffff00, legendary: 0xff8800, set: 0x44ff44 };
-    const color = colors[item.quality] ?? 0xffffff;
-
-    const bag = this.add.rectangle(0, 0, 12 * DPR, 12 * DPR, color);
+    // Same cel-shaded loot bag (quality tint + name) as monster drops.
+    SpriteGenerator.ensureEffect(this, 'loot_bag');
+    const bag = this.add.image(0, 0, 'loot_bag').setScale(1 / TEXTURE_SCALE);
+    if (item.quality !== 'normal') bag.setTint(this.getQualityColor(item.quality));
     container.add(bag);
+    if (this.vfx && item.quality !== 'normal') this.vfx.applyLootGlow(container, item.quality);
+    const qualityColors: Record<string, string> = {
+      normal: '#cccccc', magic: '#6888ff', rare: '#f1c40f', legendary: '#ff8800', set: '#2ecc71',
+    };
+    container.add(this.add.text(0, -18, item.name, {
+      fontSize: fs(12), color: qualityColors[item.quality] || '#cccccc',
+      fontFamily: '"Cinzel", serif', stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+    }).setOrigin(0.5));
 
     // Drop animation
     this.tweens.add({
@@ -3227,19 +3314,7 @@ export class ZoneScene extends Phaser.Scene {
             });
           }
         }
-        // Handle investigate clue objectives (location-based discovery)
-        if (obj.type === 'investigate_clue' && obj.location && progress.objectives[i].current < obj.required) {
-          const dx = this.player.tileCol - obj.location.col;
-          const dy = this.player.tileRow - obj.location.row;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist <= obj.location.radius) {
-            this.questSystem.updateProgress('investigate_clue', obj.targetId);
-            EventBus.emit(GameEvents.LOG_MESSAGE, {
-              text: t('zone.quest.clueFound', { targetName: getQuestTargetName(obj.targetId, obj.targetName) }),
-              type: 'system',
-            });
-          }
-        }
+        // Investigate clues are examined at their marks (QuestWorld).
         // Escort destination check is handled by updateEscortNpc() —
         // completion is gated on the escort NPC arriving, not just the player.
       }
@@ -3299,6 +3374,7 @@ export class ZoneScene extends Phaser.Scene {
     this.achievementSystem.checkLevel(this.player.level);
 
     this.questSystem.updateProgress('kill', monster.definition.id);
+    this.storyDirector?.onMonsterKilled(monster.definition.id);
 
     // Difficulty completion check: killing demon_lord in Abyss Rift completes current difficulty
     if (!this.isInDungeon && DifficultySystem.shouldMarkCompleted(
@@ -3374,6 +3450,8 @@ export class ZoneScene extends Phaser.Scene {
     // Don't respawn mini-bosses
     if (this.miniBossMonster === monster) {
       this.miniBossMonster = null;
+    } else if (this.questSpawned.has(monster)) {
+      if (this.questHuntMonsters.get(monster.definition.id) === monster) this.questHuntMonsters.delete(monster.definition.id);
     } else {
       this.time.delayedCall(15000, () => this.respawnMonster(monster));
     }
@@ -3449,21 +3527,13 @@ export class ZoneScene extends Phaser.Scene {
     const container = this.add.container(worldPos.x, worldPos.y);
     container.setDepth(worldPos.y + 30);
 
-    const color = type === 'hp' ? 0xcc2222 : 0x2244cc;
-    const glowColor = type === 'hp' ? 0xff4444 : 0x4466ff;
-
-    // Glow
-    const glow = this.add.circle(0, 0, 12, glowColor, 0.25);
-    container.add(glow);
-
-    // Bottle body
-    const body = this.add.rectangle(0, 1, 8, 10, color);
-    body.setStrokeStyle(1, 0xffffff, 0.5);
-    container.add(body);
-    // Bottle cap
-    const cap = this.add.circle(0, -5, 3, color);
-    cap.setStrokeStyle(1, 0xffffff, 0.3);
-    container.add(cap);
+    // Cel-shaded potion flask standing on the ground point.
+    const potionKey = type === 'hp' ? 'potion_drop_hp' : 'potion_drop_mp';
+    SpriteGenerator.ensureEffect(this, potionKey);
+    const flask = this.add.image(0, 4, potionKey)
+      .setOrigin(0.5, SpriteGenerator.getEffectAnchorY(potionKey) ?? 0.5)
+      .setScale(1 / TEXTURE_SCALE);
+    container.add(flask);
 
     // Bobbing animation
     this.tweens.add({
@@ -3750,6 +3820,7 @@ export class ZoneScene extends Phaser.Scene {
         miniBossDialogueSeen: [...this.miniBossDialogueSeen],
         loreCollected: [...this.loreCollected],
         discoveredHiddenAreas: [...this.discoveredHiddenAreas],
+        storySeen: this.session?.story.toSave(),
       });
     } catch (_e) { /* silent fail */ }
   }
@@ -3803,6 +3874,8 @@ export class ZoneScene extends Phaser.Scene {
 
     // 3. Quests
     if (save.quests) this.questSystem.loadProgress(save.quests);
+    // Saves from before the story existed: don't replay the prologue for veterans.
+    this.session?.story.load(save.storySeen ?? ['prologue']);
 
     // 4. Homestead
     if (save.homestead) {
@@ -3956,16 +4029,21 @@ export class ZoneScene extends Phaser.Scene {
       const container = this.add.container(worldX, worldY);
       container.setDepth(worldY + 100);
 
-      // Glow circle indicator
-      const glow = this.add.ellipse(0, 0, 28 * DPR, 14 * DPR, 0xaa44ff, 0.5);
+      // Soft violet pool of light on the ground
+      const glow = this.add.image(0, 0, 'fx_glow').setTint(0xaa44ff).setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(0.6, 0.28).setAlpha(0.5);
       container.add(glow);
 
-      // Pulsing butterfly icon (small colored rectangle as a procedural sprite)
-      const wing = this.add.rectangle(0, -10 * DPR, 12 * DPR, 8 * DPR, 0xcc66ff);
+      // The rare pet itself (same cel-shaded art as the follower), hovering
+      const petKey = `decor_pet_${spawn.petId}`;
+      SpriteGenerator.ensureDecoration(this, petKey);
+      const wing = this.add.image(0, -4 * DPR, petKey)
+        .setOrigin(0.5, SpriteGenerator.getDecorMeta(petKey)?.anchorY ?? 0.9)
+        .setScale(1 / TEXTURE_SCALE);
       container.add(wing);
 
       // Floating label
-      const label = this.add.text(0, -22 * DPR, t('zone.pet.voidButterfly.label'), {
+      const label = this.add.text(0, -40 * DPR, t('zone.pet.voidButterfly.label'), {
         fontFamily: 'serif',
         fontSize: fs(10),
         color: '#cc88ff',
@@ -3978,8 +4056,8 @@ export class ZoneScene extends Phaser.Scene {
       this.tweens.add({
         targets: glow,
         alpha: { from: 0.3, to: 0.7 },
-        scaleX: { from: 0.9, to: 1.1 },
-        scaleY: { from: 0.9, to: 1.1 },
+        scaleX: { from: 0.54, to: 0.66 },
+        scaleY: { from: 0.25, to: 0.31 },
         duration: 1200,
         yoyo: true,
         repeat: -1,
@@ -3988,7 +4066,7 @@ export class ZoneScene extends Phaser.Scene {
       // Gentle float on the wing
       this.tweens.add({
         targets: wing,
-        y: -14 * DPR,
+        y: -10 * DPR,
         duration: 800,
         yoyo: true,
         repeat: -1,
@@ -4141,7 +4219,7 @@ export class ZoneScene extends Phaser.Scene {
       container.add(visual.elements);
 
       // Floating label
-      const label = this.add.text(0, -28 * DPR, `✦ ${entry.name}`, {
+      const label = this.add.text(0, -46 * DPR, `✦ ${entry.name}`, {
         fontFamily: '"Noto Sans SC", sans-serif',
         fontSize: fs(9),
         color: this.getLoreSpriteColor(entry.spriteType),
@@ -4170,81 +4248,19 @@ export class ZoneScene extends Phaser.Scene {
 
   /** Create distinct visual elements for a lore sprite type. */
   private createLoreVisual(spriteType: string): { elements: Phaser.GameObjects.GameObject[]; glow: Phaser.GameObjects.GameObject | null } {
-    const elements: Phaser.GameObjects.GameObject[] = [];
-    let glow: Phaser.GameObjects.GameObject | null = null;
-
-    switch (spriteType) {
-      case 'ancient_tablet': {
-        const base = this.add.rectangle(0, -6 * DPR, 16 * DPR, 20 * DPR, 0x8B7355);
-        base.setStrokeStyle(1, 0x5C4033);
-        elements.push(base);
-        const rune = this.add.rectangle(0, -8 * DPR, 8 * DPR, 3 * DPR, 0xDAA520);
-        elements.push(rune);
-        glow = this.add.ellipse(0, 0, 24 * DPR, 12 * DPR, 0xDAA520, 0.4);
-        elements.push(glow);
-        break;
-      }
-      case 'old_scroll': {
-        const scroll = this.add.rectangle(0, -6 * DPR, 18 * DPR, 12 * DPR, 0xF5DEB3);
-        scroll.setStrokeStyle(1, 0xA0522D);
-        elements.push(scroll);
-        const rod1 = this.add.rectangle(-8 * DPR, -6 * DPR, 3 * DPR, 14 * DPR, 0x8B4513);
-        elements.push(rod1);
-        const rod2 = this.add.rectangle(8 * DPR, -6 * DPR, 3 * DPR, 14 * DPR, 0x8B4513);
-        elements.push(rod2);
-        glow = this.add.ellipse(0, 0, 24 * DPR, 12 * DPR, 0xF5DEB3, 0.3);
-        elements.push(glow);
-        break;
-      }
-      case 'crystal_shard': {
-        const crystal = this.add.triangle(0, -10 * DPR, 0, 16 * DPR, 8 * DPR, 0, -8 * DPR, 0, 0x66CCFF);
-        elements.push(crystal);
-        glow = this.add.ellipse(0, 0, 22 * DPR, 11 * DPR, 0x66CCFF, 0.5);
-        elements.push(glow);
-        break;
-      }
-      case 'carved_stone': {
-        const stone = this.add.rectangle(0, -4 * DPR, 20 * DPR, 14 * DPR, 0x808080);
-        stone.setStrokeStyle(1, 0x505050);
-        elements.push(stone);
-        const carving = this.add.rectangle(0, -5 * DPR, 12 * DPR, 6 * DPR, 0xA9A9A9);
-        elements.push(carving);
-        glow = this.add.ellipse(0, 0, 26 * DPR, 13 * DPR, 0xB0C4DE, 0.3);
-        elements.push(glow);
-        break;
-      }
-      case 'torn_journal': {
-        const book = this.add.rectangle(0, -6 * DPR, 14 * DPR, 16 * DPR, 0xDEB887);
-        book.setStrokeStyle(1, 0x8B4513);
-        elements.push(book);
-        const spine = this.add.rectangle(-6 * DPR, -6 * DPR, 3 * DPR, 16 * DPR, 0x654321);
-        elements.push(spine);
-        glow = this.add.ellipse(0, 0, 20 * DPR, 10 * DPR, 0xDEB887, 0.3);
-        elements.push(glow);
-        break;
-      }
-      case 'rune_pillar': {
-        const pillar = this.add.rectangle(0, -10 * DPR, 10 * DPR, 24 * DPR, 0x4B0082);
-        pillar.setStrokeStyle(1, 0x2F0060);
-        elements.push(pillar);
-        const rune1 = this.add.rectangle(0, -14 * DPR, 6 * DPR, 3 * DPR, 0x9370DB);
-        elements.push(rune1);
-        const rune2 = this.add.rectangle(0, -6 * DPR, 6 * DPR, 3 * DPR, 0x9370DB);
-        elements.push(rune2);
-        glow = this.add.ellipse(0, 0, 20 * DPR, 10 * DPR, 0x9370DB, 0.5);
-        elements.push(glow);
-        break;
-      }
-      default: {
-        const defaultObj = this.add.rectangle(0, -6 * DPR, 14 * DPR, 14 * DPR, 0xCCCCCC);
-        elements.push(defaultObj);
-        glow = this.add.ellipse(0, 0, 20 * DPR, 10 * DPR, 0xCCCCCC, 0.3);
-        elements.push(glow);
-        break;
-      }
-    }
-
-    return { elements, glow };
+    // Cel-shaded prop per lore type (src/graphics/sprites/decorations/LoreProps.ts),
+    // standing on the tile's ground point, over a soft pulsing pool of light.
+    const glowTint = Phaser.Display.Color.HexStringToColor(this.getLoreSpriteColor(spriteType)).color;
+    const pool = this.add.image(0, 0, 'fx_glow').setTint(glowTint).setBlendMode(Phaser.BlendModes.ADD)
+      .setScale(0.55, 0.26).setAlpha(0.8);
+    const glow = this.add.container(0, 0, [pool]);
+    let key = `decor_lore_${spriteType}`;
+    if (!SpriteGenerator.hasDecoration(key)) key = 'decor_lore_scroll';
+    SpriteGenerator.ensureDecoration(this, key);
+    const prop = this.add.image(0, 0, key)
+      .setOrigin(0.5, SpriteGenerator.getDecorMeta(key)?.anchorY ?? 0.9)
+      .setScale(1 / TEXTURE_SCALE);
+    return { elements: [glow, prop], glow };
   }
 
   /** Get display color for a lore sprite type label. */
@@ -4419,9 +4435,16 @@ export class ZoneScene extends Phaser.Scene {
         ? 'decor_gold_pile'
         : 'decor_lore_scroll';
     SpriteGenerator.ensureDecoration(this, rewardSpriteKey);
+    let propTop = -30 * DPR;
     if (this.textures.exists(rewardSpriteKey)) {
-      const rewardVisual = this.add.image(0, -12, rewardSpriteKey).setScale(1 / TEXTURE_SCALE);
+      // Stand the prop on its ground-contact point; chests loop their glint.
+      const rewardVisual = this.add.sprite(0, 0, rewardSpriteKey, 0)
+        .setOrigin(0.5, SpriteGenerator.getDecorMeta(rewardSpriteKey)?.anchorY ?? 0.5)
+        .setScale(1 / TEXTURE_SCALE);
+      const loopAnim = SpriteGenerator.getLoopAnimKey(this, rewardSpriteKey);
+      if (loopAnim) rewardVisual.play({ key: loopAnim, startFrame: rewardIndex % 8 });
       container.add(rewardVisual);
+      propTop = Math.min(propTop, -rewardVisual.displayHeight * rewardVisual.originY - 8);
     } else if (reward.type === 'chest') {
       // Keep a minimal resilience fallback for a failed texture context.
       const chest = this.add.rectangle(0, -12, Math.round(20 * DPR), Math.round(14 * DPR), 0xDAA520);
@@ -4438,14 +4461,16 @@ export class ZoneScene extends Phaser.Scene {
     }
 
     if (reward.type === 'chest') {
-      // Glow effect
-      const glow = this.add.ellipse(0, 0, Math.round(36 * DPR), Math.round(18 * DPR), 0xFFD700, 0.3);
+      // Warm pool of light under the chest
+      const glow = this.add.image(0, 0, 'fx_glow').setTint(0xffd060).setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(0.7, 0.3).setAlpha(0.6);
       container.add(glow);
-      this.tweens.add({ targets: glow, alpha: 0.1, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      container.sendToBack(glow);
+      this.tweens.add({ targets: glow, alpha: 0.2, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }
 
     // Interactable label
-    const label = this.add.text(0, -30 * DPR, reward.type === 'chest' ? t('zone.hiddenArea.rewardChest') : reward.type === 'gold_pile' ? t('zone.hiddenArea.rewardGoldPile') : t('zone.hiddenArea.rewardScroll'), {
+    const label = this.add.text(0, propTop, reward.type === 'chest' ? t('zone.hiddenArea.rewardChest') : reward.type === 'gold_pile' ? t('zone.hiddenArea.rewardGoldPile') : t('zone.hiddenArea.rewardScroll'), {
       fontSize: fs(9),
       color: '#FFD700',
       fontFamily: '"Noto Sans SC", sans-serif',
@@ -4502,10 +4527,24 @@ export class ZoneScene extends Phaser.Scene {
       });
     }
 
+    // Chests pop open before fading; other rewards fade straight away.
+    let fadeDelay = 0;
+    if (reward.type === 'chest') {
+      for (const child of entry.sprite.list) {
+        if (child instanceof Phaser.GameObjects.Sprite && child.texture.key === 'decor_treasure_chest'
+          && child.texture.has(String(CHEST_OPEN_FRAME))) {
+          child.stop();
+          child.setFrame(CHEST_OPEN_FRAME);
+          fadeDelay = 700;
+        }
+      }
+    }
+
     // Animate and destroy
     this.tweens.add({
       targets: entry.sprite,
       alpha: 0, scaleX: 1.3, scaleY: 1.3,
+      delay: fadeDelay,
       duration: 400,
       onComplete: () => { entry.sprite.destroy(); },
     });
@@ -4515,6 +4554,26 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   // ─── Random Dungeon Portal & Floor Transitions ───────────────────────
+
+  /**
+   * Add an animated gate sprite (dungeon / sub-dungeon entrance) standing on
+   * the container's ground point. Returns the label Y just above its top.
+   */
+  private addGateVisual(container: Phaser.GameObjects.Container, key: string, glowTint: number): number {
+    const pool = this.add.image(0, 0, 'fx_glow').setTint(glowTint).setBlendMode(Phaser.BlendModes.ADD)
+      .setScale(1.1, 0.45).setAlpha(0.45);
+    container.add(pool);
+    this.tweens.add({ targets: pool, alpha: 0.2, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    SpriteGenerator.ensureEffect(this, key);
+    if (!this.textures.exists(key)) return -46 * DPR;
+    const gate = this.add.sprite(0, 0, key, 0)
+      .setOrigin(0.5, SpriteGenerator.getEffectAnchorY(key) ?? 0.8)
+      .setScale(1 / TEXTURE_SCALE);
+    const anim = SpriteGenerator.getLoopAnimKey(this, key);
+    if (anim) gate.play(anim);
+    container.add(gate);
+    return -gate.displayHeight * gate.originY - 8;
+  }
 
   /** Spawn the dungeon portal in Abyss Rift zone. */
   private spawnDungeonPortal(): void {
@@ -4542,31 +4601,11 @@ export class ZoneScene extends Phaser.Scene {
     const container = this.add.container(worldX, worldY);
     container.setDepth(worldY + 100);
 
-    // Portal base — larger and visually distinct from exit/sub-dungeon portals
-    const portalBase = this.add.ellipse(0, 0, Math.round(40 * DPR), Math.round(20 * DPR), 0x440000, 0.8);
-    container.add(portalBase);
-
-    // Outer ring — crimson/dark-red glow (distinct from purple sub-dungeon portals)
-    const outerRing = this.add.ellipse(0, -20 * DPR, Math.round(36 * DPR), Math.round(44 * DPR));
-    outerRing.setStrokeStyle(Math.round(4 * DPR), 0xFF3300);
-    outerRing.setFillStyle(0x880000, 0.35);
-    container.add(outerRing);
-
-    // Inner glow — fiery red-orange
-    const innerGlow = this.add.ellipse(0, -20 * DPR, Math.round(22 * DPR), Math.round(30 * DPR), 0xFF6600, 0.5);
-    container.add(innerGlow);
-
-    // Core — bright center
-    const core = this.add.ellipse(0, -20 * DPR, Math.round(10 * DPR), Math.round(14 * DPR), 0xFFAA00, 0.6);
-    container.add(core);
-
-    // Pulsing animations
-    this.tweens.add({ targets: innerGlow, alpha: 0.2, scaleX: 0.8, scaleY: 0.8, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    this.tweens.add({ targets: outerRing, alpha: 0.5, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    this.tweens.add({ targets: core, alpha: 0.3, scaleX: 0.6, scaleY: 0.6, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    // Crimson basalt gate with a swirling vortex (effects/DungeonGates.ts)
+    const gateTop = this.addGateVisual(container, 'dungeon_portal', 0xff5a2a);
 
     // Label
-    const label = this.add.text(0, -46 * DPR, DungeonSystem.getDungeonPortalLabel(), {
+    const label = this.add.text(0, gateTop, DungeonSystem.getDungeonPortalLabel(), {
       fontSize: fs(11),
       color: '#FF6633',
       fontFamily: '"Noto Sans SC", sans-serif',
@@ -4702,26 +4741,11 @@ export class ZoneScene extends Phaser.Scene {
       const container = this.add.container(worldX, worldY);
       container.setDepth(worldY + 100);
 
-      // Portal base (dark ellipse)
-      const portalBase = this.add.ellipse(0, 0, Math.round(32 * DPR), Math.round(16 * DPR), 0x220044, 0.7);
-      container.add(portalBase);
-
-      // Portal ring (purple glowing ring)
-      const portalRing = this.add.ellipse(0, -16 * DPR, Math.round(28 * DPR), Math.round(36 * DPR));
-      portalRing.setStrokeStyle(Math.round(3 * DPR), 0x9933FF);
-      portalRing.setFillStyle(0x6600CC, 0.3);
-      container.add(portalRing);
-
-      // Inner glow
-      const innerGlow = this.add.ellipse(0, -16 * DPR, Math.round(18 * DPR), Math.round(24 * DPR), 0xCC66FF, 0.4);
-      container.add(innerGlow);
-
-      // Pulsing animation
-      this.tweens.add({ targets: innerGlow, alpha: 0.15, scaleX: 0.8, scaleY: 0.8, duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-      this.tweens.add({ targets: portalRing, alpha: 0.6, duration: 1500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      // Themed entrance (mine shaft / demon ring gate) from effects/DungeonGates.ts
+      const gateTop = this.addGateVisual(container, subDungeonGateKey(entrance.targetSubDungeon), 0xb070ff);
 
       // Label
-      const label = this.add.text(0, -40 * DPR, getSubDungeonEntranceName(entrance.id, entrance.name), {
+      const label = this.add.text(0, gateTop, getSubDungeonEntranceName(entrance.id, entrance.name), {
         fontSize: fs(10),
         color: '#CC88FF',
         fontFamily: '"Noto Sans SC", sans-serif',
@@ -6073,6 +6097,96 @@ export class ZoneScene extends Phaser.Scene {
   // ─── Escort Quest Runtime ─────────────────────────────────────────────────
   // ---------------------------------------------------------------------------
 
+  /**
+   * Escort NPCs and defend targets used to spawn only on zone entry, so a
+   * quest accepted in camp had nothing to escort/defend until the player left
+   * and came back — the quests could not be finished. Spawn them on accept.
+   */
+  private handleQuestAcceptedWorld(data: { questId: string }): void {
+    if (this.isInDungeon) return;
+    const quest = this.questSystem.quests.get(data.questId);
+    if (!quest || quest.zone !== this.currentMapId) return;
+    if (quest.type === 'escort' && !this.escortQuestId) this.spawnEscortNpc();
+    if (quest.type === 'defend' && !this.defendQuestId) this.spawnDefendTarget();
+    this.spawnQuestHunts(false);
+  }
+
+  /** A tracked-down hunt appears once the objectives before it are done. */
+  private handleQuestProgressWorld(): void {
+    if (this.isInDungeon) return;
+    this.spawnQuestHunts(true);
+  }
+
+  /** Put every due quest hunt (and its pack) into the world. */
+  private spawnQuestHunts(announce: boolean): void {
+    if (this.isInDungeon) return;
+    for (const [id, m] of this.questHuntMonsters) {
+      if (!m.isAlive()) this.questHuntMonsters.delete(id);
+    }
+    const due = huntsToSpawn(this.questSystem.getActiveQuests(), this.currentMapId, new Set(this.questHuntMonsters.keys()));
+    const zoneDefs = MonstersByZone[this.currentMapId] || [];
+    const baseOf = (id: string) => zoneDefs.find(m => m.id === id) || getMonsterDef(id);
+    for (const { hunt } of due) {
+      const base = baseOf(hunt.monsterId);
+      if (!base) continue;
+      const spot = this.mapData.collisions[hunt.row]?.[hunt.col]
+        ? { col: hunt.col, row: hunt.row }
+        : this.findWalkableNear(hunt.col, hunt.row, 6);
+      if (!spot) continue;
+      const def = DifficultySystem.scaleMonster(makeHuntDefinition(base, hunt, getMonsterName(hunt.huntId, hunt.name)), this.difficulty);
+      const monster = new Monster(this, def, spot.col, spot.row);
+      const affixes = this.eliteAffixSystem.rollAffixes(this.currentMapId, true);
+      if (affixes.length > 0) monster.applyEliteAffixes(affixes, this.eliteAffixSystem);
+      // A head taller than its kin.
+      const body = monster.sprite.list.find(o => o instanceof Phaser.GameObjects.Sprite) as Phaser.GameObjects.Sprite | undefined;
+      body?.setScale(body.scaleX * 1.25);
+      this.monsters.push(monster);
+      this.monsterGrid.insert(monster);
+      this.questSpawned.add(monster);
+      this.questHuntMonsters.set(hunt.huntId, monster);
+
+      const minionBase = hunt.minions ? baseOf(hunt.minions.monsterId) : undefined;
+      if (hunt.minions && minionBase) {
+        const minionDef = DifficultySystem.scaleMonster(minionBase, this.difficulty);
+        for (let i = 0; i < hunt.minions.count; i++) {
+          const c = spot.col + randomInt(-3, 3);
+          const r = spot.row + randomInt(-3, 3);
+          if (!this.mapData.collisions[r]?.[c]) continue;
+          const minion = new Monster(this, minionDef, c, r);
+          this.monsters.push(minion);
+          this.monsterGrid.insert(minion);
+          this.questSpawned.add(minion);
+        }
+      }
+
+      if (announce) {
+        EventBus.emit(GameEvents.LOG_MESSAGE, {
+          text: t('zone.quest.huntRevealed', { name: def.name }),
+          type: 'system',
+        });
+        this.cameras.main.shake(260, 0.004);
+      }
+    }
+  }
+
+  /** Nearest walkable tile within `radius` rings of (col, row), skipping the tile itself. */
+  private findWalkableNear(col: number, row: number, radius: number): { col: number; row: number } | null {
+    for (let r = 1; r <= radius; r++) {
+      for (let dr = -r; dr <= r; dr++) {
+        for (let dc = -r; dc <= r; dc++) {
+          if (Math.max(Math.abs(dc), Math.abs(dr)) !== r) continue;
+          if (this.mapData.collisions[row + dr]?.[col + dc]) return { col: col + dc, row: row + dr };
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Tile the escort NPC stands on (for the quest guide), or null. */
+  getEscortTile(): { col: number; row: number } | null {
+    return this.escortQuestId ? { col: this.escortNpcTileCol, row: this.escortNpcTileRow } : null;
+  }
+
   /** Spawn escort NPC if any escort quest is active in this zone. */
   private spawnEscortNpc(): void {
     this.destroyEscortNpc();
@@ -6088,6 +6202,8 @@ export class ZoneScene extends Phaser.Scene {
       this.escortDestCol = en.destCol;
       this.escortDestRow = en.destRow;
       this.escortQuestId = quest.id;
+      this.escortJoined = false;
+      this.escortPath = [];
 
       // HP scales with zone level
       const baseHp = quest.level * 20 + 100;
@@ -6138,34 +6254,64 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   /** Update escort NPC: follow player, take damage from nearby monsters, check arrival. */
-  private updateEscortNpc(time: number, _delta: number): void {
+  private updateEscortNpc(time: number, delta: number): void {
     if (!this.escortNpcSprite || !this.escortQuestId) return;
 
-    // Follow player (stay 1-2 tiles behind)
+    // Follow the player along a real path (a straight line got stuck on
+    // walls, water and rocks). Re-plan a few times a second.
     const dx = this.player.tileCol - this.escortNpcTileCol;
     const dy = this.player.tileRow - this.escortNpcTileRow;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist > 2) {
-      const speed = 0.05; // tiles per frame (slightly slower than player)
-      const nx = dx / dist;
-      const ny = dy / dist;
-      let newCol = this.escortNpcTileCol + nx * speed;
-      let newRow = this.escortNpcTileRow + ny * speed;
-      newCol = Math.max(1, Math.min(this.mapData.cols - 2, newCol));
-      newRow = Math.max(1, Math.min(this.mapData.rows - 2, newRow));
-      const checkCol = Math.round(newCol);
-      const checkRow = Math.round(newRow);
-      if (this.mapData.collisions[checkRow]?.[checkCol]) {
-        this.escortNpcTileCol = newCol;
-        this.escortNpcTileRow = newRow;
+    if (!this.escortJoined) {
+      if (dist > 5) {
+        this.syncEscortSprite();
+        return;
       }
+      this.escortJoined = true;
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.escort.joined', { npcName: this.questSystem.quests.get(this.escortQuestId)?.escortNpc?.name ?? '' }), type: 'system' });
+    }
+    if (dist > ESCORT_CATCH_UP_TILES) {
+      // Left far behind (player ran off, got blocked): catch up out of sight.
+      const spot = this.findWalkableNear(Math.round(this.player.tileCol), Math.round(this.player.tileRow), 2);
+      if (spot) { this.escortNpcTileCol = spot.col; this.escortNpcTileRow = spot.row; this.escortPath = []; }
+    } else if (dist > 2) {
+      if (time >= this.escortRepathAt || this.escortPath.length === 0) {
+        this.escortRepathAt = time + 400;
+        const path = this.pathfinding.findPath(
+          Math.round(this.escortNpcTileCol), Math.round(this.escortNpcTileRow),
+          Math.round(this.player.tileCol), Math.round(this.player.tileRow),
+        );
+        // Stop a tile or two short of the player.
+        this.escortPath = path.slice(1, Math.max(1, path.length - 1));
+      }
+      // Tiles per second, a touch slower than the hero.
+      let budget = (this.player.moveSpeed / 38) * 0.9 * (delta / 1000);
+      while (budget > 0 && this.escortPath.length > 0) {
+        const next = this.escortPath[0];
+        const sx = next.col - this.escortNpcTileCol;
+        const sy = next.row - this.escortNpcTileRow;
+        const sd = Math.sqrt(sx * sx + sy * sy);
+        if (sd <= budget) {
+          this.escortNpcTileCol = next.col;
+          this.escortNpcTileRow = next.row;
+          this.escortPath.shift();
+          budget -= sd;
+        } else {
+          this.escortNpcTileCol += (sx / sd) * budget;
+          this.escortNpcTileRow += (sy / sd) * budget;
+          budget = 0;
+        }
+      }
+    } else {
+      this.escortPath = [];
     }
 
     // Nearby monsters attack escort NPC (aggro if within 4 tiles)
     for (const monster of this.monsters) {
       if (!monster.isAlive()) continue;
       const md = distanceSq(monster.tileCol, monster.tileRow, this.escortNpcTileCol, this.escortNpcTileRow);
-      if (md < 16 && monster.isAggro() && time - (monster as unknown as { lastEscortAttack?: number }).lastEscortAttack! > 2000) {
+      // (lastEscortAttack starts undefined: `time - undefined` is NaN and never passed, so escorts were invulnerable.)
+      if (md < 16 && monster.isAggro() && time - ((monster as unknown as { lastEscortAttack?: number }).lastEscortAttack ?? -Infinity) > 2000) {
         const dmg = Math.max(1, Math.floor(monster.definition.damage * 0.3));
         this.escortNpcHp -= dmg;
         (monster as unknown as { lastEscortAttack?: number }).lastEscortAttack = time;
@@ -6177,10 +6323,7 @@ export class ZoneScene extends Phaser.Scene {
       }
     }
 
-    // Update sprite position
-    const worldPos = cartToIso(this.escortNpcTileCol, this.escortNpcTileRow);
-    this.escortNpcSprite.setPosition(worldPos.x, worldPos.y);
-    this.escortNpcSprite.setDepth(worldPos.y + 60);
+    this.syncEscortSprite();
 
     // Update HP bar
     if (this.escortNpcHpBar) {
@@ -6210,6 +6353,13 @@ export class ZoneScene extends Phaser.Scene {
         this.destroyEscortNpc();
       }
     }
+  }
+
+  private syncEscortSprite(): void {
+    if (!this.escortNpcSprite) return;
+    const worldPos = cartToIso(this.escortNpcTileCol, this.escortNpcTileRow);
+    this.escortNpcSprite.setPosition(worldPos.x, worldPos.y);
+    this.escortNpcSprite.setDepth(worldPos.y + 60);
   }
 
   /** Handle escort NPC death — fail the associated quest. */
@@ -6687,6 +6837,8 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    this.storyDirector?.destroy();
+    this.storyDirector = null;
     this.questWorld?.destroy();
     this.questWorld = null;
     this.isTransitioning = false;

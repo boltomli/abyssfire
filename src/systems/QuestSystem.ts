@@ -120,6 +120,9 @@ export class QuestSystem {
       for (let i = 0; i < quest.objectives.length; i++) {
         const obj = quest.objectives[i];
         if (obj.type === type && obj.targetId === targetId) {
+          // A delivery (talk objective after other steps) only counts once
+          // the hero has what they are delivering.
+          if (type === 'talk' && !this.earlierObjectivesDone(quest, prog, i)) continue;
           const before = prog.objectives[i].current;
           prog.objectives[i].current = Math.min(before + amount, obj.required);
           if (prog.objectives[i].current > before) advanced.push(i);
@@ -155,6 +158,13 @@ export class QuestSystem {
         });
       }
     }
+  }
+
+  private earlierObjectivesDone(quest: QuestDefinition, prog: QuestProgress, index: number): boolean {
+    for (let j = 0; j < index; j++) {
+      if (prog.objectives[j].current < quest.objectives[j].required) return false;
+    }
+    return true;
   }
 
   /**
@@ -256,6 +266,13 @@ export class QuestSystem {
   loadProgress(data: QuestProgress[]): void {
     this.progress.clear();
     for (const p of data) {
+      const quest = this.quests.get(p.questId);
+      // A quest redesigned since the save was made: restart its objectives
+      // rather than index into a list that no longer matches.
+      if (quest && (p.status === 'active' || p.status === 'completed') && p.objectives.length !== quest.objectives.length) {
+        p.status = 'active';
+        p.objectives = quest.objectives.map(() => ({ current: 0 }));
+      }
       this.progress.set(p.questId, p);
     }
   }

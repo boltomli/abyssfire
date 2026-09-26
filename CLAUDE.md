@@ -100,6 +100,11 @@ Each zone (`src/data/maps/`) defines: tile grid, spawn points, NPC positions, ex
 - Turn-in goes through `ZoneScene.turnInQuest(id, choiceIndex)`; `rewards.choices` generates class-appropriate pick-one gear (`QuestRewards.ts`).
 - NPC lines per quest live in `src/i18n/locales/questStory.ts` (`data.quest.<id>.offer` / `.complete`).
 
+### Story
+- Story bible: `docs/story.md`. Script data: `src/data/story/script.ts` (prologue/epilogue/credits sequences, chapter cards, cutscenes, boss intros, triggers) typed by `src/data/story/types.ts`; all text is i18n keys in `src/i18n/locales/story.ts`.
+- `StoryDirector` (created by `ZoneScene`) queues beats — prologue on a new game, a chapter card on each zone's first visit, cutscenes on main-quest turn-ins / the final boss kill, boss intros when a named boss comes within 9 tiles, then epilogue + credits — and freezes the world while one plays (`cinematic`). `StoryScene` renders them (letterbox, portraits, whispers, title cards). Seen beats persist in the save (`storySeen`).
+- `StoryScript.test.ts` checks every key exists in zh-CN and en, every trigger/boss intro resolves, and cutscene speakers stand in the zone where the cutscene plays.
+
 ### Loot System (D2-style)
 Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4) -> Legendary (orange, fixed) -> Set (green). Affixes have tiers 1-5 scaling with zone difficulty.
 

@@ -67,6 +67,8 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Coming back from a zone (Esc → menu) must hand the music back to the title theme.
+    audioManager.playTrack('menu', 'explore');
     this.subscriptions = new DisposableScope();
     const cx = W / 2;
 

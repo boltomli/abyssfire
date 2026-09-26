@@ -34,7 +34,7 @@ Cartoon-style isometric MUD web game. DnD-inspired world, Diablo II-style loot a
 
 ## World — Abyssfire (渊火)
 
-Ancient seals shattered, darkness pours from the Abyss. Player awakens as a chosen hero.
+The full story bible (myth, the Oathburner Ignaroth, the hero's brand and prophecy, five chapters, ending) lives in [`docs/story.md`](story.md). In short: the world was forged in the Abyssfire; the sixth sage Ignaroth broke the oath to recast it in the fire and was sealed beneath five seals; now the fire stirs, and the hero wakes in the ashes with a five-flame brand that both opens and closes the gate.
 
 **Races** (affect starting stats): Human / Elf / Dwarf / Half-Orc
 

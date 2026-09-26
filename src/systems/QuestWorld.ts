@@ -13,6 +13,9 @@ import { EventBus, GameEvents } from '../utils/EventBus';
 import { computeGuideTarget, type GuideTarget, type GuideWorld, type TilePoint } from './QuestGuide';
 import type { QuestSystem } from './QuestSystem';
 import { isCollectObjective, resolveGatherSpots } from './QuestRewards';
+import { DPR } from '../config';
+import { t } from '../i18n';
+import { getQuestTargetName } from '../i18n/gameAccessors';
 
 interface WorldEntity { tileCol: number; tileRow: number }
 interface WorldMonster extends WorldEntity { definition: { id: string }; isAlive(): boolean }
@@ -26,6 +29,8 @@ export interface QuestWorldDeps {
   player: () => WorldEntity & { sprite: Phaser.GameObjects.Components.Transform & Phaser.GameObjects.Components.Depth };
   monsters: () => readonly WorldMonster[];
   npcs: () => readonly WorldNpc[];
+  /** Tile of the escorted NPC, if one is out. */
+  escortTile?: () => TilePoint | null;
 }
 
 interface GatherNode {
@@ -40,6 +45,32 @@ interface GatherNode {
 
 /** Gather radius in tiles. */
 const GATHER_RANGE = 1.3;
+/** A clue is examined from this close (tiles). */
+const CLUE_RANGE = 2;
+const CLUE_KEY = 'quest_clue_mark';
+
+interface ClueMark {
+  key: string;
+  questId: string;
+  objectiveIndex: number;
+  col: number;
+  row: number;
+  container: Phaser.GameObjects.Container;
+}
+
+/** Nearest walkable tile to (col, row), searching outward ring by ring. */
+export function nearestWalkable(col: number, row: number, walkable: (c: number, r: number) => boolean, maxRing = 8): TilePoint | null {
+  if (walkable(col, row)) return { col, row };
+  for (let ring = 1; ring <= maxRing; ring++) {
+    for (let dr = -ring; dr <= ring; dr++) {
+      for (let dc = -ring; dc <= ring; dc++) {
+        if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
+        if (walkable(col + dc, row + dr)) return { col: col + dc, row: row + dr };
+      }
+    }
+  }
+  return null;
+}
 /** The guide hides when the target is this close (tiles). */
 const GUIDE_NEAR = 2.5;
 const GUIDE_RADIUS = 44;
@@ -71,6 +102,7 @@ export function questGiverOf(questId: string): string | null {
 export class QuestWorld {
   private readonly d: QuestWorldDeps;
   private readonly nodes = new Map<string, GatherNode>();
+  private readonly clues = new Map<string, ClueMark>();
   /** Spots already gathered, per `${questId}:${objectiveIndex}`. */
   private readonly gathered = new Map<string, Set<number>>();
   private arrow: Phaser.GameObjects.Image | null = null;
@@ -112,6 +144,100 @@ export class QuestWorld {
     for (const [key, node] of this.nodes) {
       if (!wanted.has(key)) { node.container.destroy(); this.nodes.delete(key); }
     }
+    this.syncClues();
+  }
+
+  // ── Clues ───────────────────────────────────────────────────
+
+  /** One glinting mark per unexamined clue of the active quests in this zone. */
+  private syncClues(): void {
+    const wanted = new Set<string>();
+    const { collisions } = this.d.mapData;
+    for (const { quest, progress } of this.d.quests.getActiveQuests()) {
+      if (progress.status !== 'active' || quest.zone !== this.d.mapId) continue;
+      quest.objectives.forEach((obj, i) => {
+        if (obj.type !== 'investigate_clue' || !obj.location) return;
+        if ((progress.objectives[i]?.current ?? 0) >= obj.required) return;
+        const key = `${quest.id}:${i}`;
+        wanted.add(key);
+        if (this.clues.has(key)) return;
+        const spot = nearestWalkable(obj.location.col, obj.location.row, (c, r) => !!collisions[r]?.[c]);
+        if (spot) this.clues.set(key, this.createClue(key, quest.id, i, spot));
+      });
+    }
+    for (const [key, clue] of this.clues) {
+      if (!wanted.has(key)) { clue.container.destroy(); this.clues.delete(key); }
+    }
+  }
+
+  /** Where each open clue actually sits (it may be nudged off a wall). */
+  clueTile(questId: string, objectiveIndex: number): TilePoint | null {
+    const c = this.clues.get(`${questId}:${objectiveIndex}`);
+    return c ? { col: c.col, row: c.row } : null;
+  }
+
+  private ensureClueTexture(): void {
+    const { scene } = this.d;
+    if (scene.textures.exists(CLUE_KEY)) return;
+    // A cel-shaded magnifying glass: dark ink outline, brass rim, pale lens.
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const x = c.getContext('2d')!;
+    x.lineCap = 'round';
+    x.strokeStyle = '#1c1208'; x.lineWidth = 12;
+    x.beginPath(); x.moveTo(38, 38); x.lineTo(56, 56); x.stroke();
+    x.strokeStyle = '#7a4a22'; x.lineWidth = 7;
+    x.beginPath(); x.moveTo(38, 38); x.lineTo(55, 55); x.stroke();
+    x.beginPath(); x.arc(26, 26, 19, 0, Math.PI * 2);
+    x.fillStyle = '#1c1208'; x.fill();
+    x.beginPath(); x.arc(26, 26, 15.5, 0, Math.PI * 2);
+    x.fillStyle = '#e0b04a'; x.fill();
+    x.beginPath(); x.arc(26, 26, 11.5, 0, Math.PI * 2);
+    const g = x.createLinearGradient(14, 14, 38, 38);
+    g.addColorStop(0, '#e9fbff'); g.addColorStop(1, '#7fc6e0');
+    x.fillStyle = g; x.fill();
+    x.beginPath(); x.ellipse(21, 20, 5, 3, -0.8, 0, Math.PI * 2);
+    x.fillStyle = 'rgba(255,255,255,0.9)'; x.fill();
+    scene.textures.addCanvas(CLUE_KEY, c);
+  }
+
+  private createClue(key: string, questId: string, objectiveIndex: number, spot: TilePoint): ClueMark {
+    const { scene } = this.d;
+    this.ensureClueTexture();
+    const w = tileToWorld(spot.col, spot.row);
+    const ring = scene.add.image(0, 2, 'fx_glow').setTint(0x8fe0ff).setBlendMode(Phaser.BlendModes.ADD)
+      .setScale(0.7, 0.32).setAlpha(0.7);
+    const icon = scene.add.image(0, -18, CLUE_KEY).setDisplaySize(26, 26);
+    const container = scene.add.container(w.x, w.y, [ring, icon]).setDepth(w.y + 99);
+    scene.tweens.add({ targets: icon, y: -24, angle: { from: -8, to: 8 }, duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    scene.tweens.add({ targets: ring, alpha: 0.25, scaleX: 0.9, duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    return { key, questId, objectiveIndex, col: spot.col, row: spot.row, container };
+  }
+
+  private examine(clue: ClueMark): void {
+    const quest = this.d.quests.quests.get(clue.questId);
+    const obj = quest?.objectives[clue.objectiveIndex];
+    this.clues.delete(clue.key);
+    const { scene } = this.d;
+    const { x, y } = clue.container;
+    scene.tweens.killTweensOf(clue.container.list);
+    scene.tweens.add({ targets: clue.container, alpha: 0, y: y - 16, duration: 380, onComplete: () => clue.container.destroy() });
+    this.burst(x, y - 18);
+    if (!quest || !obj) return;
+    const name = getQuestTargetName(obj.targetId, obj.targetName);
+    const noteKey = `data.questClue.${obj.targetId}`;
+    const note = t(noteKey);
+    EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.quest.clueFound', { targetName: name }), type: 'system' });
+    if (note !== noteKey) EventBus.emit(GameEvents.LOG_MESSAGE, { text: note, type: 'system' });
+    // What the hero reads off the clue, floating above it for a moment.
+    const text = scene.add.text(x, y - 44, note !== noteKey ? `${name}\n${note}` : name, {
+      fontSize: `${Math.round(13 * DPR)}px`, color: '#d8f4ff', align: 'center',
+      stroke: '#0b1620', strokeThickness: Math.round(3 * DPR),
+      wordWrap: { width: 260 * DPR, useAdvancedWrap: true },
+    }).setOrigin(0.5, 1).setDepth(5000).setScale(1 / DPR).setAlpha(0);
+    scene.tweens.add({ targets: text, alpha: 1, y: y - 56, duration: 300, ease: 'Quad.easeOut' });
+    scene.tweens.add({ targets: text, alpha: 0, y: y - 72, delay: 3600, duration: 600, onComplete: () => text.destroy() });
+    this.d.quests.updateProgress('investigate_clue', obj.targetId);
   }
 
   private readonly spotCache = new Map<string, TilePoint[]>();
@@ -219,6 +345,8 @@ export class QuestWorld {
         .filter(n => n.questId === questId && n.objectiveIndex === i)
         .map(n => ({ col: n.col, row: n.row })),
       giverOf: questGiverOf,
+      clueTile: (questId, i) => this.clueTile(questId, i),
+      escortTile: () => this.d.escortTile?.() ?? null,
     };
   }
 
@@ -274,6 +402,9 @@ export class QuestWorld {
     for (const node of [...this.nodes.values()]) {
       if (Math.hypot(node.col - player.tileCol, node.row - player.tileRow) <= GATHER_RANGE) this.gather(node);
     }
+    for (const clue of [...this.clues.values()]) {
+      if (Math.hypot(clue.col - player.tileCol, clue.row - player.tileRow) <= CLUE_RANGE) this.examine(clue);
+    }
     this.updateGuide(delta);
   }
 
@@ -285,6 +416,8 @@ export class QuestWorld {
     EventBus.off(GameEvents.QUEST_TRACKED_CHANGED, this.onQuestChanged);
     for (const n of this.nodes.values()) n.container.destroy();
     this.nodes.clear();
+    for (const c of this.clues.values()) c.container.destroy();
+    this.clues.clear();
     this.arrow?.destroy();
     this.arrow = null;
   }
