@@ -8,6 +8,7 @@
 import { QUEST_TYPE_LABELS } from '../systems/QuestSystem';
 import type { QuestDefinition, QuestProgress, QuestObjective } from '../data/types';
 import { t } from '../i18n';
+import { getQuestName, getQuestTargetName } from '../i18n/gameAccessors';
 
 // ─── Display Types ──────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ export function formatTrackerObjective(
   const typeLabel = labels[obj.type] ?? obj.type;
   const done = current >= obj.required;
   return {
-    label: `${typeLabel} ${obj.targetName}`,
+    label: `${typeLabel} ${getQuestTargetName(obj.targetId, obj.targetName)}`,
     progress: done ? '✓' : `${current}/${obj.required}`,
     done,
   };
@@ -128,7 +129,7 @@ export function buildTrackerEntry(
 
   return {
     questId: quest.id,
-    name: quest.name,
+    name: getQuestName(quest.id, quest.name),
     category: quest.category,
     isCompleted,
     progressSummary: buildProgressSummary(quest, progress),

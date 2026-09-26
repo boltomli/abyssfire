@@ -1,5 +1,5 @@
 import { EventBus, GameEvents } from '../utils/EventBus';
-import type { QuestDefinition, QuestProgress, QuestReward } from '../data/types';
+import type { ItemInstance, QuestDefinition, QuestProgress, QuestReward } from '../data/types';
 import { t } from '../i18n';
 
 /** Locale-aware quest type labels. Reads from i18n at access time. */
@@ -43,6 +43,10 @@ export const QUEST_TYPE_LABELS: Record<string, string> = new Proxy({} as Record<
 export class QuestSystem {
   quests: Map<string, QuestDefinition> = new Map();
   progress: Map<string, QuestProgress> = new Map();
+  /** Quest the player pinned for the guide arrow (null → auto-pick). */
+  trackedQuestId: string | null = null;
+  /** Generated equipment reward choices, per completed quest (not persisted). */
+  rewardChoiceCache: Map<string, ItemInstance[]> = new Map();
 
   registerQuest(quest: QuestDefinition): void {
     this.quests.set(quest.id, quest);
@@ -70,6 +74,7 @@ export class QuestSystem {
           text: t('sys.quest.reaccepted', { name: quest.name }),
           type: 'system',
         });
+        EventBus.emit(GameEvents.QUEST_ACCEPTED, { questId: quest.id, questName: quest.name });
         return true;
       }
       return false;
@@ -93,6 +98,7 @@ export class QuestSystem {
       text: t('sys.quest.accepted', { name: quest.name }),
       type: 'system',
     });
+    EventBus.emit(GameEvents.QUEST_ACCEPTED, { questId: quest.id, questName: quest.name });
     return true;
   }
 
@@ -105,6 +111,7 @@ export class QuestSystem {
     targetId: string,
     amount = 1,
   ): void {
+    const advanced: number[] = [];
     for (const [questId, prog] of this.progress.entries()) {
       if (prog.status !== 'active') continue;
       const quest = this.quests.get(questId);
@@ -113,10 +120,9 @@ export class QuestSystem {
       for (let i = 0; i < quest.objectives.length; i++) {
         const obj = quest.objectives[i];
         if (obj.type === type && obj.targetId === targetId) {
-          prog.objectives[i].current = Math.min(
-            prog.objectives[i].current + amount,
-            obj.required,
-          );
+          const before = prog.objectives[i].current;
+          prog.objectives[i].current = Math.min(before + amount, obj.required);
+          if (prog.objectives[i].current > before) advanced.push(i);
         }
       }
 
@@ -129,6 +135,17 @@ export class QuestSystem {
       const allDone = quest.objectives.every(
         (obj, i) => prog.objectives[i].current >= obj.required,
       );
+
+      for (const i of advanced) {
+        const current = prog.objectives[i].current;
+        if (current <= 0) continue; // undone by craft phase ordering
+        const obj = quest.objectives[i];
+        EventBus.emit(GameEvents.QUEST_PROGRESS, {
+          questId, objectiveIndex: i, current, required: obj.required, targetId: obj.targetId, amount,
+          completesQuest: allDone,
+        });
+      }
+      advanced.length = 0;
       if (allDone && prog.status === 'active') {
         prog.status = 'completed';
         EventBus.emit(GameEvents.QUEST_COMPLETED, { questId: quest.id, questName: quest.name });
@@ -164,10 +181,12 @@ export class QuestSystem {
     if (!quest) return null;
 
     prog.status = 'turned_in';
+    if (this.trackedQuestId === questId) this.setTracked(null);
     EventBus.emit(GameEvents.LOG_MESSAGE, {
       text: t('sys.quest.turnedIn', { name: quest.name, exp: quest.rewards.exp, gold: quest.rewards.gold }),
       type: 'system',
     });
+    EventBus.emit(GameEvents.QUEST_TURNED_IN, { questId: quest.id, questName: quest.name });
     return quest.rewards;
   }
 
@@ -207,6 +226,27 @@ export class QuestSystem {
       }
     }
     return result;
+  }
+
+  /** Pin a quest for the guide arrow (null clears the pin). */
+  setTracked(questId: string | null): void {
+    if (this.trackedQuestId === questId) return;
+    this.trackedQuestId = questId;
+    EventBus.emit(GameEvents.QUEST_TRACKED_CHANGED, { questId });
+  }
+
+  /**
+   * The quest the guide follows in `zoneId`: the pinned one if it is still
+   * open there, else the first open main quest in the zone, else any open
+   * quest in the zone (completed quests count — they lead back to the NPC).
+   */
+  getGuidedQuest(zoneId: string): { quest: QuestDefinition; progress: QuestProgress } | null {
+    const open = this.getActiveQuests().filter(e => e.quest.zone === zoneId);
+    if (this.trackedQuestId) {
+      const pinned = open.find(e => e.quest.id === this.trackedQuestId);
+      if (pinned) return pinned;
+    }
+    return open.find(e => e.quest.category === 'main') ?? open[0] ?? null;
   }
 
   getProgressData(): QuestProgress[] {

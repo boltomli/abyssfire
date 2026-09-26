@@ -75,6 +75,8 @@ export class SFXEngine {
       // --- World ---
       case 'zone_transition': this.sfxZoneTransition(ctx, destination, t); break;
       case 'quest_complete':  this.sfxQuestComplete(ctx, destination, t); break;
+      case 'quest_progress':  this.sfxChime(ctx, destination, t, [880, 1175], 0.07, 0.35); break;
+      case 'quest_objective': this.sfxChime(ctx, destination, t, [659, 880, 1319], 0.09, 0.5); break;
       case 'levelup':         this.sfxLevelup(ctx, destination, t); break;
       case 'npc_interact':    this.sfxNpcInteract(ctx, destination, t); break;
     }
@@ -953,6 +955,24 @@ export class SFXEngine {
   }
 
   /** Fanfare — triangle arpeggio [392,523,659,784] with delay feedback. 0.8 s */
+  /** Short bell arpeggio: quest item pickups and finished objectives. */
+  private sfxChime(ctx: AudioContext, destination: AudioNode, t: number, freqs: number[], step: number, level: number): void {
+    freqs.forEach((freq, i) => {
+      const start = t + i * step;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(level, start + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.32);
+      osc.connect(gain);
+      gain.connect(destination);
+      osc.start(start);
+      osc.stop(start + 0.34);
+    });
+  }
+
   private sfxQuestComplete(ctx: AudioContext, destination: AudioNode, t: number): void {
     const freqs = [392, 523, 659, 784];
     const noteDur = 0.25;

@@ -17,7 +17,10 @@ function externalLandmarks(mapId: string): { col: number; row: number; margin?: 
   if (boss) pts.push({ ...boss, margin: 5 });
   for (const q of AllQuests) {
     if (q.zone !== mapId) continue;
-    for (const o of q.objectives) if (o.location) pts.push({ col: o.location.col, row: o.location.row, margin: 3 });
+    for (const o of q.objectives) {
+      if (o.location) pts.push({ col: o.location.col, row: o.location.row, margin: 3 });
+      if (o.source?.kind === 'gather') pts.push({ col: o.source.area.col, row: o.source.area.row, margin: 3 });
+    }
     if (q.questArea) pts.push({ col: q.questArea.col, row: q.questArea.row, margin: 4 });
     if (q.defendTarget) pts.push({ col: q.defendTarget.col, row: q.defendTarget.row, margin: 6 });
     if (q.escortNpc) {
