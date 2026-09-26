@@ -110,6 +110,32 @@ function getKeyPoints(map: MapData): { col: number; row: number }[] {
   return points;
 }
 
+/** Points of interest in the map file that water must stay clear of, with a margin in tiles. */
+function getPoiPoints(map: MapData): { col: number; row: number; margin: number }[] {
+  const pts: { col: number; row: number; margin: number }[] = [];
+  const add = (p: { col: number; row: number }, margin: number): void => { pts.push({ col: p.col, row: p.row, margin }); };
+  add(map.playerStart, 5);
+  for (const camp of map.camps) add(camp, 9);
+  for (const spawn of map.spawns) add(spawn, 4);
+  for (const exit of map.exits) add(exit, 4);
+  for (const npc of map.fieldNpcs ?? []) add(npc, 3);
+  for (const e of map.subDungeonEntrances ?? []) add(e, 3);
+  for (const h of map.hiddenAreas ?? []) add(h, 4);
+  for (const d of map.storyDecorations ?? []) add(d, 2);
+  for (const p of map.petSpawns ?? []) add(p, 2);
+  return pts;
+}
+
+/** Whether any carved path tile lies within `reach` tiles (square) of a point. */
+function touchesCarved(carved: boolean[][], col: number, row: number, reach: number): boolean {
+  for (let r = Math.max(0, row - reach); r <= Math.min(carved.length - 1, row + reach); r++) {
+    for (let c = Math.max(0, col - reach); c <= Math.min(carved[r].length - 1, col + reach); c++) {
+      if (carved[r][c]) return true;
+    }
+  }
+  return false;
+}
+
 /** Create a 2D array filled with a value */
 function create2D<T>(cols: number, rows: number, value: T): T[][] {
   const arr: T[][] = [];
@@ -127,6 +153,7 @@ function drunkWalk(
   pathTile: number,
   rng: SeededRandom,
   cols: number, rows: number,
+  carved?: boolean[][],
 ): void {
   let col = fromCol;
   let row = fromRow;
@@ -139,6 +166,7 @@ function drunkWalk(
     if (col > 0 && col < cols - 1 && row > 0 && row < rows - 1) {
       if (!isCampTile(tiles[row][col])) {
         tiles[row][col] = pathTile;
+        if (carved) carved[row][col] = true;
       }
       // Widen the path slightly
       if (rng.chance(0.5)) {
@@ -147,6 +175,7 @@ function drunkWalk(
         if (adjacentCol > 0 && adjacentCol < cols - 1 && adjacentRow > 0 && adjacentRow < rows - 1) {
           if (!isCampTile(tiles[adjacentRow][adjacentCol])) {
             tiles[adjacentRow][adjacentCol] = pathTile;
+            if (carved) carved[adjacentRow][adjacentCol] = true;
           }
         }
       }
@@ -416,7 +445,11 @@ export class MapGenerator {
    * that has anchors (camps, spawns, exits, playerStart) but empty tiles/collisions.
    * The map must have theme and seed set.
    */
-  static generate(map: MapData): MapData {
+  /**
+   * @param avoid extra points that must stay dry (`margin` tiles, default 4),
+   *   e.g. quest areas and lore objects defined outside the map file.
+   */
+  static generate(map: MapData, avoid: readonly { col: number; row: number; margin?: number }[] = []): MapData {
     const theme = map.theme ?? 'plains';
     const seed = map.seed ?? 42;
     const rng = new SeededRandom(seed);
@@ -477,37 +510,6 @@ export class MapGenerator {
           }
           rc += dirCol + (rng.chance(0.3) ? rng.nextInt(-1, 1) : 0);
           rr += dirRow + (rng.chance(0.3) ? rng.nextInt(-1, 1) : 0);
-        }
-      }
-    }
-
-    // (e) Generate water bodies using cellular automata
-    const lakeCount = rng.nextInt(config.waterLakeCount[0], config.waterLakeCount[1]);
-    const waterGrid = create2D(cols, rows, false);
-
-    // Seed water cells for each lake
-    for (let lake = 0; lake < lakeCount; lake++) {
-      const lakeCol = rng.nextInt(8, cols - 9);
-      const lakeRow = rng.nextInt(8, rows - 9);
-      const lakeSize = rng.nextInt(config.waterLakeSize[0], config.waterLakeSize[1]);
-
-      for (let i = 0; i < lakeSize; i++) {
-        const wc = lakeCol + rng.nextInt(-3, 3);
-        const wr = lakeRow + rng.nextInt(-3, 3);
-        if (wc > 2 && wc < cols - 3 && wr > 2 && wr < rows - 3) {
-          waterGrid[wr][wc] = true;
-        }
-      }
-    }
-
-    // Run cellular automata to make water organic
-    const refinedWater = cellularAutomata(waterGrid, 4, cols, rows, 5, 3);
-
-    // Apply water to tiles
-    for (let r = 2; r < rows - 2; r++) {
-      for (let c = 2; c < cols - 2; c++) {
-        if (refinedWater[r][c]) {
-          tiles[r][c] = TILE_WATER;
         }
       }
     }
@@ -577,20 +579,29 @@ export class MapGenerator {
       }
     }
 
+    // Story props and externally defined landmarks (lore, quest spots) stand on open ground
+    for (const d of map.storyDecorations ?? []) {
+      clearArea(tiles, d.col, d.row, 1, config.primaryTile, cols, rows, true);
+    }
+    for (const p of avoid) {
+      clearArea(tiles, p.col, p.row, 1, config.primaryTile, cols, rows, true);
+    }
+
     // (d) Generate paths connecting key points using drunk walk
     const keyPoints = getKeyPoints(map);
     const pathTile = TILE_DIRT;
+    const carved = create2D(cols, rows, false);
 
     // Connect playerStart to first camp
     if (map.camps.length > 0) {
       drunkWalk(tiles, map.playerStart.col, map.playerStart.row,
-        map.camps[0].col, map.camps[0].row, pathTile, rng, cols, rows);
+        map.camps[0].col, map.camps[0].row, pathTile, rng, cols, rows, carved);
     }
 
     // Connect camps to each other
     for (let i = 0; i < map.camps.length - 1; i++) {
       drunkWalk(tiles, map.camps[i].col, map.camps[i].row,
-        map.camps[i + 1].col, map.camps[i + 1].row, pathTile, rng, cols, rows);
+        map.camps[i + 1].col, map.camps[i + 1].row, pathTile, rng, cols, rows, carved);
     }
 
     // Connect last camp to exits
@@ -598,14 +609,14 @@ export class MapGenerator {
     if (lastCamp) {
       for (const exit of map.exits) {
         drunkWalk(tiles, lastCamp.col, lastCamp.row,
-          exit.col, exit.row, pathTile, rng, cols, rows);
+          exit.col, exit.row, pathTile, rng, cols, rows, carved);
       }
     }
 
     // Connect playerStart to exits
     for (const exit of map.exits) {
       drunkWalk(tiles, map.playerStart.col, map.playerStart.row,
-        exit.col, exit.row, pathTile, rng, cols, rows);
+        exit.col, exit.row, pathTile, rng, cols, rows, carved);
     }
 
     // Connect spawn areas to nearest camp or playerStart
@@ -620,7 +631,47 @@ export class MapGenerator {
           nearest = camp;
         }
       }
-      drunkWalk(tiles, spawn.col, spawn.row, nearest.col, nearest.row, pathTile, rng, cols, rows);
+      drunkWalk(tiles, spawn.col, spawn.row, nearest.col, nearest.row, pathTile, rng, cols, rows, carved);
+    }
+
+    // (e) Water (lava in the Abyss) pools: noise-edged blobs smoothed by
+    // cellular automata, kept clear of camps, spawns, exits, NPCs, any
+    // caller-supplied points (quest areas, lore, mini-bosses) and the carved
+    // paths, so every route stays walkable and shores stay natural.
+    const lakeCount = rng.nextInt(config.waterLakeCount[0], config.waterLakeCount[1]);
+    const waterGrid = create2D(cols, rows, false);
+    const keepClear = [...getPoiPoints(map), ...avoid.map(p => ({ ...p, margin: p.margin ?? 4 }))];
+    for (let lake = 0; lake < lakeCount; lake++) {
+      const radius = 2.2 + rng.nextInt(config.waterLakeSize[0], config.waterLakeSize[1]) * 0.28;
+      for (let attempt = 0; attempt < 24; attempt++) {
+        const lc = rng.nextInt(10, cols - 11);
+        const lr = rng.nextInt(10, rows - 11);
+        const blocked = keepClear.some(p => Math.hypot(p.col - lc, p.row - lr) < radius * 1.3 + p.margin);
+        if (blocked) continue;
+        const reach = Math.ceil(radius * 1.3);
+        if (touchesCarved(carved, lc, lr, reach + 2)) continue;
+        for (let dr = -reach; dr <= reach; dr++) {
+          for (let dc = -reach; dc <= reach; dc++) {
+            const c = lc + dc, r = lr + dr;
+            if (c < 3 || c > cols - 4 || r < 3 || r > rows - 4) continue;
+            const edge = radius * (0.7 + 0.6 * groveNoise(c, r, seed + lake * 131, 3.5));
+            if (Math.hypot(dc, dr) < edge) waterGrid[r][c] = true;
+          }
+        }
+        break;
+      }
+    }
+
+    // Smooth: fill pinholes, drop one-tile spurs
+    const refinedWater = cellularAutomata(waterGrid, 2, cols, rows, 5, 4);
+
+    // Apply water to tiles
+    for (let r = 2; r < rows - 2; r++) {
+      for (let c = 2; c < cols - 2; c++) {
+        if (refinedWater[r][c]) {
+          tiles[r][c] = TILE_WATER;
+        }
+      }
     }
 
     // Ensure border walls are intact after path carving

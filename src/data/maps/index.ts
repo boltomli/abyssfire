@@ -5,6 +5,29 @@ import { ScorchingDesertMap } from './scorching_desert';
 import { AbyssRiftMap } from './abyss_rift';
 import { MapGenerator } from '../../systems/MapGenerator';
 import type { MapData } from '../types';
+import { LoreByZone } from '../loreCollectibles';
+import { MiniBossSpawns } from '../miniBosses';
+import { AllQuests } from '../quests/all_quests';
+
+/** Positions defined outside the map files (quests, lore, mini-bosses) that must stay walkable. */
+function externalLandmarks(mapId: string): { col: number; row: number; margin?: number }[] {
+  const pts: { col: number; row: number; margin?: number }[] = [];
+  for (const lore of LoreByZone[mapId] ?? []) pts.push({ col: lore.col, row: lore.row, margin: 2 });
+  const boss = MiniBossSpawns[mapId];
+  if (boss) pts.push({ ...boss, margin: 5 });
+  for (const q of AllQuests) {
+    if (q.zone !== mapId) continue;
+    for (const o of q.objectives) if (o.location) pts.push({ col: o.location.col, row: o.location.row, margin: 3 });
+    if (q.questArea) pts.push({ col: q.questArea.col, row: q.questArea.row, margin: 4 });
+    if (q.defendTarget) pts.push({ col: q.defendTarget.col, row: q.defendTarget.row, margin: 6 });
+    if (q.escortNpc) {
+      pts.push({ col: q.escortNpc.startCol, row: q.escortNpc.startRow, margin: 3 });
+      pts.push({ col: q.escortNpc.destCol, row: q.escortNpc.destRow, margin: 3 });
+    }
+    for (const clue of q.clues ?? []) pts.push({ col: clue.col, row: clue.row, margin: 2 });
+  }
+  return pts;
+}
 
 // Build the map registry and run procedural generation on maps with empty tiles
 const rawMaps: Record<string, MapData> = {
@@ -19,7 +42,7 @@ const rawMaps: Record<string, MapData> = {
 for (const key of Object.keys(rawMaps)) {
   const map = rawMaps[key];
   if (map.tiles.length === 0 && map.theme) {
-    rawMaps[key] = MapGenerator.generate(map);
+    rawMaps[key] = MapGenerator.generate(map, externalLandmarks(key));
   }
 }
 
