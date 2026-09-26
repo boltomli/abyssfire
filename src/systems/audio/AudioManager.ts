@@ -67,6 +67,36 @@ export class AudioManager {
     this.settings = this.loadSettings();
     this.setupEventListeners();
     this.setupUnlockGesture();
+    this.setupVisibilityHandling();
+  }
+
+  /**
+   * Leaving the page (tab switch, app backgrounded, window minimised) pauses
+   * all audio; coming back resumes it. Without this the music kept playing
+   * after the player left the game, especially on mobile.
+   */
+  private setupVisibilityHandling(): void {
+    if (typeof document === 'undefined') return;
+    const sync = (): void => {
+      const ctx = this.ctx;
+      if (!ctx || ctx.state === 'closed') return;
+      if (document.hidden) {
+        if (ctx.state === 'running') void ctx.suspend().catch(() => undefined);
+      } else if (ctx.state === 'suspended' && this.lifecycle !== 'failed') {
+        // Suspending flips the lifecycle to 'locked' (see onstatechange); a
+        // successful resume makes it ready again. If the browser refuses
+        // (autoplay policy), the unlock gesture handler is still armed.
+        void ctx.resume().then(() => {
+          if (ctx.state === 'running') {
+            this.lifecycle = 'ready';
+            this.removeUnlockGesture();
+          }
+        }).catch(() => undefined);
+      }
+    };
+    document.addEventListener('visibilitychange', sync);
+    window.addEventListener('pagehide', () => { void this.ctx?.suspend().catch(() => undefined); });
+    window.addEventListener('pageshow', sync);
   }
 
   // ---------------------------------------------------------------------------
