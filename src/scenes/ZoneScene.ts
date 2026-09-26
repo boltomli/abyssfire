@@ -993,12 +993,13 @@ export class ZoneScene extends Phaser.Scene {
     this.checkStoryDecorationProximity();
     this.checkSubDungeonEntranceProximity();
 
+    this.collectOcclusionTargets();
     this.updateDecorOcclusion(delta);
     if (this.terrain) {
       if (this.terrain.hasPending()) {
         this.terrain.flush(4, (c, r) => !!this.tileSprites[r]?.[c], (c, r, key) => { this.tileSprites[r]?.[c]?.setTexture(key); });
       }
-      this.terrain.updateOcclusion(this.player.sprite.x, this.player.sprite.y, delta);
+      this.terrain.updateOcclusion(this.occlusionTargets, delta);
     }
 
     // Throttled viewport tile update
@@ -1292,24 +1293,30 @@ export class ZoneScene extends Phaser.Scene {
   /** Reused scratch list of occlusion targets (player + nearby living monsters). */
   private occlusionTargets: number[] = [];
 
-  /**
-   * Fade tall props that hide the player, or a living monster near the player,
-   * standing behind them; restore smoothly when clear.
-   */
-  private updateDecorOcclusion(delta: number): void {
-    if (this.occluderDecor.size === 0 || !this.player?.sprite) return;
-    const px = this.player.sprite.x;
-    const py = this.player.sprite.y;
+  /** Refresh `occlusionTargets`: the player plus living monsters within ~6 tiles. */
+  private collectOcclusionTargets(): void {
     const targets = this.occlusionTargets;
     targets.length = 0;
+    if (!this.player?.sprite) return;
+    const px = this.player.sprite.x;
+    const py = this.player.sprite.y;
     targets.push(px, py);
-    // Monsters within ~6 tiles of the player (iso: 6 tiles ≈ 384 × 192 px).
+    // iso: 6 tiles ≈ 384 × 192 px.
     for (const m of this.monsters) {
       if (!m.isAlive() || !m.sprite) continue;
       const mx = m.sprite.x;
       const my = m.sprite.y;
       if (Math.abs(mx - px) < 384 && Math.abs(my - py) < 192) targets.push(mx, my);
     }
+  }
+
+  /**
+   * Fade tall props that hide the player, or a living monster near the player,
+   * standing behind them; restore smoothly when clear.
+   */
+  private updateDecorOcclusion(delta: number): void {
+    if (this.occluderDecor.size === 0) return;
+    const targets = this.occlusionTargets;
     const k = Math.min(1, delta / 110);
     for (const sprite of this.occluderDecor) {
       const halfW = sprite.displayWidth * 0.42;

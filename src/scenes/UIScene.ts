@@ -217,6 +217,8 @@ export class UIScene extends Phaser.Scene {
   private shopPanel: Phaser.GameObjects.Container | null = null;
   private shopNpcId: string | null = null;
   private stashPanel: Phaser.GameObjects.Container | null = null;
+  private logHeader: Phaser.GameObjects.GameObject[] = [];
+  private inventoryBtnText: Phaser.GameObjects.Text | null = null;
   private stashNpcId: string | null = null;
   private stashPage = 0;
   private stashBagPage = 0;
@@ -286,6 +288,7 @@ export class UIScene extends Phaser.Scene {
     this.expShown = -1;
     this.targetHpShown = -1;
     this.logTexts = [];
+    this.logHeader = [];
     this.logMessages = [];
     this.questTrackerTexts = [];
     this.questTrackerExpanded = new Set();
@@ -538,6 +541,15 @@ export class UIScene extends Phaser.Scene {
       fontSize: 10, variant: 'primary', bold: true,
     });
     invBtn.setDepth(3000);
+    this.inventoryBtnText = invBtn.label;
+  }
+
+  /** (Re)build the combat log's section header — rebuilt on locale change since its rule fits the label. */
+  private buildLogHeader(): void {
+    for (const o of this.logHeader) o.destroy();
+    const { x, y, w } = HUD.log;
+    this.logHeader = addSectionHeader(this, x + px(10), y + px(12), w - px(20), t('ui.hud.combatLog'));
+    for (const o of this.logHeader) (o as unknown as Phaser.GameObjects.Components.Depth).setDepth(3000);
   }
 
   private createLogPanel(): void {
@@ -545,8 +557,7 @@ export class UIScene extends Phaser.Scene {
     const { x, y, w, h } = HUD.log;
     this.add.image(0, 0, frameTextureKey(this, w, h, 0.9)).setOrigin(0, 0)
       .setPosition(x - px(8), y - px(8)).setDepth(2999);
-    const header = addSectionHeader(this, x + px(10), y + px(12), w - px(20), t('ui.hud.combatLog'));
-    for (const o of header) (o as unknown as Phaser.GameObjects.Components.Depth).setDepth(3000);
+    this.buildLogHeader();
     for (let i = 0; i < LOG_MAX_LINES; i++) {
       this.logTexts.push(
         this.add.text(x + px(10), y + px(24) + i * px(14), '', {
@@ -758,6 +769,9 @@ export class UIScene extends Phaser.Scene {
   /** Handle locale change: refresh all open panels so text updates in-place. */
   private handleLocaleChanged(): void {
     this.spiritLabel.setText(t('ui.hud.spirit'));
+    this.inventoryBtnText?.setText(t('ui.hud.inventoryBtn'));
+    this.buildLogHeader();
+    if (this.stashPanel) this.openStash(this.stashNpcId, true);
     this.handleTargetChanged({
       targetId: this.currentTargetId,
       targetName: this.currentTargetName,
@@ -5072,6 +5086,7 @@ export class UIScene extends Phaser.Scene {
     this.skillCdActive = [];
     this.lootNotices = [];
     this.logTexts = [];
+    this.logHeader = [];
     this.questTrackerTexts = [];
     this.questTrackerExpanded = new Set();
     this.questTrackerScrollOffset = 0;

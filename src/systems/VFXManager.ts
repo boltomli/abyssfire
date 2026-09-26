@@ -127,10 +127,6 @@ export class VFXManager {
     });
   }
 
-  cameraFadeIn(duration: number): void {
-    this.scene.cameras.main.fadeIn(duration);
-  }
-
   cameraZoomPulse(targetZoom: number, duration: number, originalZoom: number): void {
     const cam = this.scene.cameras.main;
     cam.zoomTo(targetZoom, duration, 'Power2', false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
@@ -154,20 +150,6 @@ export class VFXManager {
     const go = gameObject as any;
     if (!go.preFX) return null;
     return go.preFX.addGlow(color, distance, 0, false, quality);
-  }
-
-  applyShine(gameObject: Phaser.GameObjects.GameObject, speed: number = 0.5, intensity: number = 0.5): Phaser.FX.Shine | null {
-    if (!this.isWebGL) return null;
-    const go = gameObject as any;
-    if (!go.postFX) return null;
-    return go.postFX.addShine(speed, intensity, 5);
-  }
-
-  applyColorMatrix(gameObject: Phaser.GameObjects.GameObject): Phaser.FX.ColorMatrix | null {
-    if (!this.isWebGL) return null;
-    const go = gameObject as any;
-    if (!go.postFX) return null;
-    return go.postFX.addColorMatrix();
   }
 
   // ── Loot Glow by Quality ───────────────────────────────
@@ -260,10 +242,6 @@ export class VFXManager {
       case 'burn': fx.hue(-20); fx.saturate(0.6); break;
     }
     return fx;
-  }
-
-  removeStatusTint(sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image, fx: Phaser.FX.ColorMatrix): void {
-    (sprite as any).preFX?.remove(fx);
   }
 
   // ── Zone Transition (fade out, restart, fade in) ────────

@@ -517,11 +517,15 @@ export class ZoneTerrain {
   }
 
   /** Fade overlays that hide the player standing behind them. */
-  updateOcclusion(px: number, py: number, delta: number): void {
+  /** Fade wall overlays hiding any of `points` (flat x,y pairs: player, nearby monsters). */
+  updateOcclusion(points: readonly number[], delta: number): void {
     const k = Math.min(1, delta / 110);
     for (const img of this.overlays.values()) {
       let target = 1;
-      if (Math.abs(img.x - px) < 34 && py < img.y - 30 && py > img.y - 110) target = 0.45;
+      for (let i = 0; i < points.length; i += 2) {
+        const px = points[i], py = points[i + 1];
+        if (Math.abs(img.x - px) < 34 && py < img.y - 30 && py > img.y - 110) { target = 0.45; break; }
+      }
       if (img.alpha !== target) {
         const a = img.alpha + (target - img.alpha) * k;
         img.setAlpha(Math.abs(a - target) < 0.02 ? target : a);

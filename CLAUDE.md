@@ -102,41 +102,34 @@ Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4)
 - **Naming**: PascalCase for classes/types, camelCase for variables/functions, UPPER_SNAKE for constants
 - **Imports**: Phaser types imported explicitly, local imports use relative paths
 - **UI text**: Chinese (Simplified) for all player-facing strings
-- **No tests yet**: The project has no test framework set up
+- **Tests**: Vitest (`npm test`); tests live in `src/__tests__/`. Run them plus `npx tsc --noEmit` before pushing
 - **Phaser patterns**: Use `this.add.*` for game objects, `this.tweens` for animations, `this.time` for timers
 
 ## Current State
 
 ### Implemented
-- 3 playable classes (Warrior, Mage, Rogue) with skill trees
-- 5 zones with progression (Emerald Plains -> Abyss Rift)
-- Real-time combat with auto-battle toggle
-- D2-style loot generation with affixes
-- Equipment system (10 slots)
-- Quest system with tracking
-- NPC interaction (shops, dialogue, quests)
-- Fog of war with exploration memory
-- Minimap
-- Homestead system (buildings, pets)
-- Save/load via IndexedDB
-- Procedural sprite generation with external asset override
-- Audio system (BGM + SFX)
-- Skill VFX system
-- Keyboard controls (WASD, 1-6 skills, I/K/M/H/C panels)
+- 3 playable classes (Warrior, Mage, Rogue) with skill trees; mercenaries, pets, spirit system
+- 5 zones with progression (Emerald Plains -> Abyss Rift); maps are hand-authored grids enhanced by `MapGenerator` at load
+- Sub-dungeons (`DungeonSystem`), random events, weather, lighting
+- Real-time combat with auto-battle toggle, contact-frame hit timing and weighted hit feedback (see Combat Feel)
+- Elite monster affixes (`EliteAffixSystem`), difficulty modes (`DifficultySystem`)
+- D2-style loot with affixes, identify scrolls, gem sockets, buyback
+- Equipment (10 slots), inventory, stash panel (stash keeper NPC; homestead warehouse adds slots)
+- Quest system with tracking; NPC shops, dialogue trees, quests
+- Fog of war, minimap, homestead (buildings, pets), achievements
+- Save/load via IndexedDB; audio (BGM + SFX); zh-CN / en localisation (`t()`)
+- Keyboard controls (WASD, 1-6 skills, I/K/M/H/C panels) and mobile touch controls
+- Art: all characters, monsters and NPCs are procedural cel-shaded rigs (`src/graphics/sprites/rig/`);
+  zone-themed terrain (`src/graphics/terrain/`), props, pooled skill VFX (`src/graphics/vfx/`),
+  item/skill icons (`src/graphics/icons/`) and the UI kit (`src/ui/UiKit.ts`) follow
+  `docs/art-direction.md`. External PNGs in `public/assets/` still override any texture key.
 
 ### Needs Work
-- **Mobile controls**: Virtual joystick + touch skill buttons not implemented
-- **Procedural map generation**: `MapGenerator.ts` exists but maps are still hand-authored grids
 - **Random dungeons**: Zone 6 (endgame roguelike) not started
 - **Death penalty**: Corpse run / gold loss not implemented
-- **Elite monsters**: Random affix system for enhanced spawns
-- **Difficulty modes**: Nightmare/Hell post-clear not implemented
-- **Item identify**: Scroll of Identify mechanic not wired up
-- **Gem socketing**: System not implemented
 - **Crafting**: Blacksmith crafting beyond buy/sell
-- **Achievements**: `AchievementSystem.ts` exists, needs integration
-- **External art assets**: No actual PNG assets in `public/assets/` yet
-- **Performance**: Large maps may need chunk-based rendering optimization
+- **Performance**: Monster/NPC sheets are regenerated on every zone entry (~1 s on a software
+  renderer); consider caching or lazy per-action generation if zone load grows
 
 ## Parallel Agent Guidelines
 
