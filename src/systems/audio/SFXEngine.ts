@@ -79,6 +79,37 @@ export class SFXEngine {
       case 'quest_objective': this.sfxChime(ctx, destination, t, [659, 880, 1319], 0.09, 0.5); break;
       case 'levelup':         this.sfxLevelup(ctx, destination, t); break;
       case 'npc_interact':    this.sfxNpcInteract(ctx, destination, t); break;
+      case 'anvil':           this.sfxAnvil(ctx, destination, t); break;
+    }
+  }
+
+  /**
+   * Blacksmith hammer on anvil — a sharp strike click, a low body thump and a
+   * ringing set of inharmonic metal partials that decay over ~0.9 s.
+   */
+  private sfxAnvil(ctx: AudioContext, destination: AudioNode, t: number): void {
+    // Strike transient
+    this.createNoiseBurst(ctx, destination, 0.05, 3200, 'bandpass', t, 0.3);
+    // Body thump
+    const thump = ctx.createOscillator();
+    const gThump = ctx.createGain();
+    thump.type = 'sine';
+    thump.frequency.setValueAtTime(180, t);
+    thump.frequency.exponentialRampToValueAtTime(70, t + 0.12);
+    this.createADSR(ctx, gThump.gain, 0.002, 0.05, 0.2, 0.1, 0.28, t);
+    thump.connect(gThump); gThump.connect(destination);
+    thump.start(t); thump.stop(t + 0.2);
+    // Ringing partials (inharmonic ratios of a struck steel bar)
+    const partials: [number, number, number][] = [[880, 0.12, 0.9], [2376, 0.07, 0.7], [4550, 0.04, 0.45], [1321, 0.05, 0.6]];
+    for (const [f, peak, dur] of partials) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f * 0.995, t + dur);
+      this.createADSR(ctx, g.gain, 0.001, 0.04, 0.5, dur, peak, t);
+      o.connect(g); g.connect(destination);
+      o.start(t); o.stop(t + dur + 0.1);
     }
   }
 

@@ -122,6 +122,17 @@ export const Gems: ItemBase[] = [
 ];
 
 /**
+ * Blacksmith crafting materials (CraftingSystem): salvaged from equipment,
+ * spent on reforging, upgrading and punching sockets. Plain stackable items,
+ * so they save, stash and sell like anything else.
+ */
+export const Materials: ItemBase[] = [
+  { id: 'm_scrap', name: '铁屑', nameEn: 'Iron Scrap', description: '分解装备得到的金属碎料', type: 'material', icon: 'm_scrap', levelReq: 1, sellPrice: 2, stackable: true, maxStack: 50 },
+  { id: 'm_dust', name: '魔尘', nameEn: 'Magic Dust', description: '魔法装备中析出的闪光粉尘', type: 'material', icon: 'm_dust', levelReq: 1, sellPrice: 6, stackable: true, maxStack: 50 },
+  { id: 'm_essence', name: '稀有精华', nameEn: 'Rare Essence', description: '稀有装备凝结出的璀璨精华', type: 'material', icon: 'm_essence', levelReq: 1, sellPrice: 20, stackable: true, maxStack: 50 },
+];
+
+/**
  * Gem stat mapping: base ID → { stat, value, tier, name }.
  * Used when socketing a gem to create a GemInstance.
  */
@@ -146,7 +157,7 @@ export const GEM_STAT_MAP: Record<string, { stat: string; value: number; tier: n
 };
 
 export const AllItemBases: (ItemBase | WeaponBase | ArmorBase | AccessoryBase)[] = [
-  ...Weapons, ...Armors, ...Accessories, ...Consumables, ...Gems,
+  ...Weapons, ...Armors, ...Accessories, ...Consumables, ...Gems, ...Materials,
 ];
 
 export function getItemBase(id: string): ItemBase | WeaponBase | ArmorBase | AccessoryBase | undefined {

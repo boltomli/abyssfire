@@ -11,7 +11,7 @@
  * Icon ids: w_sword w_axe w_mace w_dagger w_bow w_staff w_wand w_shield
  *   a_helm a_armor a_gloves a_boots a_belt j_ring j_amulet
  *   g_ruby g_sapphire g_emerald g_topaz g_diamond c_hp c_mp c_antidote c_scroll
- *   m_ore (crafting material fallback).
+ *   m_ore (crafting material fallback), m_scrap m_dust m_essence (blacksmith materials).
  * Variants: an item base id (e.g. 'w_claymore', 'g_ruby_3', 'c_hp_potion_l')
  * picks a visual tier of its icon; unknown or omitted -> the icon's default look.
  */
@@ -79,7 +79,7 @@ export const ITEM_ICON_IDS: readonly string[] = [
   'w_sword', 'w_axe', 'w_mace', 'w_dagger', 'w_bow', 'w_staff', 'w_wand', 'w_shield',
   'a_helm', 'a_armor', 'a_gloves', 'a_boots', 'a_belt', 'j_ring', 'j_amulet',
   'g_ruby', 'g_sapphire', 'g_emerald', 'g_topaz', 'g_diamond',
-  'c_hp', 'c_mp', 'c_antidote', 'c_scroll', 'm_ore',
+  'c_hp', 'c_mp', 'c_antidote', 'c_scroll', 'm_ore', 'm_scrap', 'm_dust', 'm_essence',
 ];
 
 /** Draw an item icon into `ctx` (size × size px, transparent background). */
@@ -304,6 +304,9 @@ function iconSpec(iconId: string, variant?: string): IconSpec {
     case 'c_antidote': return potionSpec(0x5fd03a, 'm', 'square');
     case 'c_scroll': return scrollSpec(pick(SCROLLS, variant));
     case 'm_ore': return { draw: drawOre };
+    case 'm_scrap': return { draw: drawScrap };
+    case 'm_dust': return { draw: drawDust, opts: { under: (c) => glow(c, P(48, 60), 40, 0x5f8cff, 0.55), over: dustSparkles } };
+    case 'm_essence': return { draw: drawEssence, opts: { under: (c) => glow(c, P(48, 50), 42, 0xffc23a, 0.7), over: essenceSparkles } };
     default:
       if (iconId.startsWith('w_')) return bladeSpec(SWORDS.default, false);
       if (iconId.startsWith('a_')) return armorSpec('leather');
@@ -1733,4 +1736,69 @@ function drawOre(c: CanvasRenderingContext2D): void {
   for (const [x, y, r] of [[48, 50, 8], [64, 64, 6], [32, 60, 5]] as const) {
     facetGem(c, x, y, gemCut('trillion', r), 0xff9a3a, { sparkles: r > 6 ? 1 : 0, stroke: 1 });
   }
+}
+
+/** 铁屑 — a bent iron offcut, a hex nut and a curled shaving. */
+function drawScrap(c: CanvasRenderingContext2D): void {
+  const plate = tone(IRON);
+  const shard = (): void => polyPath(c, [P(10, 66), P(38, 46), P(64, 56), P(68, 72), P(54, 88), P(16, 88)]);
+  celI(c, shard, plate, { band: 4, hi: 1.5 });
+  clipTo(c, shard, () => {
+    line(c, [P(22, 78), P(44, 62)], 1.2, plate.shade);
+    for (const [x, y] of [[26, 72], [46, 76]] as const) {
+      c.beginPath(); c.arc(x, y, 2.4, 0, Math.PI * 2); c.fillStyle = plate.shade; c.fill();
+    }
+  });
+  // hex nut
+  const nt = tone(STEEL);
+  const hex = sample(6, (t) => { const a = t * Math.PI * 2 * (5 / 6) + Math.PI / 6; return P(64 + Math.cos(a) * 19, 40 + Math.sin(a) * 19); });
+  celI(c, () => polyPath(c, hex), nt, { band: 4, hi: 1.6 });
+  c.beginPath(); c.arc(64, 40, 7.5, 0, Math.PI * 2); c.fillStyle = css(0x2a2530); c.fill();
+  c.lineWidth = 1.4; c.strokeStyle = nt.line; c.stroke();
+  // curled shaving
+  const curl = sample(26, (t) => { const a = -0.4 + t * 5; const r = 17 - t * 10; return P(28 + Math.cos(a) * r, 34 + Math.sin(a) * r); });
+  line(c, curl, 6, css(0x3a3f4a));
+  line(c, curl, 3.2, css(mixHex(SILVER, 0xffffff, 0.2)));
+  // loose chips
+  for (const [x, y, r] of [[78, 72, 4], [70, 84, 3], [84, 62, 2.6]] as const) {
+    celI(c, () => polyPath(c, [P(x - r, y), P(x, y - r), P(x + r, y + r * 0.4), P(x - r * 0.3, y + r)]), tone(DARK_IRON), { band: 1.5, stroke: 1 });
+  }
+}
+
+/** 魔尘 — a heap of glowing blue powder. */
+function drawDust(c: CanvasRenderingContext2D): void {
+  const dt = tone(0x4f78f0, { light: 0.5, shadow: 0.35 });
+  const heap = (): void => blobPath(c, [P(10, 84), P(22, 66), P(38, 50), P(52, 46), P(66, 56), P(80, 70), P(88, 84), P(48, 90)]);
+  celI(c, heap, dt, { band: 6, hi: 1.8 });
+  clipTo(c, heap, () => {
+    for (let i = 0; i < 26; i++) {
+      const x = 16 + ((i * 37) % 68);
+      const y = 52 + ((i * 23) % 34);
+      c.beginPath(); c.arc(x, y, 1.1 + (i % 3) * 0.5, 0, Math.PI * 2);
+      c.fillStyle = i % 4 === 0 ? 'rgba(255,255,255,0.9)' : css(0xa8c4ff, 0.8); c.fill();
+    }
+  });
+}
+
+function dustSparkles(c: CanvasRenderingContext2D): void {
+  sparkle(c, 50, 36, 6, '#e8f0ff');
+  sparkle(c, 30, 48, 3.5, '#bcd2ff');
+  sparkle(c, 72, 44, 4, '#d6e2ff', 0.9);
+  for (const [x, y] of [[40, 28], [62, 26], [56, 16]] as const) {
+    c.beginPath(); c.arc(x, y, 1.4, 0, Math.PI * 2); c.fillStyle = 'rgba(190,210,255,0.85)'; c.fill();
+  }
+}
+
+/** 稀有精华 — a floating golden teardrop crystal. */
+function drawEssence(c: CanvasRenderingContext2D): void {
+  const drop = gemCut('pear', 26);
+  facetGem(c, 48, 50, drop, 0xffbf2e, { sparkles: 2, stroke: 1.4, table: 0.5 });
+  // small orbiting shards
+  facetGem(c, 22, 72, gemCut('trillion', 7), 0xffd35a, { stroke: 1 });
+  facetGem(c, 76, 30, gemCut('trillion', 5.5), 0xffd35a, { stroke: 1 });
+}
+
+function essenceSparkles(c: CanvasRenderingContext2D): void {
+  sparkle(c, 36, 30, 6, '#fff6d8');
+  sparkle(c, 66, 70, 4.5, '#ffe7a0', 0.9);
 }

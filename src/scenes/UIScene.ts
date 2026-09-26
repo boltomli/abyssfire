@@ -33,11 +33,15 @@ import { t, getLocale } from '../i18n';
 import { isMobileDevice } from '../systems/MobileControlsSystem';
 import { ensureItemIcon, ensureItemIconFor } from '../graphics/icons/ItemIcons';
 import {
+  CraftingSystem, CRAFT_ACTIONS, MATERIAL_IDS, craftCost, itemSocketCapacity, lootCraftRoller, materialCounts,
+  salvageYield, upgradeTarget, type CraftAction, type CraftCheck, type MaterialBag, type MaterialId,
+} from '../systems/CraftingSystem';
+import {
   addFrame, addCloseButton, addButton, addTitleFlourishes, addDivider, addVDivider, addSectionHeader,
   addSlot, wireSlotHover, frameTexture, drawCard, drawWell, drawBarFill, tabTexture, backdropTexture, orbTextures,
   skillSlotTexture, keyBadgeTexture, hudPlateTexture, minimapFrameTexture, coinTexture, pipTexture,
   barFrameTexture, barFillTexture, barTicksTexture, qualityHex, qualityNum, UI_COLORS,
-  type UiButton, type ButtonOptions, type CardStyle,
+  UiButton, type ButtonOptions, type CardStyle,
 } from '../ui/UiKit';
 import { getItemDisplayName, getItemBaseName, getItemBaseDesc, getAffixName, getStatLabel, isStatPercent, getQualityLabel, getSetName, getSetBonusDesc, getClassName, getDirection as getLocalizedDirection, getSkillName, getSkillDesc, getSkillTreeName, getDamageTypeName, getQuestName, getQuestDesc, getZoneName, getMercenaryName, getMercenaryDesc, getMercenaryTypeLabel, getBuildingName, getBuildingDesc, getPetName, getPetDesc, getAchievementName, getAchievementDesc, getAchievementTitle, getLoreName, getLoreText, getNpcName, getQuestTargetName, getPetStatLabel } from '../i18n/gameAccessors';
 
@@ -267,6 +271,15 @@ export class UIScene extends Phaser.Scene {
   private inventoryPanel: Phaser.GameObjects.Container | null = null;
   private shopPanel: Phaser.GameObjects.Container | null = null;
   private shopNpcId: string | null = null;
+  /** Blacksmith panel: merchant wares or the forge (锻造) tab. */
+  private shopTab: 'buy' | 'forge' = 'buy';
+  /** Bag item currently on the anvil. */
+  private forgeItemUid: string | null = null;
+  /** Feedback to play once the rebuilt shop panel is up. */
+  private forgeFx: { action: CraftAction; quality: string; yields?: MaterialBag } | null = null;
+  /** Anvil slot centre in shop-panel coordinates (for the spark burst). */
+  private forgeSlotPos: { x: number; y: number; size: number } | null = null;
+  private crafting: CraftingSystem | null = null;
   private stashPanel: Phaser.GameObjects.Container | null = null;
   private logHeader: Phaser.GameObjects.GameObject[] = [];
   private inventoryBtnText: Phaser.GameObjects.Text | null = null;
@@ -1124,8 +1137,15 @@ export class UIScene extends Phaser.Scene {
   private openShop(data: { npcId: string; shopItems: string[]; type: string }, keepPage = false): void {
     this.closeAllPanels();
     this.shopNpcId = data.npcId;
-    audioManager.playSFX('click');
-    if (!keepPage) this.shopInventoryPage = 0;
+    const isSmith = data.type === 'blacksmith';
+    if (!keepPage) {
+      audioManager.playSFX('click');
+      this.shopInventoryPage = 0;
+      this.shopTab = 'buy';
+      this.forgeItemUid = null;
+    }
+    if (!isSmith) this.shopTab = 'buy';
+    const forging = this.shopTab === 'forge';
 
     // Backdrop for outside-click dismiss
     this.dialogueBackdrop = this.createBackdrop(0.6);
@@ -1139,9 +1159,11 @@ export class UIScene extends Phaser.Scene {
     const dividerX = px(356);
     this.shopPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     const shop = this.shopPanel;
-    this.animatePanelOpen(shop);
+    // Rebuilds (buy / sell / craft) swap the panel in place instead of popping it again.
+    if (keepPage) shop.setData('noPop', true);
+    else this.animatePanelOpen(shop);
     shop.add(this.createPanelBg(pw, ph));
-    const title = data.type === 'blacksmith' ? t('ui.shop.blacksmith') : t('ui.shop.shop');
+    const title = isSmith ? t('ui.shop.blacksmith') : t('ui.shop.shop');
     shop.add(this.createPanelTitle(pw, title));
     shop.add(this.createPanelCloseBtn(pw, () => {
       this.hideItemTooltip();
@@ -1154,12 +1176,35 @@ export class UIScene extends Phaser.Scene {
 
     // --- LEFT: Merchant items ---
     const leftX = px(18), leftW = dividerX - px(34);
-    shop.add(addSectionHeader(this, leftX, px(54), leftW, t('ui.shop.itemList')));
-    const rowH = px(40), rowStart = px(68);
-    const iconSz = px(32);
     const listBottom = ph - px(54);
+    if (isSmith) {
+      // Tabs: wares | forge
+      const tabW = Math.floor((leftW - px(6)) / 2), tabH = px(26), tabY = px(44);
+      (['buy', 'forge'] as const).forEach((tab, ti) => {
+        const tx = leftX + ti * (tabW + px(6));
+        const active = this.shopTab === tab;
+        shop.add(this.add.image(tx, tabY, tabTexture(this, tabW, tabH, active, tab === 'forge' ? 0xff8a2a : 0xd4a54a)).setOrigin(0, 0));
+        shop.add(this.add.text(tx + tabW / 2, tabY + tabH / 2, t(tab === 'buy' ? 'ui.shop.tabBuy' : 'ui.shop.tabForge'), {
+          fontSize: fs(13), color: active ? UI_COLORS.parchment : '#8a8290', fontFamily: FONT, fontStyle: 'bold',
+          stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+        }).setOrigin(0.5));
+        const hit = this.add.rectangle(tx + tabW / 2, tabY + tabH / 2, tabW, tabH, 0x000000, 0).setInteractive({ useHandCursor: true });
+        hit.on('pointerdown', () => {
+          if (this.shopTab === tab) return;
+          this.shopTab = tab;
+          audioManager.playSFX('click');
+          this.reopenShop(data);
+        });
+        shop.add(hit);
+      });
+    } else {
+      shop.add(addSectionHeader(this, leftX, px(54), leftW, t('ui.shop.itemList')));
+    }
+    const rowH = px(40), rowStart = isSmith ? px(76) : px(68);
+    const iconSz = px(32);
 
-    data.shopItems.forEach((itemId, i) => {
+    if (forging) this.drawForgePane(shop, data, leftX, px(78), leftW, listBottom);
+    else data.shopItems.forEach((itemId, i) => {
       const base = getItemBase(itemId);
       if (!base) return;
       const iy = rowStart + i * rowH;
@@ -1193,7 +1238,7 @@ export class UIScene extends Phaser.Scene {
 
     // --- Buyback section ---
     const buybackItems = this.zone.inventorySystem.buybackItems;
-    if (buybackItems.length > 0) {
+    if (!forging && buybackItems.length > 0) {
       const buybackStartY = rowStart + data.shopItems.length * rowH + px(12);
       shop.add(addSectionHeader(this, leftX, buybackStartY, leftW, t('ui.shop.buyback')));
       buybackItems.forEach((entry, i) => {
@@ -1260,7 +1305,19 @@ export class UIScene extends Phaser.Scene {
       if (!item) { shop.add(addSlot(this, cx, cy, shopSlotSize, null).setAlpha(0.7)); continue; }
       const { slot: itemBg, objects } = this.createItemSlot(cx, cy, shopSlotSize, item);
       shop.add(objects);
+      if (forging) {
+        // Forge tab: gear is what goes on the anvil; everything else is dimmed.
+        const forgeable = !!getItemBase(item.baseId)?.slot;
+        if (!forgeable) for (const o of objects) (o as Phaser.GameObjects.Image).setAlpha?.(0.4);
+        if (item.uid === this.forgeItemUid) {
+          const sel = this.add.graphics();
+          sel.lineStyle(px(2), 0xffb040, 1);
+          sel.strokeRoundedRect(cx - shopSlotSize / 2 - px(2), cy - shopSlotSize / 2 - px(2), shopSlotSize + px(4), shopSlotSize + px(4), px(4));
+          shop.add(sel);
+        }
+      }
       itemBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
+        if (forging && IS_MOBILE) return; // touch: the tap puts it on the anvil, whose card shows it
         this.showItemTooltip(item, pointer.x, pointer.y);
       });
       itemBg.on('pointerout', () => this.hideHoverTooltip());
@@ -1268,6 +1325,10 @@ export class UIScene extends Phaser.Scene {
         this.hideItemTooltip();
         const isRightClick = pointer.rightButtonDown();
         const isHighValue = item.quality === 'legendary' || item.quality === 'set';
+        if (forging && !(isRightClick && !IS_MOBILE)) {
+          this.placeOnAnvil(item, data);
+          return;
+        }
         if (IS_MOBILE) {
           // Touch: a tap shows the item + a Sell button instead of selling on the spot.
           const price = (getItemBase(item.baseId)?.sellPrice ?? 1) * item.quantity;
@@ -1321,9 +1382,18 @@ export class UIScene extends Phaser.Scene {
 
     // Hint for right-click selling
     shop.add(addDivider(this, rightX + rightW / 2, ph - px(40), rightW));
-    shop.add(this.add.text(rightX + rightW / 2, ph - px(22), t(IS_MOBILE ? 'ui.shop.sellHintTouch' : 'ui.shop.sellHint'), {
-      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
+    const hintKey = forging
+      ? (IS_MOBILE ? 'ui.forge.bagHintTouch' : 'ui.forge.bagHint')
+      : (IS_MOBILE ? 'ui.shop.sellHintTouch' : 'ui.shop.sellHint');
+    shop.add(this.add.text(rightX + rightW / 2, ph - px(22), t(hintKey), {
+      fontSize: fs(11), color: forging ? '#e8b070' : UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5, 0.5));
+
+    if (forging && this.forgeFx && this.forgeSlotPos) {
+      const fx = this.forgeFx;
+      this.forgeFx = null;
+      this.playForgeFx(shop, fx);
+    }
   }
 
   private showSellConfirm(item: ItemInstance, shopData: { npcId: string; shopItems: string[]; type: string }): void {
@@ -1348,6 +1418,305 @@ export class UIScene extends Phaser.Scene {
       this.reopenShop(shopData);
     }, { variant: 'primary', fontSize: 13 }));
     this.contextPopup.add(this.makeButton(popW / 2 + px(62), popH - px(26), px(100), px(28), btnLabel(t('ui.shop.cancel')), () => this.hideContextPopup(), { fontSize: 13 }));
+  }
+
+  // --- Blacksmith forge (锻造) ---
+
+  private getCrafting(): CraftingSystem {
+    if (!this.crafting) this.crafting = new CraftingSystem(lootCraftRoller(this.zone.lootSystem));
+    return this.crafting;
+  }
+
+  /** Forge tab, bag click: put a piece of gear on the anvil (tap again to take it off). */
+  private placeOnAnvil(item: ItemInstance, data: { npcId: string; shopItems: string[]; type: string }): void {
+    if (!getItemBase(item.baseId)?.slot) {
+      audioManager.playSFX('error');
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.forge.notEquipment'), type: 'system' });
+      return;
+    }
+    this.forgeItemUid = this.forgeItemUid === item.uid ? null : item.uid;
+    audioManager.playSFX(this.forgeItemUid ? 'equip' : 'click');
+    this.reopenShop(data);
+  }
+
+  private materialLabel(id: MaterialId, qty: number): string {
+    return t('ui.forge.qty', { name: getItemBaseName(id), qty: String(qty) });
+  }
+
+  private materialList(bag: MaterialBag): string {
+    return MATERIAL_IDS.filter(id => (bag[id] ?? 0) > 0).map(id => this.materialLabel(id, bag[id]!)).join(' ');
+  }
+
+  /** Left pane of the blacksmith panel in forge mode: anvil card, materials, four actions. */
+  private drawForgePane(
+    shop: Phaser.GameObjects.Container, data: { npcId: string; shopItems: string[]; type: string },
+    x: number, y: number, w: number, bottom: number,
+  ): void {
+    const inv = this.zone.inventorySystem;
+    const crafting = this.getCrafting();
+    const item = this.forgeItemUid ? inv.inventory.find(i => i.uid === this.forgeItemUid) ?? null : null;
+    if (!item) this.forgeItemUid = null;
+
+    // ── Anvil card ──
+    const cardH = px(86);
+    const accent = item ? qualityNum(item.quality) : 0x4a4250;
+    const card = this.add.graphics();
+    drawCard(card, x, y, w, cardH, { border: accent, strip: item ? accent : undefined, glow: item ? accent : undefined });
+    shop.add(card);
+    const slotSize = px(62);
+    const scx = x + px(12) + slotSize / 2, scy = y + cardH / 2;
+    // Ember glow behind the anvil slot
+    const ember = this.add.graphics();
+    ember.fillStyle(0xff7a2a, item ? 0.22 : 0.1);
+    ember.fillEllipse(scx, scy + slotSize * 0.28, slotSize * 1.3, slotSize * 0.5);
+    shop.add(ember);
+    const slot = this.createItemSlot(scx, scy, slotSize, item, { showCount: false });
+    shop.add(slot.objects);
+    this.forgeSlotPos = { x: scx, y: scy, size: slotSize };
+    const textX = scx + slotSize / 2 + px(12);
+    const textW = x + w - px(10) - textX;
+    if (item) {
+      slot.slot.on('pointerover', (p: Phaser.Input.Pointer) => this.showItemTooltip(item, p.x, p.y));
+      slot.slot.on('pointerout', () => this.hideHoverTooltip());
+      const nameT = this.add.text(textX, y + px(10), getItemDisplayName(item), {
+        fontSize: fs(14), color: qualityHex(item.quality), fontFamily: FONT, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+      });
+      if (nameT.width > textW) nameT.setScale(textW / nameT.width, 1);
+      shop.add(nameT);
+      const cap = itemSocketCapacity(item);
+      let info = t('ui.forge.itemInfo', { quality: getQualityLabel(item.quality), level: String(item.level) });
+      if (cap > 0) info += '  ·  ' + t('ui.forge.sockets', { filled: String(item.sockets.length), max: String(cap) });
+      shop.add(this.add.text(textX, y + px(31), info, { fontSize: fs(11), color: '#9a8f80', fontFamily: FONT }));
+      const affixText = !item.identified && item.quality !== 'normal'
+        ? t('ui.tooltip.unidentified')
+        : item.affixes.length === 0
+          ? t('ui.forge.noAffixes')
+          : item.affixes.map(a => `+${a.value}${isStatPercent(a.stat) ? '%' : ''} ${getStatLabel(a.stat)}`).join('  ');
+      shop.add(this.add.text(textX, y + px(48), affixText, {
+        fontSize: fs(11), color: item.affixes.length ? '#7fb0ff' : UI_COLORS.dim, fontFamily: FONT, lineSpacing: px(1),
+        wordWrap: { width: textW, useAdvancedWrap: true }, maxLines: 2,
+      }));
+    } else {
+      shop.add(this.add.text(scx, scy, t('ui.forge.slotEmpty'), {
+        fontSize: fs(11), color: UI_COLORS.dim, fontFamily: FONT, align: 'center',
+        wordWrap: { width: slotSize - px(8), useAdvancedWrap: true },
+      }).setOrigin(0.5));
+      shop.add(this.add.text(textX, scy, t('ui.forge.pickHint'), {
+        fontSize: fs(12), color: '#e8b070', fontFamily: FONT, lineSpacing: px(2),
+        wordWrap: { width: textW, useAdvancedWrap: true },
+      }).setOrigin(0, 0.5));
+    }
+
+    // ── Materials owned ──
+    const owned = materialCounts(inv);
+    const matY = y + cardH + px(16);
+    const chipW = w / 3;
+    MATERIAL_IDS.forEach((id, i) => {
+      const cx = x + i * chipW;
+      shop.add(this.add.image(cx + px(12), matY, ensureItemIcon(this, id)).setDisplaySize(px(22), px(22)));
+      const txt = this.add.text(cx + px(26), matY, `${getItemBaseName(id)} ${owned[id]}`, {
+        fontSize: fs(12), color: owned[id] > 0 ? UI_COLORS.text : UI_COLORS.dim, fontFamily: FONT,
+      }).setOrigin(0, 0.5);
+      if (txt.width > chipW - px(28)) txt.setScale((chipW - px(28)) / txt.width, 1);
+      shop.add(txt);
+    });
+
+    // ── Actions ──
+    const rowsTop = matY + px(16);
+    const rowH = Math.floor((bottom - rowsTop) / CRAFT_ACTIONS.length);
+    const ACTION_COLOR: Record<CraftAction, number> = { salvage: 0xc0503c, reforge: 0x4f8cff, upgrade: 0xffd84a, socket: 0x8be9fd };
+    CRAFT_ACTIONS.forEach((action, i) => {
+      const ry = rowsTop + i * rowH;
+      const rh = rowH - px(6);
+      const chk: CraftCheck | null = item ? crafting.check(action, item, inv, this.player) : null;
+      const applies = !!chk?.cost;
+      const g = this.add.graphics();
+      drawCard(g, x, ry, w, rh, chk?.ok
+        ? { border: 0x6a5a3a, strip: ACTION_COLOR[action] }
+        : { border: 0x2e2a32, fill: 0x100e12 });
+      shop.add(g);
+      const btnW = px(70), btnH = Math.min(px(32), rh - px(10));
+      const contentW = w - btnW - px(26);
+      const titleT = this.add.text(x + px(12), ry + px(14), t(`ui.forge.action.${action}`), {
+        fontSize: fs(14), color: applies ? UI_COLORS.parchment : UI_COLORS.dim, fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(0, 0.5);
+      shop.add(titleT);
+      // Preview (what the action will do)
+      if (item && applies) {
+        const prev = this.forgePreview(action, item);
+        const pt = this.add.text(titleT.x + titleT.width + px(8), ry + px(14), prev.text, {
+          fontSize: fs(11), color: prev.color, fontFamily: FONT,
+        }).setOrigin(0, 0.5);
+        const maxW = contentW - titleT.width - px(8);
+        if (pt.width > maxW) pt.setScale(maxW / pt.width, 1);
+        shop.add(pt);
+      }
+      // Cost line (red where short) or why the action is unavailable
+      const ly = ry + px(35);
+      if (item && chk) {
+        if (!chk.cost) {
+          const why = action === 'upgrade' && chk.reason === 'quality' ? 'upgradeQuality' : chk.reason ?? 'quality';
+          shop.add(this.add.text(x + px(12), ly, t(`ui.forge.block.${why}`), {
+            fontSize: fs(11), color: '#8a6a60', fontFamily: FONT,
+          }).setOrigin(0, 0.5));
+        } else {
+          let cx = x + px(12);
+          const cost = chk.cost;
+          const addChip = (icon: string, label: string, ok: boolean): void => {
+            shop.add(this.add.image(cx + px(7), ly, icon).setDisplaySize(px(16), px(16)).setAlpha(ok ? 1 : 0.6));
+            const tt = this.add.text(cx + px(17), ly, label, {
+              fontSize: fs(12), color: ok ? '#f0dcae' : '#ff6b5a', fontFamily: FONT, fontStyle: 'bold',
+            }).setOrigin(0, 0.5);
+            shop.add(tt);
+            cx += px(17) + tt.width + px(10);
+          };
+          if (cost.gold > 0) addChip(coinTexture(this, px(14)), String(cost.gold), this.player.gold >= cost.gold);
+          for (const id of MATERIAL_IDS) {
+            const need = cost.materials[id] ?? 0;
+            if (need > 0) addChip(ensureItemIcon(this, id), `${owned[id]}/${need}`, owned[id] >= need);
+          }
+          if (cost.gold === 0 && MATERIAL_IDS.every(id => !(cost.materials[id] ?? 0))) {
+            shop.add(this.add.text(cx, ly, t('ui.forge.free'), { fontSize: fs(12), color: '#7fd07a', fontFamily: FONT }).setOrigin(0, 0.5));
+            cx += px(40);
+          }
+          if (!chk.ok && (chk.reason === 'maxSockets' || chk.reason === 'bagFull' || chk.reason === 'notInBag')) {
+            const rt = this.add.text(cx, ly, t(`ui.forge.block.${chk.reason}`), { fontSize: fs(11), color: '#ff6b5a', fontFamily: FONT }).setOrigin(0, 0.5);
+            if (rt.x + rt.width > x + contentW) rt.setScale(Math.max(0.5, (x + contentW - rt.x) / rt.width), 1);
+            shop.add(rt);
+          }
+        }
+      }
+      shop.add(this.makeButton(x + w - px(10) - btnW / 2, ry + rh / 2, btnW, btnH, t(`ui.forge.action.${action}`), () => {
+        if (item) this.doForge(action, item, data);
+      }, { variant: action === 'salvage' ? 'danger' : 'primary', disabled: !chk?.ok, fontSize: 13, bold: true }));
+    });
+  }
+
+  /** One-line "what happens" for an action (deterministic parts shown as before → after). */
+  private forgePreview(action: CraftAction, item: ItemInstance): { text: string; color: string } {
+    switch (action) {
+      case 'salvage': {
+        let text = t('ui.forge.preview.salvage', { list: this.materialList(salvageYield(item)) });
+        if (item.sockets.length > 0) text += ' · ' + t('ui.forge.preview.salvageGems');
+        return { text, color: '#d8c8a8' };
+      }
+      case 'reforge': {
+        const [min, max] = item.quality === 'rare' ? [3, 4] : [1, 2];
+        return { text: t('ui.forge.preview.reforge', { min: String(min), max: String(max) }), color: '#9fc0ff' };
+      }
+      case 'upgrade': {
+        const to = upgradeTarget(item.quality) ?? item.quality;
+        return { text: t('ui.forge.preview.upgrade', { from: getQualityLabel(item.quality), to: getQualityLabel(to) }), color: qualityHex(to) };
+      }
+      case 'socket': {
+        const cap = itemSocketCapacity(item);
+        return { text: t('ui.forge.preview.socket', { from: String(cap), to: String(cap + 1) }), color: '#8be9fd' };
+      }
+    }
+  }
+
+  private doForge(action: CraftAction, item: ItemInstance, data: { npcId: string; shopItems: string[]; type: string }, confirmed = false): void {
+    this.hideItemTooltip();
+    const valuable = item.quality === 'rare' || item.quality === 'legendary' || item.quality === 'set' || item.sockets.length > 0;
+    if (action === 'salvage' && valuable && !confirmed) {
+      this.showForgeConfirm(item, () => this.doForge(action, item, data, true));
+      return;
+    }
+    const inv = this.zone.inventorySystem;
+    const name = getItemDisplayName(item);
+    const res = this.getCrafting().perform(action, item, inv, this.player);
+    if (!res.ok) {
+      audioManager.playSFX('error');
+      if (res.reason) EventBus.emit(GameEvents.LOG_MESSAGE, { text: t(`ui.forge.block.${res.reason}`), type: 'system' });
+      this.reopenShop(data);
+      return;
+    }
+    audioManager.playSFX('anvil');
+    if (action === 'salvage') {
+      this.forgeItemUid = null;
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.forge.log.salvage', { name, list: this.materialList(res.yields ?? {}) }), type: 'loot' });
+    } else {
+      const newName = getItemDisplayName(item);
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t(`ui.forge.log.${action}`, { name: action === 'socket' ? name : newName }), type: 'loot' });
+      if (action === 'upgrade') this.time.delayedCall(140, () => audioManager.playSFX(item.quality === 'rare' ? 'loot_rare' : 'loot_magic'));
+    }
+    this.forgeFx = { action, quality: item.quality, yields: res.yields };
+    this.reopenShop(data);
+  }
+
+  private showForgeConfirm(item: ItemInstance, onConfirm: () => void): void {
+    this.hideContextPopup();
+    const popW = px(280);
+    this.contextPopup = this.add.container(0, 0).setDepth(PANEL_STYLE.depth.confirmDialog);
+    const msg = this.add.text(popW / 2, px(20), t('ui.forge.salvageConfirm', { name: getItemDisplayName(item) }), {
+      fontSize: fs(13), color: UI_COLORS.text, fontFamily: FONT, align: 'center',
+      wordWrap: { width: popW - px(36), useAdvancedWrap: true },
+    }).setOrigin(0.5, 0);
+    const btnH = IS_MOBILE ? px(40) : px(28);
+    const popH = msg.y + msg.height + btnH + px(30);
+    const scale = IS_MOBILE ? MOBILE_POP_SCALE : 1;
+    this.contextPopup.setPosition((W - popW * scale) / 2, (H - popH * scale) / 2).setScale(scale);
+    this.contextPopup.add(addFrame(this, 0, 0, popW, popH, { variant: 'tooltip', accent: qualityNum(item.quality) }));
+    this.contextPopup.add(msg);
+    const by = popH - px(14) - btnH / 2;
+    this.contextPopup.add(this.makeButton(popW / 2 - px(62), by, px(108), btnH, t('ui.forge.action.salvage'), () => {
+      this.hideContextPopup();
+      onConfirm();
+    }, { variant: 'danger', fontSize: 13, bold: true }));
+    this.contextPopup.add(this.makeButton(popW / 2 + px(62), by, px(108), btnH, btnLabel(t('ui.shop.cancel')), () => this.hideContextPopup(), { fontSize: 13 }));
+  }
+
+  /** Hammer-strike feedback on the anvil slot: white flash, spark spray, icon punch, material pops. */
+  private playForgeFx(shop: Phaser.GameObjects.Container, fx: { action: CraftAction; quality: string; yields?: MaterialBag }): void {
+    const pos = this.forgeSlotPos;
+    if (!pos) return;
+    const { x, y, size } = pos;
+    const flash = this.add.circle(x, y, size * 0.45, 0xfff2d0, 0.95).setBlendMode(Phaser.BlendModes.ADD);
+    shop.add(flash);
+    this.tweens.add({ targets: flash, scale: 2.1, alpha: 0, duration: 280, ease: 'Cubic.easeOut', onComplete: () => flash.destroy() });
+    if (fx.action === 'upgrade' || fx.action === 'reforge') {
+      const ring = this.add.circle(x, y, size * 0.5).setStrokeStyle(px(3), qualityNum(fx.quality), 1);
+      shop.add(ring);
+      this.tweens.add({ targets: ring, scale: 1.9, alpha: 0, duration: 520, ease: 'Cubic.easeOut', onComplete: () => ring.destroy() });
+    }
+    const colors = [0xfff3b0, 0xffd060, 0xffa030, 0xff6a20];
+    const count = fx.action === 'upgrade' ? 30 : 22;
+    for (let i = 0; i < count; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.6;
+      const d = px(30 + Math.random() * 60);
+      const spark = this.add.rectangle(x, y + size * 0.1, px(3), px(7 + Math.random() * 8), colors[i % colors.length])
+        .setRotation(a + Math.PI / 2).setBlendMode(Phaser.BlendModes.ADD);
+      shop.add(spark);
+      this.tweens.add({
+        targets: spark, x: x + Math.cos(a) * d, y: y + Math.sin(a) * d + px(16), alpha: 0, scaleY: 0.4,
+        duration: 360 + Math.random() * 320, ease: 'Quad.easeOut', onComplete: () => spark.destroy(),
+      });
+    }
+    // Punch the item icon (the slot image's sibling added right after it).
+    if (fx.action !== 'salvage') {
+      const icon = shop.list.find(o => o instanceof Phaser.GameObjects.Image && Math.abs(o.x - x) < 1 && Math.abs(o.y - y) < 1
+        && o.displayWidth < size) as Phaser.GameObjects.Image | undefined;
+      if (icon) {
+        const sx = icon.scaleX, sy = icon.scaleY;
+        icon.setScale(sx * 1.3, sy * 1.3);
+        this.tweens.add({ targets: icon, scaleX: sx, scaleY: sy, duration: 260, ease: 'Back.easeOut' });
+      }
+    }
+    // Salvage: the materials float up out of the anvil.
+    if (fx.action === 'salvage' && fx.yields) {
+      MATERIAL_IDS.filter(id => (fx.yields![id] ?? 0) > 0).forEach((id, i) => {
+        const c = this.add.container(x + (i - 1) * px(34), y);
+        c.add(this.add.image(0, 0, ensureItemIcon(this, id)).setDisplaySize(px(24), px(24)));
+        c.add(this.add.text(px(12), px(6), `+${fx.yields![id]}`, {
+          fontSize: fs(12), color: '#ffe7a0', fontFamily: FONT, fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+        }).setOrigin(0, 0.5));
+        c.setAlpha(0);
+        shop.add(c);
+        this.tweens.add({ targets: c, alpha: 1, y: y - px(26), duration: 260, delay: 80 + i * 90, ease: 'Back.easeOut' });
+        this.tweens.add({ targets: c, alpha: 0, y: y - px(44), duration: 420, delay: 900 + i * 90, onComplete: () => c.destroy() });
+      });
+    }
   }
 
   // --- Boss bar ---
@@ -1454,7 +1823,20 @@ export class UIScene extends Phaser.Scene {
     const dividerX = px(420);
     const panel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.stashPanel = panel;
-    if (!rebuild) this.animatePanelOpen(panel);
+    if (rebuild) panel.setData('noPop', true);
+    else this.animatePanelOpen(panel);
+    /**
+     * Desktop: a click moves the item straight across. Touch: a tap shows the item card with a
+     * 存入 / 取出 button (like the bag), so browsing the stash never moves things by accident.
+     */
+    const pick = (item: ItemInstance, pointer: Phaser.Input.Pointer, label: string, move: () => void): void => {
+      if (!IS_MOBILE) { move(); return; }
+      this.hideItemTooltip();
+      this.showContextPopup(item, pointer.x, pointer.y, [{
+        label, variant: 'primary',
+        callback: () => { this.hideContextPopup(); move(); },
+      }]);
+    };
     panel.add(this.createPanelBg(pw, ph));
     panel.add(this.createPanelTitle(pw, t('ui.stash.title')));
     panel.add(this.createPanelCloseBtn(pw, () => { this.hideItemTooltip(); this.closeStash(); }));
@@ -1463,7 +1845,7 @@ export class UIScene extends Phaser.Scene {
     const cols = 8, rows = 5, perPage = cols * rows, gap = px(5), gridY = px(72);
     const drawGrid = (
       x: number, w: number, items: ItemInstance[], page: number, slotsTotal: number,
-      onPick: (item: ItemInstance) => void, setPage: (p: number) => void,
+      onPick: (item: ItemInstance, pointer: Phaser.Input.Pointer) => void, setPage: (p: number) => void,
     ): void => {
       const size = Math.floor((w - gap * (cols - 1)) / cols);
       const pages = Math.max(1, Math.ceil(slotsTotal / perPage));
@@ -1482,7 +1864,7 @@ export class UIScene extends Phaser.Scene {
         panel.add(objects);
         slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(item, pointer.x, pointer.y));
         slot.on('pointerout', () => this.hideHoverTooltip());
-        slot.on('pointerdown', () => onPick(item));
+        slot.on('pointerdown', (pointer: Phaser.Input.Pointer) => onPick(item, pointer));
       }
       if (pages > 1) {
         const pageY = gridY + rows * (size + gap) + px(12);
@@ -1501,11 +1883,11 @@ export class UIScene extends Phaser.Scene {
     panel.add(this.makeButton(leftX + leftW - px(30), px(54), px(56), px(22), t('ui.stash.sort'), () => {
       inv.sortStash(); audioManager.playSFX('click'); refresh();
     }, { fontSize: 11 }));
-    drawGrid(leftX, leftW, inv.stash, this.stashPage, Math.max(cap, inv.stash.length), item => {
+    drawGrid(leftX, leftW, inv.stash, this.stashPage, Math.max(cap, inv.stash.length), (item, pointer) => pick(item, pointer, t('ui.stash.withdraw'), () => {
       if (inv.moveFromStash(item.uid)) audioManager.playSFX('click');
       else EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.stash.bagFull'), type: 'system' });
       refresh();
-    }, p => { this.stashPage = p; });
+    }), p => { this.stashPage = p; });
 
     // --- RIGHT: bag ---
     const rightX = dividerX + px(16), rightW = pw - rightX - px(18);
@@ -1513,13 +1895,13 @@ export class UIScene extends Phaser.Scene {
     panel.add(this.makeButton(rightX + rightW - px(30), px(54), px(56), px(22), t('ui.stash.sort'), () => {
       inv.sortInventory(); audioManager.playSFX('click'); refresh();
     }, { fontSize: 11 }));
-    drawGrid(rightX, rightW, inv.inventory, this.stashBagPage, Math.max(perPage, inv.inventory.length), item => {
+    drawGrid(rightX, rightW, inv.inventory, this.stashBagPage, Math.max(perPage, inv.inventory.length), (item, pointer) => pick(item, pointer, t('ui.stash.deposit'), () => {
       if (inv.moveToStash(item.uid, cap)) audioManager.playSFX('click');
       refresh();
-    }, p => { this.stashBagPage = p; });
+    }), p => { this.stashBagPage = p; });
 
     panel.add(addDivider(this, pw / 2, ph - px(40), pw - px(36)));
-    panel.add(this.add.text(pw / 2, ph - px(22), t('ui.stash.hint'), {
+    panel.add(this.add.text(pw / 2, ph - px(22), t(IS_MOBILE ? 'ui.stash.hintTouch' : 'ui.stash.hint'), {
       fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5, 0.5));
   }
@@ -1697,9 +2079,42 @@ export class UIScene extends Phaser.Scene {
     const iconSize = px(42);
     const cardGap = px(12);
 
-    // Scrollable content container
+    // Scrollable content container (+ an unmasked scrollbar layer above it)
     const scrollContainer = this.add.container(0, 0);
     this.skillPanel.add(scrollContainer);
+    const scrollbar = this.add.graphics();
+    this.skillPanel.add(scrollbar);
+    const treeContentH = (tabIndex: number): number =>
+      (treeSkillsMap.get(treeNames[tabIndex])?.length ?? 0) * (cardH + cardGap) + px(30);
+    /** Scroll the active tree: move the card layer, redraw the thumb, and disable input on off-screen cards. */
+    const applySkillScroll = (tabIndex: number, value: number): void => {
+      const totalContentH = treeContentH(tabIndex);
+      const maxScrollY = Math.max(0, totalContentH - contentH);
+      const v = Phaser.Math.Clamp(value, 0, maxScrollY);
+      this.skillTreeScrollY[tabIndex] = v;
+      scrollContainer.y = -v;
+      scrollbar.clear();
+      if (totalContentH > contentH) {
+        const sbX = pw - px(16);
+        const sbTrackH = contentH - px(8);
+        const sbTrackY = contentTop + px(4);
+        scrollbar.fillStyle(0x060508, 1);
+        scrollbar.fillRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
+        scrollbar.lineStyle(1, 0x4a4250, 1);
+        scrollbar.strokeRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
+        const thumbH = Math.max(px(20), sbTrackH * Math.min(1, contentH / totalContentH));
+        const thumbY = sbTrackY + (maxScrollY > 0 ? (v / maxScrollY) * (sbTrackH - thumbH) : 0);
+        scrollbar.fillStyle(0xd4a54a, 0.85);
+        scrollbar.fillRoundedRect(sbX + px(1), thumbY, px(4), thumbH, px(2));
+      }
+      // Input ignores the geometry mask, so cards scrolled out of view must not take taps.
+      for (const child of scrollContainer.list) {
+        const target = child instanceof UiButton ? child.bg : child as Phaser.GameObjects.Rectangle;
+        if (!target.input) continue;
+        const cy = (child as Phaser.GameObjects.Rectangle).y - v;
+        target.input.enabled = cy > contentTop && cy < contentTop + contentH;
+      }
+    };
 
     // Clip mask for scroll area
     const clipMask = this.make.graphics({});
@@ -1708,6 +2123,53 @@ export class UIScene extends Phaser.Scene {
     const mask = clipMask.createGeometryMask();
     scrollContainer.setMask(mask);
     this.skillPanel.setData('fitMasks', [clipMask]);
+
+    /**
+     * Touch: drag the card list to scroll. Buttons fire on pointerdown, so on touch the "+"
+     * action is deferred to pointerup and dropped if the finger moved past the drag threshold.
+     */
+    let pendingTap: (() => void) | null = null;
+    const deferTap = (fn: () => void) => (): void => {
+      if (IS_MOBILE) pendingTap = fn;
+      else fn();
+    };
+    if (IS_MOBILE) {
+      const DRAG_THRESHOLD = px(12);
+      let drag: { startY: number; startScroll: number; active: boolean } | null = null;
+      const panel = this.skillPanel;
+      const onDown = (p: Phaser.Input.Pointer): void => {
+        const k = panel.scaleY || 1;
+        const lx = (p.x - panel.x) / k, ly = (p.y - panel.y) / k;
+        drag = lx >= 0 && lx <= pw && ly >= contentTop && ly <= contentTop + contentH
+          ? { startY: p.y, startScroll: this.skillTreeScrollY[this.skillTreeActiveTab] ?? 0, active: false }
+          : null;
+      };
+      const onMove = (p: Phaser.Input.Pointer): void => {
+        if (!drag || !p.isDown || !this.skillPanel) return;
+        const dy = p.y - drag.startY;
+        if (!drag.active && Math.abs(dy) > DRAG_THRESHOLD) {
+          drag.active = true;
+          pendingTap = null;
+          this.skillTooltip?.destroy(); this.skillTooltip = null;
+        }
+        if (drag.active) applySkillScroll(this.skillTreeActiveTab, drag.startScroll - dy / (panel.scaleY || 1));
+      };
+      const onUp = (): void => {
+        const tap = pendingTap;
+        const dragged = !!drag?.active;
+        pendingTap = null;
+        drag = null;
+        if (tap && !dragged) tap();
+      };
+      this.input.on('pointerdown', onDown);
+      this.input.on('pointermove', onMove);
+      this.input.on('pointerup', onUp);
+      panel.once(Phaser.GameObjects.Events.DESTROY, () => {
+        this.input.off('pointerdown', onDown);
+        this.input.off('pointermove', onMove);
+        this.input.off('pointerup', onUp);
+      });
+    }
 
     // Render active tab content
     const renderTab = (tabIndex: number) => {
@@ -1719,30 +2181,7 @@ export class UIScene extends Phaser.Scene {
       const treeColor = TREE_COLORS[treeName] ?? 0x888888;
       const sortedSkills = [...treeSkills].sort((a, b) => a.tier - b.tier);
 
-      const scrollY = this.skillTreeScrollY[tabIndex] ?? 0;
-      const totalContentH = sortedSkills.length * (cardH + cardGap) + px(30);
-      const maxScrollY = Math.max(0, totalContentH - contentH);
-
-      // Scrollbar
-      if (totalContentH > contentH) {
-        const sbX = pw - px(16);
-        const sbTrackH = contentH - px(8);
-        const sbTrackY = contentTop + px(4);
-        const sbTrack = this.add.graphics();
-        sbTrack.fillStyle(0x060508, 1);
-        sbTrack.fillRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
-        sbTrack.lineStyle(1, 0x4a4250, 1);
-        sbTrack.strokeRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
-        scrollContainer.add(sbTrack);
-
-        const thumbRatio = Math.min(1, contentH / totalContentH);
-        const thumbH = Math.max(px(20), sbTrackH * thumbRatio);
-        const thumbY = sbTrackY + (maxScrollY > 0 ? (scrollY / maxScrollY) * (sbTrackH - thumbH) : 0);
-        const sbThumb = this.add.graphics();
-        sbThumb.fillStyle(0xd4a54a, 0.85);
-        sbThumb.fillRoundedRect(sbX + px(1), thumbY, px(4), thumbH, px(2));
-        scrollContainer.add(sbThumb);
-      }
+      // Cards are laid out unscrolled; scrolling moves the container (see applySkillScroll).
 
       // Prerequisite lines (behind cards)
       const skillStartY = contentTop + px(10);
@@ -1756,8 +2195,8 @@ export class UIScene extends Phaser.Scene {
         const lineColor = isLearned ? treeColor : 0x3a3a4e;
 
         const cx = cardStartX + cardW / 2;
-        const curCardY = skillStartY + si * (cardH + cardGap) - scrollY;
-        const nextCardY = skillStartY + (si + 1) * (cardH + cardGap) - scrollY;
+        const curCardY = skillStartY + si * (cardH + cardGap);
+        const nextCardY = skillStartY + (si + 1) * (cardH + cardGap);
         const startLineY = curCardY + cardH;
         const endLineY = nextCardY;
 
@@ -1796,7 +2235,7 @@ export class UIScene extends Phaser.Scene {
         const isLearned = level > 0;
         const isMaxed = level >= skill.maxLevel;
         const cardX = cardStartX;
-        const cardY = skillStartY + si * (cardH + cardGap) - scrollY;
+        const cardY = skillStartY + si * (cardH + cardGap);
         const dmgColor = DMG_COLORS[skill.damageType] ?? 0xcccccc;
         const dmgColorHex = '#' + dmgColor.toString(16).padStart(6, '0');
 
@@ -1964,7 +2403,7 @@ export class UIScene extends Phaser.Scene {
         // + Button
         if (canLevel) {
           const btnSize = px(26);
-          const plusBtn = this.makeButton(cardX + cardW - btnSize / 2 - px(10), cardY + btnSize / 2 + px(8), btnSize, btnSize, '+', () => {
+          const plusBtn = this.makeButton(cardX + cardW - btnSize / 2 - px(10), cardY + btnSize / 2 + px(8), btnSize, btnSize, '+', deferTap(() => {
             const result = investSkillPoint(
               skill,
               this.player.classData.skills,
@@ -1981,10 +2420,11 @@ export class UIScene extends Phaser.Scene {
               });
               this.toggleSkillTree(); this.toggleSkillTree();
             }
-          }, { variant: 'success', fontSize: 17, bold: true });
+          }), { variant: 'success', fontSize: 17, bold: true });
           scrollContainer.add(plusBtn);
         }
       });
+      applySkillScroll(tabIndex, this.skillTreeScrollY[tabIndex] ?? 0);
     };
 
     // Draw tab buttons
@@ -2035,15 +2475,7 @@ export class UIScene extends Phaser.Scene {
     this.skillTreeWheelHandler = (_pointer: Phaser.Input.Pointer, _gos: Phaser.GameObjects.GameObject[], _dx: number, dy: number) => {
       if (!this.skillPanel) return;
       const tabIndex = this.skillTreeActiveTab;
-      const treeSkills = treeSkillsMap.get(treeNames[tabIndex]) ?? [];
-      const totalContentH = treeSkills.length * (cardH + cardGap) + px(30);
-      const maxScrollY = Math.max(0, totalContentH - contentH);
-      const scroll = this.skillTreeScrollY[tabIndex] ?? 0;
-      const newScroll = Phaser.Math.Clamp(scroll + dy * 0.5, 0, maxScrollY);
-      if (newScroll !== scroll) {
-        this.skillTreeScrollY[tabIndex] = newScroll;
-        renderTab(tabIndex);
-      }
+      applySkillScroll(tabIndex, (this.skillTreeScrollY[tabIndex] ?? 0) + dy * 0.5);
     };
     this.input.on('wheel', this.skillTreeWheelHandler);
 
@@ -3787,8 +4219,8 @@ export class UIScene extends Phaser.Scene {
       }
     }
     // Socket count (if base has sockets)
-    if (base && 'sockets' in base) {
-      const maxSock = (base as WeaponBase | ArmorBase).sockets;
+    if (base) {
+      const maxSock = itemSocketCapacity(item);
       if (maxSock > 0) {
         const filled = item.sockets?.length ?? 0;
         statLines.push({ text: t('ui.tooltip.socketCount', { filled: String(filled), max: String(maxSock) }), color: '#8a8290', size: 11 });
@@ -5316,8 +5748,12 @@ export class UIScene extends Phaser.Scene {
     const ny = Phaser.Math.Clamp(oy + ph / 2, m + sh / 2, H - m - sh / 2) - sh / 2;
     panel.setData('fitScale', s);
     this.tweens.killTweensOf(panel);
-    panel.setPosition(nx, ny).setScale(s * 0.94).setAlpha(0.3);
-    this.tweens.add({ targets: panel, scaleX: s, scaleY: s, alpha: 1, duration: 140, ease: 'Back.easeOut' });
+    if (panel.getData('noPop')) {
+      panel.setPosition(nx, ny).setScale(s).setAlpha(1);
+    } else {
+      panel.setPosition(nx, ny).setScale(s * 0.94).setAlpha(0.3);
+      this.tweens.add({ targets: panel, scaleX: s, scaleY: s, alpha: 1, duration: 140, ease: 'Back.easeOut' });
+    }
     const masks = panel.getData('fitMasks') as Phaser.GameObjects.Graphics[] | undefined;
     for (const g of masks ?? []) g.setScale(s).setPosition(nx - ox * s, ny - oy * s);
     const closeScale = Math.max(1, MOBILE_CLOSE_SIZE / (CLOSE_BTN_TEX * s));

@@ -166,6 +166,8 @@ export interface ItemInstance {
   level: number;
   affixes: ItemAffix[];
   sockets: GemInstance[];
+  /** Extra sockets punched by the blacksmith (CraftingSystem), on top of the base's. */
+  bonusSockets?: number;
   setId?: string;
   legendaryEffect?: string;
   identified: boolean;
