@@ -122,10 +122,75 @@ export const ZONE_PALETTES: Record<MapTheme, ZonePaletteEntry> = {
 // ── Runtime zone tracking ──
 
 let currentZonePalette: ZonePaletteEntry = ZONE_PALETTES.plains;
+let currentZoneTheme: MapTheme = 'plains';
 
 /** Set the active zone palette. Call when changing zones. */
 export function setCurrentZonePalette(theme: MapTheme): void {
   currentZonePalette = ZONE_PALETTES[theme] ?? ZONE_PALETTES.plains;
+  currentZoneTheme = ZONE_PALETTES[theme] ? theme : 'plains';
+}
+
+/** Theme of the active zone (drives terrain, lighting mood and colour grade). */
+export function getCurrentZoneTheme(): MapTheme {
+  return currentZoneTheme;
+}
+
+/**
+ * Per-zone atmosphere: ambient multiply tint, screen vignette, drifting haze
+ * and colour-grade parameters. Kept gentle so characters always read.
+ */
+export interface ZoneMood {
+  /** Ambient multiply colour and strength (0 = none). */
+  ambient: number;
+  ambientAlpha: number;
+  /** Edge vignette colour and strength at the corners. */
+  vignette: number;
+  vignetteAlpha: number;
+  /** Additive drifting haze colour and alpha. */
+  haze: number;
+  hazeAlpha: number;
+  /** Colour grade: saturation, contrast, shadow lift and highlight gain (RGB offsets). */
+  saturation: number;
+  contrast: number;
+  lift: readonly [number, number, number];
+  gain: readonly [number, number, number];
+}
+
+export const ZONE_MOODS: Record<MapTheme, ZoneMood> = {
+  // Warm afternoon sun, golden highlights.
+  plains: {
+    ambient: 0xfff0d2, ambientAlpha: 0.22, vignette: 0x2e2410, vignetteAlpha: 0.32,
+    haze: 0xffe6a0, hazeAlpha: 0.05,
+    saturation: 1.06, contrast: 1.04, lift: [0.012, 0.008, -0.004], gain: [0.03, 0.02, -0.01],
+  },
+  // Cool violet dusk with teal shadows.
+  forest: {
+    ambient: 0x9aa6e0, ambientAlpha: 0.34, vignette: 0x120a2a, vignetteAlpha: 0.5,
+    haze: 0x7a60c8, hazeAlpha: 0.07,
+    saturation: 1.05, contrast: 1.05, lift: [-0.006, 0.014, 0.03], gain: [0.0, 0.02, 0.035],
+  },
+  // Crisp cold air, blue shadows, warm forge-lit highlights.
+  mountain: {
+    ambient: 0xd4def2, ambientAlpha: 0.26, vignette: 0x141c2c, vignetteAlpha: 0.4,
+    haze: 0xc8dcf0, hazeAlpha: 0.06,
+    saturation: 0.96, contrast: 1.06, lift: [-0.008, 0.004, 0.022], gain: [0.02, 0.012, 0.0],
+  },
+  // Bleaching heat: warm lift, slightly lower contrast.
+  desert: {
+    ambient: 0xffe2b0, ambientAlpha: 0.24, vignette: 0x3a200c, vignetteAlpha: 0.34,
+    haze: 0xffd890, hazeAlpha: 0.06,
+    saturation: 1.04, contrast: 1.02, lift: [0.02, 0.01, -0.006], gain: [0.03, 0.016, -0.014],
+  },
+  // Smouldering crimson dark.
+  abyss: {
+    ambient: 0xb07896, ambientAlpha: 0.4, vignette: 0x1a0010, vignetteAlpha: 0.58,
+    haze: 0xff3050, hazeAlpha: 0.06,
+    saturation: 1.1, contrast: 1.07, lift: [0.024, -0.004, 0.012], gain: [0.03, 0.0, 0.0],
+  },
+};
+
+export function getCurrentZoneMood(): ZoneMood {
+  return ZONE_MOODS[currentZoneTheme] ?? ZONE_MOODS.plains;
 }
 
 /** Get the active zone palette for sprite generation. */

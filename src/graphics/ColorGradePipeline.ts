@@ -1,33 +1,30 @@
 import Phaser from 'phaser';
+import { getCurrentZoneMood } from './ZonePalette';
 
 const fragShader = `
 precision mediump float;
 uniform sampler2D uMainSampler;
+uniform vec3 uLift;
+uniform vec3 uGain;
+uniform float uSat;
+uniform float uContrast;
 varying vec2 outTexCoord;
 
 void main() {
   vec4 color = texture2D(uMainSampler, outTexCoord);
-
-  // Mild contrast boost (~5%)
   vec3 c = color.rgb;
-  c = (c - 0.5) * 1.05 + 0.5;
 
-  // Gentle warm midtones (reduced to preserve cool-hued zones)
-  c.r = c.r * 1.02 + 0.005;
-  c.g = c.g * 1.01;
-  c.b = c.b * 0.98;
+  // Per-zone saturation and contrast (gentle).
+  float lum = dot(c, vec3(0.299, 0.587, 0.114));
+  c = mix(vec3(lum), c, uSat);
+  c = (c - 0.5) * uContrast + 0.5;
 
-  // Subtle brown shadow tint: only affects very dark values
-  float luminance = dot(c, vec3(0.299, 0.587, 0.114));
-  float shadowMask = smoothstep(0.0, 0.25, 1.0 - luminance);
-  c.r += shadowMask * 0.012;
-  c.g += shadowMask * 0.003;
-  c.b -= shadowMask * 0.008;
+  // Split toning: tint shadows (lift) and highlights (gain) with the zone mood.
+  float sh = 1.0 - smoothstep(0.0, 0.55, lum);
+  float hi = smoothstep(0.45, 1.0, lum);
+  c += uLift * sh + uGain * hi;
 
-  // Clamp
-  c = clamp(c, 0.0, 1.0);
-
-  gl_FragColor = vec4(c, color.a);
+  gl_FragColor = vec4(clamp(c, 0.0, 1.0), color.a);
 }
 `;
 
@@ -38,6 +35,14 @@ export class ColorGradePipeline extends Phaser.Renderer.WebGL.Pipelines.PostFXPi
       name: 'ColorGradePipeline',
       fragShader,
     });
+  }
+
+  onPreRender(): void {
+    const m = getCurrentZoneMood();
+    this.set3f('uLift', m.lift[0], m.lift[1], m.lift[2]);
+    this.set3f('uGain', m.gain[0], m.gain[1], m.gain[2]);
+    this.set1f('uSat', m.saturation);
+    this.set1f('uContrast', m.contrast);
   }
 }
 

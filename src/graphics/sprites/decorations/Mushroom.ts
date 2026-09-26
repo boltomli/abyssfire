@@ -1,66 +1,58 @@
 // src/graphics/sprites/decorations/Mushroom.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, shade, tone, ellipseP, glow, flat, tuft, type Rand } from './DecorKit';
 
-export const MushroomDrawer: EntityDrawer = {
+function shroom(ctx: CanvasRenderingContext2D, x: number, gy: number, h: number, capR: number, cap: number, spots: string | null, lit: number | null, r: Rand): void {
+  const stem = tone(0xe8dcc4, { shadow: 0.35 });
+  const capY = gy - h;
+  shade(ctx, () => {
+    ctx.moveTo(x - capR * 0.28, gy);
+    ctx.quadraticCurveTo(x - capR * 0.36, gy - h * 0.5, x - capR * 0.22, capY);
+    ctx.lineTo(x + capR * 0.22, capY);
+    ctx.quadraticCurveTo(x + capR * 0.3, gy - h * 0.5, x + capR * 0.32, gy);
+    ctx.closePath();
+  }, stem, { band: capR * 0.2, hi: 0.6, stroke: 0.6 });
+  if (lit !== null) glow(ctx, { x, y: capY - capR * 0.2 }, capR * 2.4, lit, 0.5);
+  const t = tone(cap, { light: 0.4 });
+  shade(ctx, () => {
+    ctx.moveTo(x - capR, capY + capR * 0.15);
+    ctx.bezierCurveTo(x - capR, capY - capR * 1.05, x + capR, capY - capR * 1.05, x + capR, capY + capR * 0.15);
+    ctx.quadraticCurveTo(x, capY + capR * 0.45, x - capR, capY + capR * 0.15);
+    ctx.closePath();
+  }, t, { band: capR * 0.35, hi: capR * 0.15, stroke: 0.65 });
+  if (spots) {
+    for (let i = 0; i < 3; i++) {
+      const sx = x + (i - 1) * capR * 0.5 + (r() - 0.5);
+      const sy = capY - capR * (0.35 + (i === 1 ? 0.2 : 0));
+      flat(ctx, ellipseP(ctx, sx, sy, capR * 0.15, capR * 0.11), spots);
+    }
+  }
+}
+
+/** Twilight Forest / Abyss — glowing toadstool cluster. */
+export const MushroomDrawer = defineDecor({
   key: 'decor_mushroom',
-  frameW: 10,
-  frameH: 12,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 10;
-    const cx = w / 2;
-
-    // Ground shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.26)';
-    utils.fillEllipse(ctx, cx, h - 0.8 * s, 4 * s, 1.2 * s);
-
-
-    // Thick stem (darkened 30%)
-    const stemGrad = ctx.createLinearGradient(cx - 2 * s, h * 0.52, cx + 2 * s, h * 0.52);
-    stemGrad.addColorStop(0, '#8c816b');
-    stemGrad.addColorStop(0.5, '#9d9279');
-    stemGrad.addColorStop(1, '#756b4e');
-    ctx.fillStyle = stemGrad;
-    utils.roundRect(ctx, cx - 2 * s, h * 0.52, 4 * s, h * 0.40, 1.5 * s);
-    ctx.fill();
-
-    // Gills underneath cap (thin arcs, darkened)
-    ctx.strokeStyle = 'rgba(112,84,56,0.5)';
-    ctx.lineWidth = 0.5 * s;
-    for (let i = -2; i <= 2; i++) {
-      ctx.beginPath();
-      ctx.arc(cx + i * 1.4 * s, h * 0.52, 1.0 * s, Math.PI * 0.1, Math.PI * 0.9);
-      ctx.stroke();
-    }
-
-    // Cap ellipse (darkened 30%)
-    const capGrad = ctx.createRadialGradient(cx - 1.5 * s, h * 0.28, 0, cx, h * 0.35, 5.5 * s);
-    capGrad.addColorStop(0, '#861c1b');
-    capGrad.addColorStop(0.5, '#61120b');
-    capGrad.addColorStop(1, '#3f0706');
-    ctx.fillStyle = capGrad;
-    utils.fillEllipse(ctx, cx, h * 0.38, 5 * s, 4.2 * s);
-
-    // Cap rim underside hint
-    ctx.fillStyle = 'rgba(220,190,150,0.3)';
-    utils.fillEllipse(ctx, cx, h * 0.50, 4.5 * s, 1.2 * s);
-
-
-    // Spots on cap (small white circles)
-    const spots: [number, number, number][] = [
-      [0.38, 0.22, 1.1],
-      [0.62, 0.26, 0.8],
-      [0.50, 0.32, 0.7],
-      [0.28, 0.35, 0.9],
-      [0.70, 0.38, 0.75],
-    ];
-    for (const [sxF, syF, sr] of spots) {
-      ctx.fillStyle = 'rgba(230,220,200,0.75)';
-      utils.fillCircle(ctx, w * sxF, h * syF, sr * s);
-      // Inner spot sheen
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      utils.fillCircle(ctx, w * sxF - 0.2 * s, h * syF - 0.2 * s, sr * 0.4 * s);
-    }
+  w: 40,
+  h: 36,
+  ground: 31,
+  draw(ctx, { cx, gy, r }) {
+    contactShadow(ctx, cx + 2, gy, 15, 4.5, 0.38);
+    shroom(ctx, cx - 7, gy, 14, 8, 0x7a4ab8, '#d8f8ff', 0x7ff0ff, r);
+    shroom(ctx, cx + 6, gy + 1, 9, 6, 0x5a86c8, '#e8f8ff', 0x9ab8ff, r);
+    shroom(ctx, cx + 13, gy + 1, 5, 3.6, 0x7a4ab8, null, null, r);
+    tuft(ctx, cx - 1, gy + 1, 5, 4, '#1f5a57', '#44a58f', r);
   },
-};
+});
+
+/** Emerald Plains — red spotted toadstools. */
+export const MushroomRedDrawer = defineDecor({
+  key: 'decor_mushroom_red',
+  w: 36,
+  h: 30,
+  ground: 26,
+  draw(ctx, { cx, gy, r }) {
+    contactShadow(ctx, cx + 2, gy, 13, 4, 0.35);
+    shroom(ctx, cx - 5, gy, 11, 7, 0xd2402e, '#fff4e0', null, r);
+    shroom(ctx, cx + 7, gy + 1, 7, 4.5, 0xd2402e, '#fff4e0', null, r);
+    tuft(ctx, cx, gy + 1, 5, 4, '#3f7a33', '#8cc24f', r);
+  },
+});

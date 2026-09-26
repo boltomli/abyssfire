@@ -11,6 +11,12 @@ import { SpriteGenerator } from '../graphics/SpriteGenerator';
 import { DifficultySystem, DIFFICULTY_ORDER } from '../systems/DifficultySystem';
 import type { Difficulty } from '../systems/DifficultySystem';
 import { t, setLocale, getLocale } from '../i18n';
+import { getZoneName } from '../i18n/gameAccessors';
+import { AllClasses } from '../data/classes';
+import { addFrame, addButton, addDivider, addTitleFlourishes, UI_COLORS, type UiButton, type ButtonVariant } from '../ui/UiKit';
+
+const MENU_FONT = '"Noto Sans SC", "Noto Sans TC", sans-serif';
+const MENU_TITLE_FONT = '"Cinzel", "Noto Sans SC", "Noto Sans TC", serif';
 
 function fs(basePx: number): string {
   return `${Math.round(basePx * DPR)}px`;
@@ -166,6 +172,89 @@ export class MenuScene extends Phaser.Scene {
 
     // Layer 6 — Title fire glow
     this.buildTitleGlow(cx);
+
+    // Layer 7 — Slowly turning rune circle behind the title
+    this.buildRuneCircle(cx);
+
+    // Layer 8 — Vignette to frame the scene
+    const vigKey = 'menu_vignette';
+    if (!this.textures.exists(vigKey)) {
+      const canvas = this.textures.createCanvas(vigKey, 320, 180)!;
+      const ctx2d = canvas.getContext();
+      const g = ctx2d.createRadialGradient(160, 80, 40, 160, 90, 190);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(0.65, 'rgba(0,0,0,0.18)');
+      g.addColorStop(1, 'rgba(0,0,0,0.6)');
+      ctx2d.fillStyle = g;
+      ctx2d.fillRect(0, 0, 320, 180);
+      canvas.refresh();
+    }
+    this.add.image(cx, H / 2, vigKey).setDisplaySize(W, H).setDepth(6);
+  }
+
+  private buildRuneCircle(cx: number): void {
+    const key = 'menu_rune_circle';
+    const S = 512;
+    if (!this.textures.exists(key)) {
+      const canvas = this.textures.createCanvas(key, S, S)!;
+      const ctx = canvas.getContext();
+      const c = S / 2;
+      ctx.strokeStyle = 'rgba(255,170,80,0.55)';
+      ctx.lineWidth = 2;
+      for (const r of [240, 226, 170, 158]) {
+        ctx.beginPath(); ctx.arc(c, c, r, 0, Math.PI * 2); ctx.stroke();
+      }
+      // rune ticks between the outer rings
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 48; i++) {
+        const a = (i / 48) * Math.PI * 2;
+        const r0 = 229, r1 = i % 4 === 0 ? 238 : 234;
+        ctx.beginPath();
+        ctx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
+        ctx.lineTo(c + Math.cos(a) * r1, c + Math.sin(a) * r1);
+        ctx.stroke();
+      }
+      // hexagram
+      ctx.lineWidth = 2;
+      for (let k = 0; k < 2; k++) {
+        ctx.beginPath();
+        for (let i = 0; i <= 3; i++) {
+          const a = -Math.PI / 2 + k * Math.PI / 3 + (i * Math.PI * 2) / 3;
+          const x = c + Math.cos(a) * 158, y = c + Math.sin(a) * 158;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      // small glyph dots
+      ctx.fillStyle = 'rgba(255,200,120,0.7)';
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        ctx.beginPath(); ctx.arc(c + Math.cos(a) * 198, c + Math.sin(a) * 198, 4, 0, Math.PI * 2); ctx.fill();
+      }
+      canvas.refresh();
+    }
+    const ring = this.add.image(cx, px(150), key).setDisplaySize(px(420), px(420))
+      .setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.13).setDepth(5);
+    this.tweens.add({ targets: ring, angle: 360, duration: 120000, repeat: -1 });
+    this.tweens.add({ targets: ring, alpha: { from: 0.09, to: 0.17 }, duration: 5000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+  }
+
+  /** Framed menu button (UiKit). */
+  private menuButton(x: number, y: number, w: number, h: number, label: string, onClick: () => void, variant: ButtonVariant = 'secondary', fontSize = 16): UiButton {
+    return addButton(this, x, y, w, h, label, { variant, fontSize, fontFamily: MENU_FONT, onClick: () => onClick() });
+  }
+
+  /** Opaque modal panel frame with a centred title (returns content top y). */
+  private addModalFrame(container: Phaser.GameObjects.Container, cx: number, cy: number, w: number, h: number, title: string): number {
+    const left = cx - w / 2, top = cy - h / 2;
+    container.add(addFrame(this, left, top, w, h, { variant: 'panel', header: px(44) }));
+    const titleT = this.add.text(cx, top + px(23), title, {
+      fontSize: fs(20), color: UI_COLORS.parchment, fontFamily: MENU_TITLE_FONT, fontStyle: 'bold',
+      stroke: '#120b04', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5);
+    container.add(addTitleFlourishes(this, cx, top + px(23), titleT.width));
+    container.add(titleT);
+    return top + px(56);
   }
 
   private buildFireGlow(cx: number): void {
@@ -269,52 +358,49 @@ export class MenuScene extends Phaser.Scene {
   private buildTitle(cx: number): void {
     this.titleContainer = this.add.container(0, 0).setDepth(10);
 
-    // Decorative line above title
-    const lineY = px(80);
-    const lineGfx = this.add.graphics();
-    lineGfx.lineStyle(1, 0xc0934a, 0.3);
-    lineGfx.beginPath();
-    lineGfx.moveTo(cx - px(200), lineY);
-    lineGfx.lineTo(cx + px(200), lineY);
-    lineGfx.strokePath();
-    lineGfx.fillStyle(0xc0934a, 0.5);
-    lineGfx.fillCircle(cx - px(200), lineY, px(2));
-    lineGfx.fillCircle(cx + px(200), lineY, px(2));
-    this.titleContainer.add(lineGfx);
+    // Ornamental rule above the title
+    this.titleContainer.add(addDivider(this, cx, px(78), px(440)));
 
-    // Title — ABYSSFIRE never changes
-    this.titleContainer.add(this.add.text(cx, px(130), t('menu.title'), {
-      fontSize: fs(52),
-      color: '#c0934a',
+    // Title — ABYSSFIRE never changes; molten-gold gradient fill
+    const title = this.add.text(cx, px(130), t('menu.title'), {
+      fontSize: fs(58),
+      color: '#e8b04a',
       fontFamily: '"Cinzel", serif',
       fontStyle: 'bold',
-      stroke: '#3a2a10',
-      strokeThickness: Math.round(4 * DPR),
-    }).setOrigin(0.5));
+      stroke: '#2a1606',
+      strokeThickness: Math.round(6 * DPR),
+      shadow: { offsetX: 0, offsetY: 4, color: '#000000', blur: 12, fill: true, stroke: true },
+    }).setOrigin(0.5);
+    const grad = title.context.createLinearGradient(0, 0, 0, title.height);
+    grad.addColorStop(0, '#fff3c4');
+    grad.addColorStop(0.45, '#f0b84e');
+    grad.addColorStop(0.7, '#c46a1c');
+    grad.addColorStop(1, '#7a2a0c');
+    title.setFill(grad);
+    this.titleContainer.add(title);
+    // soft breathing glow on the title
+    this.tweens.add({ targets: title, scale: { from: 1, to: 1.015 }, duration: 3000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
     // Subtitle — locale-dependent
-    this.titleContainer.add(this.add.text(cx, px(188), t('menu.subtitle'), {
-      fontSize: fs(32),
-      color: '#d4a84b',
-      fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
+    const sub = this.add.text(cx, px(190), t('menu.subtitle'), {
+      fontSize: fs(30),
+      color: '#e8c77a',
+      fontFamily: MENU_FONT,
       fontStyle: 'bold',
-      stroke: '#2a1a08',
-      strokeThickness: Math.round(3 * DPR),
-    }).setOrigin(0.5));
+      stroke: '#1a0e04',
+      strokeThickness: Math.round(4 * DPR),
+      shadow: { offsetX: 0, offsetY: 2, color: '#000000', blur: 6, fill: true },
+    }).setOrigin(0.5);
+    this.titleContainer.add(addTitleFlourishes(this, cx, px(190), sub.width + px(12)));
+    this.titleContainer.add(sub);
 
-    // Decorative line below title
-    const lineGfx2 = this.add.graphics();
-    lineGfx2.lineStyle(1, 0xc0934a, 0.3);
-    lineGfx2.beginPath();
-    lineGfx2.moveTo(cx - px(160), px(215));
-    lineGfx2.lineTo(cx + px(160), px(215));
-    lineGfx2.strokePath();
-    this.titleContainer.add(lineGfx2);
+    // Ornamental rule below the title
+    this.titleContainer.add(addDivider(this, cx, px(222), px(360), false));
 
     // Version
-    this.titleContainer.add(this.add.text(cx, H - px(20), 'v0.22.0', {
-      fontSize: fs(13),
-      color: '#333340',
+    this.titleContainer.add(this.add.text(cx, H - px(18), 'v0.22.0', {
+      fontSize: fs(12),
+      color: '#6a5a48',
       fontFamily: '"Cinzel", serif',
     }).setOrigin(0.5));
   }
@@ -368,21 +454,65 @@ export class MenuScene extends Phaser.Scene {
     this.menuContainer = this.add.container(0, 0).setDepth(10);
     this.currentSave = save;
     this.activePanel = 'menu';
+    const menu = this.menuContainer;
 
     const cx = W / 2;
-    let y = save ? px(300) : px(340);
+    let y = save ? px(296) : px(320);
 
     if (save) {
-      // "Continue" button — shows locale-aware class name + level
+      // Save slot card — portrait, class + level, zone, difficulty
+      const cardW = px(380), cardH = px(86);
+      const left = cx - cardW / 2, top = y - cardH / 2;
+      const frame = addFrame(this, left, top, cardW, cardH, { variant: 'tooltip', accent: 0xffd98a });
+      menu.add(frame);
+      const hit = this.add.rectangle(cx, y, cardW, cardH, 0xffc860, 0).setInteractive({ useHandCursor: true });
+      menu.add(hit);
+
+      // Portrait: animated class sprite in a round well
+      const pcx = left + px(46), pcy = y;
+      const well = this.add.graphics();
+      well.fillStyle(0x000000, 0.6); well.fillCircle(pcx, pcy + 1.5, px(34));
+      well.fillStyle(0x16121a, 1); well.fillCircle(pcx, pcy, px(33));
+      well.lineStyle(2, 0xd4a54a, 1); well.strokeCircle(pcx, pcy, px(33));
+      menu.add(well);
+      const spriteKey = `player_${save.classId}`;
+      SpriteGenerator.ensurePlayerSheet(this, save.classId);
+      if (this.textures.exists(spriteKey)) {
+        const maskG = this.make.graphics({});
+        maskG.fillStyle(0xffffff); maskG.fillCircle(pcx, pcy, px(31));
+        const portrait = this.add.sprite(pcx, pcy + px(52), spriteKey, 0).setOrigin(0.5, 1);
+        portrait.setScale(px(150) / Math.max(1, portrait.height));
+        portrait.setMask(maskG.createGeometryMask());
+        const idleKey = `${spriteKey}_idle`;
+        if (this.anims.exists(idleKey)) portrait.play(idleKey);
+        menu.add(portrait);
+        menu.once('destroy', () => maskG.destroy());
+      }
+
       const classNameKey = `data.class.${save.classId}.name`;
       const className = t(classNameKey);
       const label = t('menu.continue', { class: className, level: String(save.player.level) });
+      const tx = left + px(92);
+      menu.add(this.add.text(tx, top + px(20), label, {
+        fontSize: fs(17), color: UI_COLORS.parchment, fontFamily: MENU_TITLE_FONT, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+      }).setOrigin(0, 0.5));
+      const diff = (save.difficulty ?? 'normal') as Difficulty;
+      const diffLabel = t(`menu.difficulty.${diff}`);
+      menu.add(this.add.text(tx, top + px(44), `${getZoneName(save.player.currentMap)}  ·  ${diffLabel}`, {
+        fontSize: fs(13), color: UI_COLORS.textSoft, fontFamily: MENU_FONT,
+      }).setOrigin(0, 0.5));
+      menu.add(this.add.text(tx, top + px(66), t('menu.continueSubtitle'), {
+        fontSize: fs(12), color: '#e8c77a', fontFamily: MENU_FONT, fontStyle: 'italic',
+      }).setOrigin(0, 0.5));
+      const arrow = this.add.text(left + cardW - px(22), y, '▶', {
+        fontSize: fs(18), color: '#e8c77a', fontFamily: MENU_FONT,
+      }).setOrigin(0.5);
+      menu.add(arrow);
 
-      const bg = this.add.rectangle(cx, y, px(320), px(65), 0x12121e, 0.9)
-        .setStrokeStyle(1.5, 0xc0934a, 0.8).setInteractive({ useHandCursor: true });
-      bg.on('pointerover', () => { bg.setStrokeStyle(2, 0xc0934a, 1); bg.setFillStyle(0x1a1a2e, 0.95); });
-      bg.on('pointerout', () => { bg.setStrokeStyle(1.5, 0xc0934a, 0.8); bg.setFillStyle(0x12121e, 0.9); });
-      bg.on('pointerdown', () => {
+      hit.on('pointerover', () => { hit.setFillStyle(0xffc860, 0.08); arrow.setColor('#fff3c4'); frame.setTint(0xfff0d0); });
+      hit.on('pointerout', () => { hit.setFillStyle(0xffc860, 0); arrow.setColor('#e8c77a'); frame.clearTint(); });
+      hit.on('pointerdown', () => {
         // Show difficulty selector when save has non-normal difficulty OR completed difficulties.
         // Also derive completedDifficulties from persisted difficulty for migrated saves.
         save.completedDifficulties = DifficultySystem.deriveCompletedDifficulties(
@@ -396,171 +526,176 @@ export class MenuScene extends Phaser.Scene {
           this.loadGame(save);
         }
       });
-      this.menuContainer.add(bg);
 
-      this.menuContainer.add(this.add.text(cx, y - px(6), label, {
-        fontSize: fs(20), color: '#e8e0d4', fontFamily: '"Cinzel", "Noto Sans SC", "Noto Sans TC", serif',
-      }).setOrigin(0.5));
-      this.menuContainer.add(this.add.text(cx, y + px(16), t('menu.continueSubtitle'), {
-        fontSize: fs(13), color: '#c0934a', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-      }).setOrigin(0.5));
-
-      y += px(90);
+      y += px(84);
     }
 
     // "New Game" button
-    const newBg = this.add.rectangle(cx, y, px(320), px(55), 0x12121e, 0.9)
-      .setStrokeStyle(1.5, 0x555566, 0.6).setInteractive({ useHandCursor: true });
-    newBg.on('pointerover', () => { newBg.setStrokeStyle(2, 0x888899, 1); newBg.setFillStyle(0x1a1a2e, 0.95); });
-    newBg.on('pointerout', () => { newBg.setStrokeStyle(1.5, 0x555566, 0.6); newBg.setFillStyle(0x12121e, 0.9); });
-    newBg.on('pointerdown', () => {
+    menu.add(this.menuButton(cx, y, px(320), px(50), t('menu.newGame'), () => {
       this.menuContainer?.destroy(); this.menuContainer = null;
       this.showClassSelection();
-    });
-    this.menuContainer.add(newBg);
-    this.menuContainer.add(this.add.text(cx, y, t('menu.newGame'), {
-      fontSize: fs(20), color: '#a0907a', fontFamily: '"Cinzel", "Noto Sans SC", "Noto Sans TC", serif',
-    }).setOrigin(0.5));
+    }, save ? 'secondary' : 'primary', 20));
 
-    y += px(70);
+    y += px(56);
 
-    // "Help" button
-    const helpBg = this.add.rectangle(cx, y, px(320), px(45), 0x12121e, 0.9)
-      .setStrokeStyle(1.5, 0x555566, 0.4).setInteractive({ useHandCursor: true });
-    helpBg.on('pointerover', () => { helpBg.setStrokeStyle(2, 0x888899, 0.8); helpBg.setFillStyle(0x1a1a2e, 0.95); });
-    helpBg.on('pointerout', () => { helpBg.setStrokeStyle(1.5, 0x555566, 0.4); helpBg.setFillStyle(0x12121e, 0.9); });
-    helpBg.on('pointerdown', () => this.showHelp());
-    this.menuContainer.add(helpBg);
-    this.menuContainer.add(this.add.text(cx, y, t('menu.help'), {
-      fontSize: fs(16), color: '#888880', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5));
-
-    y += px(60);
-
-    // "Soundtrack" button
-    const ostBg = this.add.rectangle(cx, y, px(320), px(45), 0x12121e, 0.9)
-      .setStrokeStyle(1.5, 0x555566, 0.4).setInteractive({ useHandCursor: true });
-    ostBg.on('pointerover', () => { ostBg.setStrokeStyle(2, 0x888899, 0.8); ostBg.setFillStyle(0x1a1a2e, 0.95); });
-    ostBg.on('pointerout', () => { ostBg.setStrokeStyle(1.5, 0x555566, 0.4); ostBg.setFillStyle(0x12121e, 0.9); });
-    ostBg.on('pointerdown', () => this.showJukebox());
-    this.menuContainer.add(ostBg);
-    this.menuContainer.add(this.add.text(cx, y, t('menu.ost'), {
-      fontSize: fs(16), color: '#888880', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5));
-
-    y += px(60);
-
-    // "Credits" button
-    const creditsBg = this.add.rectangle(cx, y, px(320), px(45), 0x12121e, 0.9)
-      .setStrokeStyle(1.5, 0x555566, 0.4).setInteractive({ useHandCursor: true });
-    creditsBg.on('pointerover', () => { creditsBg.setStrokeStyle(2, 0x888899, 0.8); creditsBg.setFillStyle(0x1a1a2e, 0.95); });
-    creditsBg.on('pointerout', () => { creditsBg.setStrokeStyle(1.5, 0x555566, 0.4); creditsBg.setFillStyle(0x12121e, 0.9); });
-    creditsBg.on('pointerdown', () => this.showCredits());
-    this.menuContainer.add(creditsBg);
-    this.menuContainer.add(this.add.text(cx, y, t('menu.credits'), {
-      fontSize: fs(16), color: '#888880', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5));
-
-    y += px(60);
-
-    // "Language" button — after Credits
-    const langBg = this.add.rectangle(cx, y, px(320), px(45), 0x12121e, 0.9)
-      .setStrokeStyle(1.5, 0x555566, 0.4).setInteractive({ useHandCursor: true });
-    langBg.on('pointerover', () => { langBg.setStrokeStyle(2, 0x888899, 0.8); langBg.setFillStyle(0x1a1a2e, 0.95); });
-    langBg.on('pointerout', () => { langBg.setStrokeStyle(1.5, 0x555566, 0.4); langBg.setFillStyle(0x12121e, 0.9); });
-    langBg.on('pointerdown', () => {
-      this.menuContainer?.destroy(); this.menuContainer = null;
-      this.showLanguageSelector();
-    });
-    this.menuContainer.add(langBg);
-    this.menuContainer.add(this.add.text(cx, y, t('menu.language'), {
-      fontSize: fs(16), color: '#888880', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5));
+    const secondary: [string, () => void][] = [
+      [t('menu.help'), () => this.showHelp()],
+      [t('menu.ost'), () => this.showJukebox()],
+      [t('menu.credits'), () => this.showCredits()],
+      [t('menu.language'), () => {
+        this.menuContainer?.destroy(); this.menuContainer = null;
+        this.showLanguageSelector();
+      }],
+    ];
+    for (const [label, cb] of secondary) {
+      menu.add(this.menuButton(cx, y, px(280), px(38), label, cb, 'ghost', 15));
+      y += px(46);
+    }
   }
 
   private showClassSelection(): void {
     this.classContainer = this.add.container(0, 0).setDepth(10);
     this.activePanel = 'class';
     const cx = W / 2;
+    const cont = this.classContainer;
 
-    this.classContainer.add(this.add.text(cx, px(260), t('menu.classSelect.title'), {
+    const heading = this.add.text(cx, px(250), t('menu.classSelect.title'), {
       fontSize: fs(20),
-      color: '#a0907a',
-      fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5));
+      color: UI_COLORS.parchment,
+      fontFamily: MENU_TITLE_FONT,
+      fontStyle: 'bold',
+      stroke: '#120b04', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5);
+    cont.add(addTitleFlourishes(this, cx, px(250), heading.width));
+    cont.add(heading);
 
     const classes = [
-      { id: 'warrior', nameKey: 'menu.classSelect.warrior.name', descKey: 'menu.classSelect.warrior.desc', color: 0xc0392b, accent: '#e74c3c' },
-      { id: 'mage', nameKey: 'menu.classSelect.mage.name', descKey: 'menu.classSelect.mage.desc', color: 0x6c3483, accent: '#9b59b6' },
-      { id: 'rogue', nameKey: 'menu.classSelect.rogue.name', descKey: 'menu.classSelect.rogue.desc', color: 0x1e8449, accent: '#27ae60' },
+      { id: 'warrior', nameKey: 'menu.classSelect.warrior.name', descKey: 'menu.classSelect.warrior.desc', color: 0xd0473a, accent: '#ff8a72' },
+      { id: 'mage', nameKey: 'menu.classSelect.mage.name', descKey: 'menu.classSelect.mage.desc', color: 0x9b59d6, accent: '#d0a0ff' },
+      { id: 'rogue', nameKey: 'menu.classSelect.rogue.name', descKey: 'menu.classSelect.rogue.desc', color: 0x3fb86a, accent: '#8ff0a8' },
     ];
 
-    classes.forEach((cls, i) => {
-      const y = px(320) + i * px(80);
-      const bg = this.add.rectangle(cx, y, px(320), px(65), 0x12121e, 0.9)
-        .setStrokeStyle(1.5, cls.color, 0.6)
-        .setInteractive({ useHandCursor: true });
+    const cardW = px(250), cardH = px(356), gap = px(26);
+    const cardsTop = px(274);
 
-      // Animated class icon preview
+    // Soft coloured radial light used behind each hero
+    const lightKey = 'menu_class_light';
+    if (!this.textures.exists(lightKey)) {
+      const canvas = this.textures.createCanvas(lightKey, 128, 128)!;
+      const ctx2d = canvas.getContext();
+      const g = ctx2d.createRadialGradient(64, 64, 0, 64, 64, 64);
+      g.addColorStop(0, 'rgba(255,255,255,0.9)');
+      g.addColorStop(0.4, 'rgba(255,255,255,0.35)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx2d.fillStyle = g;
+      ctx2d.fillRect(0, 0, 128, 128);
+      canvas.refresh();
+    }
+
+    classes.forEach((cls, i) => {
+      const ccx = cx + (i - 1) * (cardW + gap);
+      const card = this.add.container(ccx, cardsTop + cardH / 2);
+      cont.add(card);
+      const left = -cardW / 2, top = -cardH / 2;
+
+      const hoverGlow = this.add.image(0, 0, lightKey).setDisplaySize(cardW * 1.5, cardH * 1.25)
+        .setTint(cls.color).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD);
+      card.add(hoverGlow);
+      card.add(addFrame(this, left, top, cardW, cardH, { variant: 'panel', gem: cls.color, accent: cls.color }));
+
+      // Hero stage: coloured light + pedestal
+      const stageY = top + px(128);
+      card.add(this.add.image(0, stageY - px(20), lightKey).setDisplaySize(px(220), px(200)).setTint(cls.color).setAlpha(0.35).setBlendMode(Phaser.BlendModes.ADD));
+      const ped = this.add.graphics();
+      ped.fillStyle(0x000000, 0.55); ped.fillEllipse(0, stageY + px(62), px(130), px(26));
+      ped.lineStyle(2, cls.color, 0.8); ped.strokeEllipse(0, stageY + px(60), px(120), px(22));
+      ped.lineStyle(1, 0xffd98a, 0.5); ped.strokeEllipse(0, stageY + px(60), px(96), px(16));
+      card.add(ped);
+
+      // Animated class sprite (new cel-shaded character art)
       const spriteKey = `player_${cls.id}`;
       SpriteGenerator.ensurePlayerSheet(this, cls.id);
+      let preview: Phaser.GameObjects.Sprite | null = null;
       if (this.textures.exists(spriteKey)) {
-        const preview = this.add.sprite(cx - px(130), y, spriteKey, 0).setScale(0.7 / TEXTURE_SCALE);
+        preview = this.add.sprite(0, stageY + px(64), spriteKey, 0).setOrigin(0.5, 1);
+        const baseScale = px(170) / Math.max(1, preview.height);
+        preview.setScale(baseScale);
         const idleKey = `${spriteKey}_idle`;
         if (this.anims.exists(idleKey)) preview.play(idleKey);
-        this.classContainer!.add(preview);
-        // Subtle breathing animation
-        this.tweens.add({
-          targets: preview, scaleY: (0.7 / TEXTURE_SCALE) * 1.04,
-          duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-        });
+        card.add(preview);
       }
 
-      this.classContainer!.add(bg);
-      this.classContainer!.add(this.add.text(cx, y - px(12), t(cls.nameKey), {
-        fontSize: fs(20),
-        color: '#e8e0d4',
-        fontFamily: '"Cinzel", "Noto Sans SC", "Noto Sans TC", serif',
+      // Name + description
+      card.add(this.add.text(0, top + px(222), t(cls.nameKey), {
+        fontSize: fs(20), color: UI_COLORS.parchment, fontFamily: MENU_TITLE_FONT, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(3 * DPR),
       }).setOrigin(0.5));
+      card.add(this.add.text(0, top + px(248), t(cls.descKey), {
+        fontSize: fs(13), color: cls.accent, fontFamily: MENU_FONT, align: 'center',
+        wordWrap: { width: cardW - px(36), useAdvancedWrap: true },
+      }).setOrigin(0.5, 0));
 
-      this.classContainer!.add(this.add.text(cx, y + px(12), t(cls.descKey), {
-        fontSize: fs(14),
-        color: cls.accent,
-        fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-      }).setOrigin(0.5));
+      // Signature skill icons
+      const skills = (AllClasses[cls.id]?.skills ?? []).filter(sk => this.textures.exists(`skill_icon_${sk.id}`)).slice(0, 4);
+      const iconSz = px(30), iconGap = px(8);
+      const rowW = skills.length * iconSz + Math.max(0, skills.length - 1) * iconGap;
+      skills.forEach((sk, k) => {
+        const ix = -rowW / 2 + iconSz / 2 + k * (iconSz + iconGap);
+        const iy = top + px(292);
+        const fr = this.add.graphics();
+        fr.fillStyle(0x07060a, 1); fr.fillRoundedRect(ix - iconSz / 2 - 2, iy - iconSz / 2 - 2, iconSz + 4, iconSz + 4, 4);
+        fr.lineStyle(1.5, 0xd4a54a, 0.9); fr.strokeRoundedRect(ix - iconSz / 2 - 2, iy - iconSz / 2 - 2, iconSz + 4, iconSz + 4, 4);
+        card.add(fr);
+        card.add(this.add.image(ix, iy, `skill_icon_${sk.id}`).setDisplaySize(iconSz, iconSz));
+      });
 
-      bg.on('pointerover', () => {
-        bg.setStrokeStyle(2, cls.color, 1);
-        bg.setFillStyle(0x1a1a2e, 0.95);
-        // Play attack anim on hover
+      // Choose button
+      const btn = addButton(this, 0, top + cardH - px(30), cardW - px(60), px(34), t('menu.classSelect.confirm'), {
+        variant: 'primary', fontSize: 15, bold: true, fontFamily: MENU_FONT,
+        onClick: () => this.startGame(cls.id),
+      });
+      card.add(btn);
+
+      // Whole card is clickable too
+      const hit = this.add.rectangle(0, -px(24), cardW, cardH - px(56), 0x000000, 0).setInteractive({ useHandCursor: true });
+      card.addAt(hit, 2);
+      const baseY = card.y;
+      const onOver = () => {
+        this.tweens.killTweensOf(card);
+        this.tweens.add({ targets: card, y: baseY - px(8), duration: 160, ease: 'Quad.easeOut' });
+        this.tweens.add({ targets: hoverGlow, alpha: 0.35, duration: 160 });
         const atkKey = `${spriteKey}_attack`;
-        const spr = this.classContainer?.list.find(
-          c => c instanceof Phaser.GameObjects.Sprite && (c as Phaser.GameObjects.Sprite).texture.key === spriteKey
-        ) as Phaser.GameObjects.Sprite | undefined;
-        if (spr && this.anims.exists(atkKey)) {
-          spr.play(atkKey);
-          spr.once('animationcomplete', () => {
+        if (preview && this.anims.exists(atkKey)) {
+          preview.play(atkKey);
+          preview.once('animationcomplete', () => {
             const idleAnim = `${spriteKey}_idle`;
-            if (this.anims.exists(idleAnim)) spr.play(idleAnim);
+            if (preview && preview.active && this.anims.exists(idleAnim)) preview.play(idleAnim);
           });
         }
-      });
-      bg.on('pointerout', () => {
-        bg.setStrokeStyle(1.5, cls.color, 0.6);
-        bg.setFillStyle(0x12121e, 0.9);
-      });
-      bg.on('pointerdown', () => this.startGame(cls.id));
+      };
+      const onOut = (pointer?: Phaser.Input.Pointer) => {
+        if (pointer && Math.abs(pointer.x - card.x) < cardW / 2 && Math.abs(pointer.y - baseY) < cardH / 2) return;
+        this.tweens.killTweensOf(card);
+        this.tweens.add({ targets: card, y: baseY, duration: 160, ease: 'Quad.easeOut' });
+        this.tweens.add({ targets: hoverGlow, alpha: 0, duration: 200 });
+      };
+      hit.on('pointerover', () => { if (card.y >= baseY - 1) onOver(); });
+      hit.on('pointerout', onOut);
+      btn.bg.on('pointerover', () => { if (card.y >= baseY - 1) onOver(); });
+      btn.bg.on('pointerout', onOut);
+      hit.on('pointerdown', () => this.startGame(cls.id));
+
+      // staggered entrance
+      card.setAlpha(0);
+      card.y = baseY + px(24);
+      this.tweens.add({ targets: card, alpha: 1, y: baseY, duration: 360, delay: 80 * i, ease: 'Cubic.easeOut' });
     });
 
     // Back button
-    const backBtn = this.add.text(cx, px(570), t('menu.back'), {
-      fontSize: fs(14), color: '#888', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    backBtn.on('pointerdown', () => {
+    cont.add(this.menuButton(cx, px(668), px(160), px(34), t('menu.backShort'), () => {
       this.classContainer?.destroy(); this.classContainer = null;
       this.checkForSaves();
-    });
-    this.classContainer.add(backBtn);
+    }, 'ghost', 14));
   }
 
   private showHelp(): void {
@@ -570,32 +705,16 @@ export class MenuScene extends Phaser.Scene {
 
     const cx = W / 2;
     const panelW = px(460);
-    const panelH = px(520);
+    const panelH = px(500);
     const panelX = cx;
     const panelY = H / 2;
 
     // Dimmed backdrop
-    const backdrop = this.add.rectangle(cx, H / 2, W, H, 0x000000, 0.6).setInteractive();
+    const backdrop = this.add.rectangle(cx, H / 2, W, H, 0x000000, 0.72).setInteractive();
     this.helpContainer.add(backdrop);
 
-    // Panel background
-    const panel = this.add.rectangle(panelX, panelY, panelW, panelH, 0x0e0e1a, 0.95)
-      .setStrokeStyle(1.5, 0xc0934a, 0.6);
-    this.helpContainer.add(panel);
-
-    // Title
-    this.helpContainer.add(this.add.text(panelX, panelY - panelH / 2 + px(24), t('menu.helpPanel.title'), {
-      fontSize: fs(22), color: '#c0934a', fontFamily: '"Cinzel", "Noto Sans SC", "Noto Sans TC", serif', fontStyle: 'bold',
-    }).setOrigin(0.5));
-
-    // Decorative line
-    const lineGfx = this.add.graphics();
-    lineGfx.lineStyle(1, 0xc0934a, 0.4);
-    lineGfx.beginPath();
-    lineGfx.moveTo(panelX - px(160), panelY - panelH / 2 + px(44));
-    lineGfx.lineTo(panelX + px(160), panelY - panelH / 2 + px(44));
-    lineGfx.strokePath();
-    this.helpContainer.add(lineGfx);
+    // Panel frame + title
+    this.addModalFrame(this.helpContainer, panelX, panelY, panelW, panelH, t('menu.helpPanel.title'));
 
     const categories: { titleKey: string; keys: [string, string][] }[] = [
       {
@@ -630,22 +749,29 @@ export class MenuScene extends Phaser.Scene {
       },
     ];
 
-    let y = panelY - panelH / 2 + px(60);
+    let y = panelY - panelH / 2 + px(70);
     const leftX = panelX - panelW / 2 + px(30);
     const rightX = panelX + panelW / 2 - px(30);
 
     for (const cat of categories) {
       // Category title
       this.helpContainer.add(this.add.text(leftX, y, t(cat.titleKey), {
-        fontSize: fs(14), color: '#d4a84b', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif', fontStyle: 'bold',
+        fontSize: fs(14), color: '#e8c77a', fontFamily: MENU_FONT, fontStyle: 'bold',
       }).setOrigin(0, 0.5));
       y += px(22);
 
       for (const [key, desc] of cat.keys) {
-        // Key label
-        this.helpContainer.add(this.add.text(leftX + px(8), y, key, {
-          fontSize: fs(12), color: '#e0d8cc', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-        }).setOrigin(0, 0.5));
+        // Key label as a key-cap
+        const keyT = this.add.text(leftX + px(14), y, key, {
+          fontSize: fs(11), color: '#f0dcae', fontFamily: MENU_FONT, fontStyle: 'bold',
+        }).setOrigin(0, 0.5);
+        const cap = this.add.graphics();
+        cap.fillStyle(0x1d1a21, 1);
+        cap.fillRoundedRect(keyT.x - px(6), y - px(8), keyT.width + px(12), px(16), px(3));
+        cap.lineStyle(1, 0x8a7a64, 1);
+        cap.strokeRoundedRect(keyT.x - px(6), y - px(8), keyT.width + px(12), px(16), px(3));
+        this.helpContainer.add(cap);
+        this.helpContainer.add(keyT);
         // Description
         this.helpContainer.add(this.add.text(rightX, y, desc, {
           fontSize: fs(12), color: '#888880', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
@@ -656,14 +782,11 @@ export class MenuScene extends Phaser.Scene {
     }
 
     // Close button
-    const closeBtn = this.add.text(panelX, panelY + panelH / 2 - px(24), t('menu.back'), {
-      fontSize: fs(14), color: '#888', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => {
+    const closeBtn = this.menuButton(panelX, panelY + panelH / 2 - px(28), px(140), px(32), t('menu.backShort'), () => {
       this.helpContainer?.destroy();
       this.helpContainer = null;
       this.activePanel = 'menu';
-    });
+    }, 'secondary', 14);
     backdrop.on('pointerdown', () => {
       this.helpContainer?.destroy();
       this.helpContainer = null;
@@ -679,7 +802,7 @@ export class MenuScene extends Phaser.Scene {
 
     const cx = W / 2;
     const panelW = px(460);
-    const panelH = px(510);
+    const panelH = px(530);
     const panelX = cx;
     const panelY = H / 2;
     const panelTop = panelY - panelH / 2;
@@ -694,49 +817,33 @@ export class MenuScene extends Phaser.Scene {
     let paused = false;
 
     // ---- Backdrop ----
-    const backdrop = this.add.rectangle(cx, H / 2, W, H, 0x000000, 0.6).setInteractive();
+    const backdrop = this.add.rectangle(cx, H / 2, W, H, 0x000000, 0.72).setInteractive();
     this.jukeboxContainer.add(backdrop);
 
-    // ---- Panel ----
-    this.jukeboxContainer.add(
-      this.add.rectangle(panelX, panelY, panelW, panelH, 0x0a0a14, 0.96)
-        .setStrokeStyle(1.5, 0xc0934a, 0.5)
-    );
-
-    // ---- Header ----
-    this.jukeboxContainer.add(this.add.text(panelX, panelTop + px(20), t('menu.jukebox.header'), {
-      fontSize: fs(18), color: '#c0934a', fontFamily: '"Cinzel", serif', fontStyle: 'bold',
-    }).setOrigin(0.5));
+    // ---- Panel + Header ----
+    this.addModalFrame(this.jukeboxContainer, panelX, panelY, panelW, panelH, t('menu.jukebox.header'));
 
     const totalDur = JUKEBOX_TRACKS.reduce((sum, tr) => sum + tr.duration, 0);
-    this.jukeboxContainer.add(this.add.text(panelX, panelTop + px(38),
+    this.jukeboxContainer.add(this.add.text(panelX, panelTop + px(56),
       t('menu.jukebox.subtitle', { count: String(JUKEBOX_TRACKS.length), duration: fmtTime(totalDur) }), {
       fontSize: fs(11), color: '#666660', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
     }).setOrigin(0.5));
 
-    const hdrLine = this.add.graphics();
-    hdrLine.lineStyle(1, 0xc0934a, 0.3);
-    hdrLine.beginPath();
-    hdrLine.moveTo(innerLeft, panelTop + px(52));
-    hdrLine.lineTo(innerRight, panelTop + px(52));
-    hdrLine.strokePath();
-    this.jukeboxContainer.add(hdrLine);
-
     // ---- Track list ----
-    const listTop = panelTop + px(60);
+    const listTop = panelTop + px(70);
     const rowH = px(30);
 
     // Alternating row backgrounds
     for (let i = 0; i < JUKEBOX_TRACKS.length; i++) {
       if (i % 2 === 1) {
         this.jukeboxContainer.add(
-          this.add.rectangle(panelX, listTop + i * rowH + rowH / 2, panelW - px(12), rowH, 0x0f0f1c, 0.5)
+          this.add.rectangle(panelX, listTop + i * rowH + rowH / 2, panelW - px(28), rowH, 0x000000, 0.25)
         );
       }
     }
 
     // Active track highlight
-    const highlight = this.add.rectangle(panelX, listTop + rowH / 2, panelW - px(12), rowH, 0xc0934a, 0.10);
+    const highlight = this.add.rectangle(panelX, listTop + rowH / 2, panelW - px(28), rowH, 0xd4a54a, 0.16).setStrokeStyle(1, 0xd4a54a, 0.5);
     this.jukeboxContainer.add(highlight);
 
     const numTexts: Phaser.GameObjects.Text[] = [];
@@ -747,7 +854,7 @@ export class MenuScene extends Phaser.Scene {
       const track = JUKEBOX_TRACKS[i];
       const rowY = listTop + i * rowH + rowH / 2;
 
-      const hit = this.add.rectangle(panelX, rowY, panelW - px(12), rowH, 0x000000, 0)
+      const hit = this.add.rectangle(panelX, rowY, panelW - px(28), rowH, 0x000000, 0)
         .setInteractive({ useHandCursor: true });
       hit.on('pointerover', () => { if (i !== trackIndex) hit.setFillStyle(0x222230, 0.5); });
       hit.on('pointerout', () => hit.setFillStyle(0x000000, 0));
@@ -788,7 +895,7 @@ export class MenuScene extends Phaser.Scene {
     const progH = px(4);
 
     this.jukeboxContainer.add(
-      this.add.rectangle(innerLeft + innerW / 2, progY, innerW, progH, 0x1a1a28, 1)
+      this.add.rectangle(innerLeft + innerW / 2, progY, innerW, progH + px(2), 0x07060a, 1).setStrokeStyle(1, 0x4a4250, 1)
     );
 
     const progFill = this.add.graphics();
@@ -860,10 +967,7 @@ export class MenuScene extends Phaser.Scene {
     this.jukeboxContainer.add(timeText);
 
     // ---- Close ----
-    const closeBtn = this.add.text(panelX, panelTop + panelH - px(22), t('menu.back'), {
-      fontSize: fs(14), color: '#888', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => doClose());
+    const closeBtn = this.menuButton(panelX, panelTop + panelH - px(30), px(140), px(32), t('menu.backShort'), () => doClose(), 'secondary', 14);
     backdrop.on('pointerdown', () => doClose());
     this.jukeboxContainer.add(closeBtn);
 
@@ -961,7 +1065,7 @@ export class MenuScene extends Phaser.Scene {
 
     const cx = W / 2;
     const panelW = px(500);
-    const panelH = px(560);
+    const panelH = px(600);
     const panelX = cx;
     const panelY = H / 2;
     const panelTop = panelY - panelH / 2;
@@ -970,30 +1074,13 @@ export class MenuScene extends Phaser.Scene {
     const innerRight = panelLeft + panelW - px(24);
 
     // Backdrop
-    const backdrop = this.add.rectangle(cx, H / 2, W, H, 0x000000, 0.6).setInteractive();
+    const backdrop = this.add.rectangle(cx, H / 2, W, H, 0x000000, 0.72).setInteractive();
     this.creditsContainer.add(backdrop);
 
-    // Panel
-    this.creditsContainer.add(
-      this.add.rectangle(panelX, panelY, panelW, panelH, 0x0e0e1a, 0.95)
-        .setStrokeStyle(1.5, 0xc0934a, 0.6)
-    );
+    // Panel + title
+    this.addModalFrame(this.creditsContainer, panelX, panelY, panelW, panelH, t('menu.creditsPanel.title'));
 
-    // Title
-    this.creditsContainer.add(this.add.text(panelX, panelTop + px(24), t('menu.creditsPanel.title'), {
-      fontSize: fs(22), color: '#c0934a', fontFamily: '"Cinzel", "Noto Sans SC", "Noto Sans TC", serif', fontStyle: 'bold',
-    }).setOrigin(0.5));
-
-    // Decorative line
-    const lineGfx = this.add.graphics();
-    lineGfx.lineStyle(1, 0xc0934a, 0.4);
-    lineGfx.beginPath();
-    lineGfx.moveTo(innerLeft, panelTop + px(44));
-    lineGfx.lineTo(innerRight, panelTop + px(44));
-    lineGfx.strokePath();
-    this.creditsContainer.add(lineGfx);
-
-    let y = panelTop + px(60);
+    let y = panelTop + px(70);
 
     // --- Tile Art ---
     this.creditsContainer.add(this.add.text(innerLeft, y, t('menu.creditsPanel.tileArt'), {
@@ -1069,14 +1156,11 @@ export class MenuScene extends Phaser.Scene {
     }).setOrigin(0, 0.5));
 
     // Close button
-    const closeBtn = this.add.text(panelX, panelTop + panelH - px(22), t('menu.back'), {
-      fontSize: fs(14), color: '#888', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => {
+    const closeBtn = this.menuButton(panelX, panelTop + panelH - px(30), px(140), px(32), t('menu.backShort'), () => {
       this.creditsContainer?.destroy();
       this.creditsContainer = null;
       this.activePanel = 'menu';
-    });
+    }, 'secondary', 14);
     backdrop.on('pointerdown', () => {
       this.creditsContainer?.destroy();
       this.creditsContainer = null;
@@ -1121,12 +1205,15 @@ export class MenuScene extends Phaser.Scene {
     };
 
     // Title
-    this.difficultyContainer.add(this.add.text(cx, px(275), t('menu.difficulty.title'), {
+    const diffTitle = this.add.text(cx, px(272), t('menu.difficulty.title'), {
       fontSize: fs(22),
-      color: '#c0934a',
-      fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
+      color: UI_COLORS.parchment,
+      fontFamily: MENU_TITLE_FONT,
       fontStyle: 'bold',
-    }).setOrigin(0.5));
+      stroke: '#120b04', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5);
+    this.difficultyContainer.add(addTitleFlourishes(this, cx, px(272), diffTitle.width));
+    this.difficultyContainer.add(diffTitle);
 
     // Difficulty colors
     const DIFF_COLORS: Record<Difficulty, number> = {
@@ -1141,29 +1228,24 @@ export class MenuScene extends Phaser.Scene {
     };
 
     DIFFICULTY_ORDER.forEach((diff, i) => {
-      const y = px(340) + i * px(80);
+      const y = px(340) + i * px(76);
       const state = states[diff];
       const isLocked = state === 'locked';
       const isCompleted = state === 'completed';
       const isCurrent = diff === currentDiff;
+      const cardW = px(360), cardH = px(64);
 
-      const borderColor = isLocked ? 0x333344 : DIFF_COLORS[diff];
-      const bgAlpha = isLocked ? 0.5 : 0.9;
-      const borderAlpha = isLocked ? 0.3 : (isCurrent ? 1.0 : 0.6);
-
-      const bg = this.add.rectangle(cx, y, px(340), px(65), 0x12121e, bgAlpha)
-        .setStrokeStyle(isCurrent ? 2.5 : 1.5, borderColor, borderAlpha);
+      const frame = addFrame(this, cx - cardW / 2, y - cardH / 2, cardW, cardH, {
+        variant: 'tooltip', accent: isLocked ? 0x3f3845 : DIFF_COLORS[diff],
+      });
+      if (isLocked) frame.setAlpha(0.6);
+      this.difficultyContainer!.add(frame);
+      const bg = this.add.rectangle(cx, y, cardW, cardH, 0xffc860, 0);
 
       if (!isLocked) {
         bg.setInteractive({ useHandCursor: true });
-        bg.on('pointerover', () => {
-          bg.setStrokeStyle(2.5, borderColor, 1);
-          bg.setFillStyle(0x1a1a2e, 0.95);
-        });
-        bg.on('pointerout', () => {
-          bg.setStrokeStyle(isCurrent ? 2.5 : 1.5, borderColor, borderAlpha);
-          bg.setFillStyle(0x12121e, bgAlpha);
-        });
+        bg.on('pointerover', () => { bg.setFillStyle(0xffc860, 0.07); frame.setTint(0xfff0d0); });
+        bg.on('pointerout', () => { bg.setFillStyle(0xffc860, 0); frame.clearTint(); });
         bg.on('pointerdown', () => {
           save.difficulty = diff;
           this.difficultyContainer?.destroy(); this.difficultyContainer = null;
@@ -1181,47 +1263,41 @@ export class MenuScene extends Phaser.Scene {
         label = `🔒 ${label}`;
       }
 
-      const textColor = isLocked ? '#555555' : (isCurrent ? '#ffffff' : DIFF_TEXT_COLORS[diff]);
+      const textColor = isLocked ? '#6a635c' : (isCurrent ? '#ffffff' : DIFF_TEXT_COLORS[diff]);
 
       this.difficultyContainer!.add(this.add.text(cx, y - px(10), label, {
         fontSize: fs(20),
         color: textColor,
-        fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-        fontStyle: isCurrent ? 'bold' : 'normal',
+        fontFamily: MENU_FONT,
+        fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(3 * DPR),
       }).setOrigin(0.5));
 
       // Description text
       const descText = isLocked ? t('menu.difficulty.locked') : t(DIFF_DESC_KEYS[diff]);
       this.difficultyContainer!.add(this.add.text(cx, y + px(14), descText, {
         fontSize: fs(13),
-        color: isLocked ? '#444444' : '#888880',
-        fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
+        color: isLocked ? '#5a5550' : UI_COLORS.textSoft,
+        fontFamily: MENU_FONT,
       }).setOrigin(0.5));
 
       // Current difficulty indicator
       if (isCurrent && !isLocked) {
-        this.difficultyContainer!.add(this.add.text(cx + px(140), y - px(10), t('menu.difficulty.current'), {
+        const tag = this.add.text(cx + cardW / 2 - px(16), y - px(18), t('menu.difficulty.current'), {
           fontSize: fs(11),
-          color: '#c0934a',
-          fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-        }).setOrigin(0.5));
+          color: '#ffe7a0',
+          fontFamily: MENU_FONT, fontStyle: 'bold',
+        }).setOrigin(1, 0.5);
+        this.difficultyContainer!.add(tag);
       }
     });
 
     // Back button
-    const backY = px(340) + 3 * px(80);
-    const backBg = this.add.rectangle(cx, backY, px(200), px(45), 0x12121e, 0.9)
-      .setStrokeStyle(1.5, 0x555566, 0.4).setInteractive({ useHandCursor: true });
-    backBg.on('pointerover', () => { backBg.setStrokeStyle(2, 0x888899, 0.8); backBg.setFillStyle(0x1a1a2e, 0.95); });
-    backBg.on('pointerout', () => { backBg.setStrokeStyle(1.5, 0x555566, 0.4); backBg.setFillStyle(0x12121e, 0.9); });
-    backBg.on('pointerdown', () => {
+    const backY = px(340) + 3 * px(76) + px(8);
+    this.difficultyContainer.add(this.menuButton(cx, backY, px(180), px(38), t('menu.backShort'), () => {
       this.difficultyContainer?.destroy(); this.difficultyContainer = null;
       this.showMainMenu(save);
-    });
-    this.difficultyContainer.add(backBg);
-    this.difficultyContainer.add(this.add.text(cx, backY, t('menu.backShort'), {
-      fontSize: fs(16), color: '#888880', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5));
+    }, 'ghost', 15));
   }
 
   // ---------------------------------------------------------------------------
@@ -1237,12 +1313,15 @@ export class MenuScene extends Phaser.Scene {
     const currentLang = getLocale();
 
     // Title
-    this.langContainer.add(this.add.text(cx, px(300), t('menu.language'), {
+    const langTitle = this.add.text(cx, px(290), t('menu.language'), {
       fontSize: fs(22),
-      color: '#c0934a',
-      fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
+      color: UI_COLORS.parchment,
+      fontFamily: MENU_TITLE_FONT,
       fontStyle: 'bold',
-    }).setOrigin(0.5));
+      stroke: '#120b04', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5);
+    this.langContainer.add(addTitleFlourishes(this, cx, px(290), langTitle.width));
+    this.langContainer.add(langTitle);
 
     const options: { key: string; label: string; localeId: string }[] = [
       { key: 'menu.langSelect.zhCN', label: t('menu.langSelect.zhCN'), localeId: 'zh-CN' },
@@ -1251,48 +1330,28 @@ export class MenuScene extends Phaser.Scene {
     ];
 
     options.forEach((opt, i) => {
-      const y = px(370) + i * px(70);
+      const y = px(360) + i * px(62);
       const isCurrent = opt.localeId === currentLang;
-      const borderColor = isCurrent ? 0xc0934a : 0x555566;
-      const borderAlpha = isCurrent ? 0.8 : 0.4;
-
-      const bg = this.add.rectangle(cx, y, px(320), px(50), 0x12121e, 0.9)
-        .setStrokeStyle(isCurrent ? 2 : 1.5, borderColor, borderAlpha)
-        .setInteractive({ useHandCursor: true });
-
-      bg.on('pointerover', () => { bg.setStrokeStyle(2, 0xc0934a, 1); bg.setFillStyle(0x1a1a2e, 0.95); });
-      bg.on('pointerout', () => { bg.setStrokeStyle(isCurrent ? 2 : 1.5, borderColor, borderAlpha); bg.setFillStyle(0x12121e, 0.9); });
-      bg.on('pointerdown', () => {
+      const btn = this.menuButton(cx, y, px(320), px(46), opt.label, () => {
         // setLocale triggers LOCALE_CHANGED which re-renders via onLocaleChanged
         setLocale(opt.localeId);
-      });
-
-      this.langContainer!.add(bg);
-      this.langContainer!.add(this.add.text(cx, y, opt.label, {
-        fontSize: fs(18),
-        color: isCurrent ? '#e8e0d4' : '#a0907a',
-        fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-        fontStyle: isCurrent ? 'bold' : 'normal',
-      }).setOrigin(0.5));
+      }, isCurrent ? 'primary' : 'secondary', 18);
+      this.langContainer!.add(btn);
 
       if (isCurrent) {
         this.langContainer!.add(this.add.text(cx + px(140), y, t('menu.difficulty.current'), {
           fontSize: fs(11),
-          color: '#c0934a',
-          fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-        }).setOrigin(0.5));
+          color: '#ffe7a0',
+          fontFamily: MENU_FONT, fontStyle: 'bold',
+        }).setOrigin(1, 0.5));
       }
     });
 
     // Back button
-    const backBtn = this.add.text(cx, px(590), t('menu.back'), {
-      fontSize: fs(14), color: '#888', fontFamily: '"Noto Sans SC", "Noto Sans TC", sans-serif',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    backBtn.on('pointerdown', () => {
+    this.langContainer.add(this.menuButton(cx, px(560), px(180), px(38), t('menu.backShort'), () => {
       this.langContainer?.destroy(); this.langContainer = null;
       this.checkForSaves();
-    });
-    this.langContainer.add(backBtn);
+    }, 'ghost', 15));
   }
 
   private async startGame(classId: string): Promise<void> {

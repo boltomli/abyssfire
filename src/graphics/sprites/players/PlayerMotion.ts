@@ -32,3 +32,17 @@ export function samplePose(value: number, stops: readonly PoseStop[]): number {
 
   return stops[stops.length - 1].value;
 }
+
+/**
+ * Leg kinematics for one leg of a walk cycle.
+ * `swing` runs −1 (trailing) → 1 (leading); `lift` is 0..1 while the foot
+ * travels forward, so feet leave the ground instead of sliding.
+ */
+export function walkStride(phase: number): { swing: number; lift: number } {
+  return { swing: Math.sin(phase), lift: Math.max(0, Math.cos(phase)) };
+}
+
+/** Body height over a stride: lowest at heel-strike, highest while passing. */
+export function walkBob(phase: number): number {
+  return 1 - Math.abs(Math.sin(phase));
+}

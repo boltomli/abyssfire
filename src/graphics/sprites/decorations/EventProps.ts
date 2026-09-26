@@ -1,4 +1,8 @@
 import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, shade, tone, polyP, line, glow, flat, ellipseP, limbP, shard, rgbaHex } from './DecorKit';
+import { block } from './Stonework';
+import { drawRock } from './Rock';
+import { drawFlame } from './CampProps';
 
 type EventPropKind =
   | 'rune_pillar'
@@ -9,170 +13,151 @@ type EventPropKind =
   | 'defend_campfire'
   | 'defend_abyss_seal';
 
+type Ctx = CanvasRenderingContext2D;
+
+function groundGlow(ctx: Ctx, x: number, y: number, rr: number, col: number, a: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1, 0.4);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rr);
+  g.addColorStop(0, rgbaHex(col, a));
+  g.addColorStop(1, rgbaHex(col, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, rr, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+const DRAW: Record<EventPropKind, (ctx: Ctx, cx: number, gy: number, r: () => number) => void> = {
+  rune_pillar(ctx, cx, gy, r) {
+    contactShadow(ctx, cx + 3, gy, 22, 6, 0.42);
+    block(ctx, cx - 17, gy, 32, 8, 8, 0x5a6664, r, false);
+    const t = tone(0x6f7c7a, { light: 0.35 });
+    shade(ctx, polyP(ctx, [[cx - 11, gy - 8], [cx - 9, gy - 50], [cx - 2, gy - 58], [cx + 7, gy - 52], [cx + 9, gy - 8]]), t, { band: 5, hi: 1.2 });
+    glow(ctx, { x: cx - 1, y: gy - 32 }, 18, 0x72d8ff, 0.5);
+    const rune: [number, number][] = [[cx, gy - 48], [cx - 5, gy - 40], [cx + 4, gy - 32], [cx - 1, gy - 22], [cx + 3, gy - 14]];
+    line(ctx, rune, '#2a9ad8', 2.2);
+    line(ctx, rune, '#dff8ff', 0.8);
+  },
+  root_altar(ctx, cx, gy, r) {
+    contactShadow(ctx, cx + 3, gy, 24, 6, 0.42);
+    const bark = tone(0x5a4232);
+    for (const [ox, h] of [[-14, 40], [0, 50], [13, 38]] as const) {
+      shade(ctx, limbP(ctx, [cx + ox, gy], [cx + ox * 0.4, gy - h * 0.55], [cx + ox * 0.2, gy - h], 4, 1.5), bark, { band: 2.5, hi: 0.6 });
+    }
+    drawRock(ctx, cx, gy + 1, 30, 16, 0x7a8a6a, r, 1);
+    const moss = tone(0x6a9a3c);
+    shade(ctx, ellipseP(ctx, cx - 2, gy - 15, 13, 3.5), moss, { band: 1.5, hi: 0.6 });
+    for (const ox of [-8, 0, 8]) {
+      glow(ctx, { x: cx + ox, y: gy - 20 }, 6, 0x9ee26d, 0.6);
+      flat(ctx, ellipseP(ctx, cx + ox, gy - 20, 2.2, 2.2), '#d8ffa8', '#4a8a2a', 0.5);
+    }
+  },
+  gem_lock(ctx, cx, gy, r) {
+    contactShadow(ctx, cx + 3, gy, 26, 7, 0.42);
+    block(ctx, cx - 24, gy, 44, 16, 9, 0x5e5f6a, r, false);
+    block(ctx, cx - 18, gy - 16, 32, 16, 7, 0x6e6f7c, r);
+    const gems = [0xe0484a, 0x4ac870, 0x4a80e0];
+    gems.forEach((g, i) => {
+      const gx = cx - 10 + i * 10;
+      glow(ctx, { x: gx, y: gy - 25 }, 7, g, 0.5);
+      shade(ctx, polyP(ctx, [[gx, gy - 31], [gx + 4, gy - 25], [gx, gy - 19], [gx - 4, gy - 25]]), tone(g, { light: 0.5 }), { band: 2, hi: 0.8, stroke: 0.5 });
+      flat(ctx, ellipseP(ctx, gx - 1.2, gy - 27, 0.8, 1.2), '#ffffff');
+    });
+  },
+  sundial(ctx, cx, gy, r) {
+    contactShadow(ctx, cx + 3, gy, 26, 7, 0.4);
+    block(ctx, cx - 10, gy, 18, 16, 6, 0xc8a878, r, false);
+    const stone = tone(0xd8bc88, { light: 0.35 });
+    shade(ctx, ellipseP(ctx, cx - 1, gy - 18, 22, 8), stone, { band: 3, hi: 1 });
+    ctx.beginPath();
+    ctx.ellipse(cx - 1, gy - 18, 17, 6, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = stone.shade;
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      line(ctx, [[cx - 1 + Math.cos(a) * 14, gy - 18 + Math.sin(a) * 5], [cx - 1 + Math.cos(a) * 17, gy - 18 + Math.sin(a) * 6]], stone.line, 0.7);
+    }
+    line(ctx, [[cx - 1, gy - 18], [cx + 16, gy - 12]], 'rgba(40,24,40,0.45)', 3);
+    shade(ctx, polyP(ctx, [[cx - 3, gy - 18], [cx + 1, gy - 42], [cx + 5, gy - 18]]), tone(0x7a5a3a), { band: 1.5, hi: 0.6 });
+    glow(ctx, { x: cx + 1, y: gy - 42 }, 6, 0x3fd0c8, 0.6);
+    flat(ctx, ellipseP(ctx, cx + 1, gy - 42, 1.8, 1.8), '#9ffff4');
+  },
+  abyss_array(ctx, cx, gy) {
+    groundGlow(ctx, cx, gy - 8, 30, 0x60e1e6, 0.5);
+    ctx.save();
+    ctx.translate(cx, gy - 8);
+    ctx.scale(1, 0.42);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(20,10,40,0.6)';
+    ctx.beginPath(); ctx.arc(0, 0, 24, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = '#68dce1';
+    ctx.beginPath(); ctx.arc(0, 0, 24, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    for (let i = 0; i <= 5; i++) {
+      const a = -Math.PI / 2 + i * Math.PI * 0.8;
+      if (i === 0) ctx.moveTo(Math.cos(a) * 20, Math.sin(a) * 20); else ctx.lineTo(Math.cos(a) * 20, Math.sin(a) * 20);
+    }
+    ctx.stroke();
+    ctx.restore();
+    for (const [ox, oy, h] of [[-18, -6, 16], [18, -6, 14], [0, -16, 12], [0, 2, 10]] as const) {
+      shard(ctx, cx + ox, gy + oy, h, 6, 0, 0x8a6ae0);
+    }
+    for (let i = 0; i < 4; i++) {
+      const x = cx + (i - 1.5) * 9, y = gy - 34 - (i % 2) * 7;
+      glow(ctx, { x, y }, 6, 0xb48cff, 0.6);
+      flat(ctx, ellipseP(ctx, x, y, 1.8, 1.8), '#eadcff');
+    }
+  },
+  defend_campfire(ctx, cx, gy, r) {
+    contactShadow(ctx, cx + 2, gy, 26, 7, 0.45);
+    groundGlow(ctx, cx, gy - 4, 30, 0xff9a3a, 0.4);
+    const stone = tone(0x6a6e78, { light: 0.3 });
+    for (let i = 0; i < 9; i++) {
+      const a = Math.PI + (i / 8) * Math.PI;
+      shade(ctx, ellipseP(ctx, cx + Math.cos(a) * 17, gy - 6 + Math.sin(a) * 5.5, 4.5, 3), stone, { band: 1.4, hi: 0.6 });
+    }
+    const log = tone(0x6a4028);
+    shade(ctx, limbP(ctx, [cx - 16, gy - 4], [cx, gy - 8], [cx + 14, gy - 12], 3, 2.6), log, { band: 1.5, hi: 0.6 });
+    shade(ctx, limbP(ctx, [cx + 16, gy - 3], [cx, gy - 7], [cx - 14, gy - 12], 3, 2.6), log, { band: 1.5, hi: 0.6 });
+    drawFlame(ctx, cx, gy - 7, 15, 32, 0, 0xff8a2a);
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 8) * Math.PI;
+      shade(ctx, ellipseP(ctx, cx + Math.cos(a) * 17, gy - 6 + Math.sin(a) * 5.5, 4.5, 3), stone, { band: 1.4, hi: 0.6 });
+    }
+    void r;
+  },
+  defend_abyss_seal(ctx, cx, gy, r) {
+    contactShadow(ctx, cx + 3, gy, 24, 7, 0.45);
+    groundGlow(ctx, cx, gy - 4, 30, 0x5fe1e3, 0.45);
+    block(ctx, cx - 18, gy, 32, 8, 8, 0x2e2a3e, r, false);
+    const t = tone(0x3a3650, { light: 0.35 });
+    shade(ctx, polyP(ctx, [[cx - 1, gy - 60], [cx + 13, gy - 16], [cx + 8, gy - 8], [cx - 10, gy - 8], [cx - 15, gy - 16]]), t, { band: 5, hi: 1.4 });
+    glow(ctx, { x: cx - 1, y: gy - 32 }, 20, 0x67dce2, 0.55);
+    const rune: [number, number][] = [[cx - 1, gy - 50], [cx - 7, gy - 38], [cx + 6, gy - 28], [cx - 1, gy - 14]];
+    line(ctx, rune, '#1a9aa8', 2.4);
+    line(ctx, rune, '#dffcff', 0.8);
+    for (const s of [-1, 1]) {
+      line(ctx, [[cx + s * 20, gy - 46], [cx + s * 14, gy - 24]], '#7d629f', 2.2);
+      glow(ctx, { x: cx + s * 20, y: gy - 46 }, 5, 0xb48cff, 0.6);
+    }
+  },
+};
+
 function createEventPropDrawer(key: string, kind: EventPropKind): EntityDrawer {
-  return {
+  return defineDecor({
     key,
-    frameW: 64,
-    frameH: 72,
-    totalFrames: 1,
-
-    drawFrame(ctx, _frame, _action, w, h, utils) {
-      const s = w / 64;
-      const cx = w / 2;
-      const ground = h * 0.94;
-
-      ctx.fillStyle = 'rgba(0,0,0,0.28)';
-      utils.fillEllipse(ctx, cx, ground, 24 * s, 6 * s);
-
-      if (kind === 'rune_pillar') {
-        utils.drawStoneTexture(ctx, cx - 13 * s, ground - 48 * s, 26 * s, 43 * s, 0x5d6665);
-        ctx.fillStyle = utils.rgb(0x464e4d);
-        ctx.beginPath();
-        ctx.moveTo(cx - 17 * s, ground - 5 * s);
-        ctx.lineTo(cx - 12 * s, ground - 15 * s);
-        ctx.lineTo(cx + 12 * s, ground - 15 * s);
-        ctx.lineTo(cx + 17 * s, ground - 5 * s);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = '#72d8ff';
-        ctx.lineWidth = 2 * s;
-        ctx.beginPath();
-        ctx.moveTo(cx, ground - 42 * s);
-        ctx.lineTo(cx - 6 * s, ground - 34 * s);
-        ctx.lineTo(cx + 5 * s, ground - 27 * s);
-        ctx.lineTo(cx, ground - 19 * s);
-        ctx.stroke();
-      } else if (kind === 'root_altar') {
-        ctx.strokeStyle = utils.rgb(0x4b3628);
-        ctx.lineWidth = 7 * s;
-        ctx.lineCap = 'round';
-        for (const offset of [-14, 0, 14]) {
-          ctx.beginPath();
-          ctx.moveTo(cx + offset * s, ground - 3 * s);
-          ctx.quadraticCurveTo(cx + offset * 0.5 * s, ground - 24 * s, cx + offset * 0.3 * s, ground - 43 * s);
-          ctx.stroke();
-        }
-        ctx.fillStyle = utils.rgb(0x667d3c);
-        utils.fillEllipse(ctx, cx, ground - 17 * s, 19 * s, 9 * s);
-        ctx.fillStyle = '#9ee26d';
-        for (const offset of [-9, 0, 9]) utils.fillCircle(ctx, cx + offset * s, ground - 19 * s, 2.5 * s);
-      } else if (kind === 'gem_lock') {
-        utils.drawStoneTexture(ctx, cx - 22 * s, ground - 25 * s, 44 * s, 22 * s, 0x575861);
-        ctx.fillStyle = utils.rgb(0x41424a);
-        utils.roundRect(ctx, cx - 18 * s, ground - 33 * s, 36 * s, 15 * s, 4 * s);
-        ctx.fill();
-        const gems = [0xd34a4a, 0x53b570, 0x4a78cf];
-        for (let i = 0; i < gems.length; i++) {
-          const gx = cx + (i - 1) * 12 * s;
-          ctx.fillStyle = utils.rgb(gems[i]);
-          ctx.beginPath();
-          ctx.moveTo(gx, ground - 34 * s);
-          ctx.lineTo(gx + 5 * s, ground - 27 * s);
-          ctx.lineTo(gx, ground - 20 * s);
-          ctx.lineTo(gx - 5 * s, ground - 27 * s);
-          ctx.closePath();
-          ctx.fill();
-        }
-      } else if (kind === 'sundial') {
-        ctx.fillStyle = utils.rgb(0x98734c);
-        utils.fillEllipse(ctx, cx, ground - 14 * s, 23 * s, 10 * s);
-        ctx.strokeStyle = utils.rgb(0xd6bd7c);
-        ctx.lineWidth = 2 * s;
-        ctx.beginPath();
-        ctx.ellipse(cx, ground - 14 * s, 18 * s, 7 * s, 0, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.fillStyle = utils.rgb(0x5c4534);
-        ctx.beginPath();
-        ctx.moveTo(cx, ground - 16 * s);
-        ctx.lineTo(cx + 4 * s, ground - 42 * s);
-        ctx.lineTo(cx + 8 * s, ground - 14 * s);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(55,35,25,0.5)';
-        ctx.lineWidth = 3 * s;
-        ctx.beginPath();
-        ctx.moveTo(cx + 3 * s, ground - 14 * s);
-        ctx.lineTo(cx + 19 * s, ground - 8 * s);
-        ctx.stroke();
-      } else if (kind === 'abyss_array') {
-        const aura = ctx.createRadialGradient(cx, ground - 13 * s, 0, cx, ground - 13 * s, 28 * s);
-        aura.addColorStop(0, 'rgba(96,225,230,0.5)');
-        aura.addColorStop(1, 'rgba(78,45,138,0)');
-        ctx.fillStyle = aura;
-        utils.fillCircle(ctx, cx, ground - 13 * s, 28 * s);
-        ctx.strokeStyle = '#68dce1';
-        ctx.lineWidth = 2 * s;
-        ctx.beginPath();
-        ctx.ellipse(cx, ground - 10 * s, 23 * s, 10 * s, 0, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.beginPath();
-        for (let i = 0; i < 5; i++) {
-          const angle = -Math.PI / 2 + i * Math.PI * 0.8;
-          const px = cx + Math.cos(angle) * 20 * s;
-          const py = ground - 10 * s + Math.sin(angle) * 8 * s;
-          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.stroke();
-        ctx.fillStyle = '#b48cff';
-        for (let i = 0; i < 4; i++) utils.fillCircle(ctx, cx + (i - 1.5) * 8 * s, ground - 30 * s - (i % 2) * 7 * s, 2 * s);
-      } else if (kind === 'defend_campfire') {
-        ctx.fillStyle = utils.rgb(0x4c5158);
-        for (let i = 0; i < 10; i++) {
-          const angle = i * Math.PI * 0.2;
-          utils.fillEllipse(ctx, cx + Math.cos(angle) * 17 * s, ground - 7 * s + Math.sin(angle) * 5 * s, 5 * s, 3 * s);
-        }
-        ctx.strokeStyle = utils.rgb(0x4a2c18);
-        ctx.lineWidth = 6 * s;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(cx - 15 * s, ground - 10 * s);
-        ctx.lineTo(cx + 15 * s, ground - 4 * s);
-        ctx.moveTo(cx + 15 * s, ground - 10 * s);
-        ctx.lineTo(cx - 15 * s, ground - 4 * s);
-        ctx.stroke();
-        const glow = ctx.createRadialGradient(cx, ground - 22 * s, 0, cx, ground - 22 * s, 24 * s);
-        glow.addColorStop(0, 'rgba(255,212,72,0.65)');
-        glow.addColorStop(1, 'rgba(207,71,30,0)');
-        ctx.fillStyle = glow;
-        utils.fillCircle(ctx, cx, ground - 22 * s, 24 * s);
-        utils.drawFlameLayer(ctx, cx, ground - 8 * s, 18 * s, 38 * s, '#d94b25', 0.7);
-        utils.drawFlameLayer(ctx, cx, ground - 9 * s, 11 * s, 29 * s, '#ff9c32', 1.8);
-        utils.drawFlameLayer(ctx, cx, ground - 10 * s, 5 * s, 18 * s, '#ffe47d', 2.4);
-      } else {
-        const aura = ctx.createRadialGradient(cx, ground - 25 * s, 0, cx, ground - 25 * s, 31 * s);
-        aura.addColorStop(0, 'rgba(95,225,227,0.42)');
-        aura.addColorStop(1, 'rgba(54,31,102,0)');
-        ctx.fillStyle = aura;
-        utils.fillCircle(ctx, cx, ground - 25 * s, 31 * s);
-        ctx.fillStyle = utils.rgb(0x282837);
-        ctx.beginPath();
-        ctx.moveTo(cx, ground - 60 * s);
-        ctx.lineTo(cx + 15 * s, ground - 13 * s);
-        ctx.lineTo(cx + 9 * s, ground - 4 * s);
-        ctx.lineTo(cx - 9 * s, ground - 4 * s);
-        ctx.lineTo(cx - 15 * s, ground - 13 * s);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = '#67dce2';
-        ctx.lineWidth = 2.2 * s;
-        ctx.beginPath();
-        ctx.moveTo(cx, ground - 48 * s);
-        ctx.lineTo(cx - 7 * s, ground - 35 * s);
-        ctx.lineTo(cx + 7 * s, ground - 25 * s);
-        ctx.lineTo(cx, ground - 12 * s);
-        ctx.stroke();
-        ctx.strokeStyle = utils.rgb(0x7d629f);
-        ctx.lineWidth = 2 * s;
-        ctx.beginPath();
-        ctx.moveTo(cx - 17 * s, ground - 43 * s);
-        ctx.lineTo(cx - 11 * s, ground - 25 * s);
-        ctx.moveTo(cx + 17 * s, ground - 43 * s);
-        ctx.lineTo(cx + 11 * s, ground - 25 * s);
-        ctx.stroke();
-      }
+    w: 64,
+    h: 72,
+    ground: 67,
+    tall: true,
+    draw(ctx, { cx, gy, r }) {
+      DRAW[kind](ctx, cx, gy, r);
     },
-  };
+  });
 }
 
 export const EventPuzzleRunePillarDrawer = createEventPropDrawer('decor_event_puzzle_rune_pillar', 'rune_pillar');

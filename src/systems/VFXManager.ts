@@ -1,5 +1,19 @@
 import Phaser from 'phaser';
 import { EventBus, GameEvents } from '../utils/EventBus';
+import { HIT_PROFILES, type HitWeight } from './HitFeedback';
+import { FxEngine } from '../graphics/vfx/FxEngine';
+import { FxKit, PAL } from '../graphics/vfx/FxKit';
+
+// Above entities (depth = world y + offset) and the lighting overlay, below floating text.
+const IMPACT_DEPTH = 4400;
+
+/** Loot quality colours (match the UI quality palette in docs/art-direction.md). */
+const LOOT_COLORS: Record<string, number> = {
+  magic: 0x4f8cff,
+  rare: 0xffd84a,
+  legendary: 0xff8a2a,
+  set: 0x3ecf6a,
+};
 
 /**
  * Centralized VFX manager — camera effects, per-GameObject FX, combat juice.
@@ -8,10 +22,14 @@ import { EventBus, GameEvents } from '../utils/EventBus';
 export class VFXManager {
   private scene: Phaser.Scene;
   private isWebGL: boolean;
+  private fx: FxKit;
 
   // Throttle timestamps
   private lastShakeTime = 0;
   private lastFlashTime = 0;
+
+  // Slow-motion (elite/boss kill beats)
+  private slowMoTimer: Phaser.Time.TimerEvent | null = null;
 
   // Low HP vignette
   private dangerVignette: Phaser.FX.Vignette | null = null;
@@ -37,14 +55,9 @@ export class VFXManager {
         const duration = Math.max(50, Math.min(120, 50 + ratio * 100));
         this.cameraShake(duration, intensity);
       }
-    } else {
-      const intensity = Math.max(0.001, Math.min(0.005, ratio * 0.008));
-      const duration = Math.max(40, Math.min(100, 40 + ratio * 80));
-      this.cameraShake(duration, intensity);
-      if (data.isCrit) {
-        this.cameraFlash(50, 0.3, 0xffffff);
-      }
     }
+    // Hits on monsters are driven per-hit by ZoneScene via HIT_PROFILES
+    // (see impactBurst / playHitImpact) so shake scales with hit weight.
   };
   private readonly handlePlayerLevelUp = (): void => {
     this.cameraFlash(200, 0.5, 0xffd700);
@@ -63,14 +76,15 @@ export class VFXManager {
   };
   private readonly handleItemDropped = (data: { item: { quality: string } }): void => {
     if (data.item.quality === 'legendary' || data.item.quality === 'set') {
-      this.cameraFlash(300, 0.6, 0xff8800);
-      this.cameraShake(250, 0.015);
+      this.cameraFlash(220, 0.35, LOOT_COLORS[data.item.quality]);
+      this.cameraShake(160, 0.005);
     }
   };
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     this.isWebGL = scene.renderer.type === Phaser.WEBGL;
+    this.fx = new FxKit(FxEngine.for(scene));
     this.setupEventListeners();
   }
 
@@ -159,15 +173,10 @@ export class VFXManager {
   // ── Loot Glow by Quality ───────────────────────────────
 
   applyLootGlow(container: Phaser.GameObjects.Container, quality: string): void {
-    if (!this.isWebGL) return;
-    const colors: Record<string, number> = {
-      magic: 0x4488ff,
-      rare: 0xffff00,
-      legendary: 0xff8800,
-      set: 0x00ff00,
-    };
-    const color = colors[quality];
+    const color = LOOT_COLORS[quality];
     if (!color) return;
+    this.addLootBeam(container, quality, color);
+    if (!this.isWebGL) return;
 
     // Apply glow to the first visible child (the loot bag image)
     const children = container.list as Phaser.GameObjects.GameObject[];
@@ -182,6 +191,38 @@ export class VFXManager {
         break;
       }
     }
+  }
+
+  /**
+   * Ground glow for magic+ drops and a light pillar for rare+ (D2-style beam),
+   * parented to the loot container so it moves/destroys with it.
+   */
+  private addLootBeam(container: Phaser.GameObjects.Container, quality: string, color: number): void {
+    const scene = this.scene;
+    if (!scene.textures.exists('fx_beam')) return;
+    const big = quality === 'legendary' || quality === 'set';
+    const pool = scene.add.image(0, 2, 'fx_glow').setTint(color).setBlendMode(Phaser.BlendModes.ADD)
+      .setScale(big ? 0.55 : 0.4, big ? 0.24 : 0.18).setAlpha(0.7);
+    const parts: Phaser.GameObjects.Image[] = [pool];
+    if (quality !== 'magic') {
+      const h = big ? 110 : 70;
+      const beam = scene.add.image(0, 4, 'fx_beam').setOrigin(0.5, 1).setTint(color).setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(big ? 0.55 : 0.4, h / 256).setAlpha(big ? 0.75 : 0.55);
+      const core = scene.add.image(0, 4, 'fx_beam').setOrigin(0.5, 1).setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(big ? 0.18 : 0.13, (h * 0.8) / 256).setAlpha(big ? 0.7 : 0.5);
+      parts.push(beam, core);
+      // drop moment: pillar shoots up out of the ground
+      beam.scaleY = 0; core.scaleY = 0;
+      scene.tweens.add({ targets: [beam, core], scaleY: { getEnd: (t: Phaser.GameObjects.Image) => (t === beam ? h : h * 0.8) / 256 }, duration: 260, ease: 'Back.easeOut' });
+      this.fx.flash(container.x, container.y - 6, color, big ? 30 : 20, 220);
+      this.fx.ring(container.x, container.y, color, 4, big ? 36 : 24, 420);
+      if (big) this.fx.motes(container.x, container.y - 10, 10, 'fx_spark', [color, 0xffffff], { radius: 6, speed: [20, 60], rise: 40, size: [0.2, 0.32], life: [500, 800] });
+    }
+    for (const p of parts) container.addAt(p, 0);
+    const pulse = scene.tweens.add({
+      targets: parts, alpha: '*=0.55', duration: big ? 700 : 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: 280,
+    });
+    pool.once(Phaser.GameObjects.Events.DESTROY, () => pulse.remove());
   }
 
   // ── Hit Flash (Color Matrix) ────────────────────────────
@@ -238,86 +279,126 @@ export class VFXManager {
   // ── Skill Impact Effects ────────────────────────────────
 
   skillImpactBloom(x: number, y: number, color: number = 0xff6600, duration: number = 300): void {
-    if (!this.isWebGL) return;
-    // Create a brief bloom circle at impact point
-    const circle = this.scene.add.circle(x, y, 20, color, 0.6).setDepth(1500);
-    const bloomFx = (circle as any).postFX?.addBloom(color, 1.5, 1.5, 1.5, 1.5);
-    this.scene.tweens.add({
-      targets: circle,
-      scaleX: 3,
-      scaleY: 3,
-      alpha: 0,
-      duration,
-      ease: 'Power2',
-      onComplete: () => {
-        if (bloomFx) (circle as any).postFX?.remove(bloomFx);
-        circle.destroy();
-      },
+    // Soft coloured bloom on the struck target (per-skill effects carry the detail).
+    this.fx.glow(x, y, color, 44, duration, 1.25, 0.55);
+    this.fx.e.spawn('fx_core', x, y, duration * 0.5).scale(0.4, 0.8, 2).fade(0.8, 0);
+  }
+
+  // ── Melee Impact ─────────────────────────────────────────
+
+  /**
+   * Directional impact: hot core flash, flattened shock ring on the ground
+   * plane, and spark streaks spraying *away* from the attacker.
+   * @param angle radians, attacker → target.
+   */
+  impactBurst(x: number, y: number, angle: number, weight: HitWeight, color: number = 0xfff2c0): void {
+    const profile = HIT_PROFILES[weight];
+    if (profile.sparks <= 0 && profile.ringRadius <= 0) return;
+    const e = this.fx.e;
+    const r = profile.ringRadius;
+    const big = weight === 'crit' || weight === 'kill';
+
+    // Hot core + coloured bloom, pushed slightly along the blow
+    const px = x + Math.cos(angle) * 3, py = y + Math.sin(angle) * 2;
+    e.spawn('fx_core', px, py, big ? 140 : 100).at(IMPACT_DEPTH + 1).scale(r / 32 * 0.5, r / 32 * 1.3, 2).fade(1, 0, 0, 1.5);
+    e.spawn('fx_glow', px, py, big ? 220 : 160).at(IMPACT_DEPTH).color(color).scale(r / 64 * 1.2, r / 64 * 2.6, 3).fade(0.45, 0, 0, 1.3);
+
+    // Ground-plane shock ring (iso-flattened, under the target's feet)
+    this.fx.ring(x, y + 18, color, r * 0.3, r * (big ? 1.7 : 1.25), big ? 320 : 240, { alpha: 0.9 });
+
+    // Directional spark streaks spraying away from the attacker
+    const spread = big ? 1.25 : 0.9;
+    for (let i = 0; i < profile.sparks; i++) {
+      const a = angle + (Math.random() - 0.5) * spread;
+      const speed = (big ? 220 : 160) + Math.random() * (big ? 200 : 120);
+      e.spawn('fx_streak', x, y, 160 + Math.random() * 120).at(IMPACT_DEPTH + 1)
+        .polar(a, speed, 0.75).damp(4).accel(0, 120).face(0, 0.3)
+        .scaleXY(big ? 0.5 : 0.4, big ? 0.8 : 0.6, 0.15, 0.3).color(i % 2 === 0 ? 0xffffff : color).fade(1, 0, 0, 1.3);
+    }
+
+    // Crit/kill: four-point glint that pops over the target
+    if (big) {
+      const rot = angle + Math.PI / 4;
+      for (let k = 0; k < 2; k++) {
+        const len = (k ? 2.2 : 3.2) * r / 32;
+        // two-sided thin streaks = crisp cross glint
+        for (const flip of [0, Math.PI]) {
+          e.spawn('fx_streak', x, y, 200).at(IMPACT_DEPTH + 2).origin(1, 0.5)
+            .scaleXY(len * 0.2, 0.5, len, 0.2, 4).spinning(rot + k * Math.PI / 2 + flip).fade(1, 0, 0, 1.6);
+        }
+      }
+    }
+
+    if (profile.shakeMs > 0) this.cameraShake(profile.shakeMs, profile.shakeIntensity);
+  }
+
+  /**
+   * Brief slow-motion beat for big kills. Scales tweens and sprite
+   * animation playback only — combat timers keep running in real time.
+   */
+  slowMotion(durationMs: number = 260, scale: number = 0.3): void {
+    const scene = this.scene;
+    scene.tweens.timeScale = scale;
+    scene.anims.globalTimeScale = scale;
+    this.slowMoTimer?.remove(false);
+    this.slowMoTimer = scene.time.delayedCall(durationMs, () => {
+      this.slowMoTimer = null;
+      scene.tweens.timeScale = 1;
+      scene.anims.globalTimeScale = 1;
     });
   }
 
-  // ── Particle Burst Effects (tween-based, reliable) ───────
+  // ── Particle Burst Effects (pooled FxEngine sprites) ─────
 
-  /** Burst particles outward from a point using tweened sprites */
-  private burstParticles(
-    x: number, y: number, count: number,
-    texture: string, tints: number[],
-    opts: { speedMin?: number; speedMax?: number; scaleStart?: number; duration?: number; gravityY?: number; blend?: number } = {},
-  ): void {
-    const { speedMin = 40, speedMax = 100, scaleStart = 0.8, duration = 400, gravityY = 0, blend = Phaser.BlendModes.ADD } = opts;
-    for (let i = 0; i < count; i++) {
-      const tint = tints[Math.floor(Math.random() * tints.length)];
-      const p = this.scene.add.image(x, y, texture)
-        .setDepth(1501).setTint(tint).setScale(scaleStart).setAlpha(0.9)
-        .setBlendMode(blend);
-      const angle = Math.random() * Math.PI * 2;
-      const speed = speedMin + Math.random() * (speedMax - speedMin);
-      const endX = x + Math.cos(angle) * speed;
-      const endY = y + Math.sin(angle) * speed + gravityY * (duration / 1000);
-      this.scene.tweens.add({
-        targets: p,
-        x: endX, y: endY,
-        alpha: 0, scale: 0.05,
-        duration: duration * (0.7 + Math.random() * 0.6),
-        ease: 'Power2',
-        onComplete: () => p.destroy(),
-      });
-    }
-  }
-
-  /** Hit sparks at a world position (player crit) */
+  /** Hit sparks at a world position (dodge / perfect-evade glint). */
   hitSparks(x: number, y: number, count: number = 12): void {
-    this.burstParticles(x, y, count, 'particle_spark',
-      [0xffffff, 0xffffaa, 0xffd700],
-      { speedMin: 20, speedMax: 55, scaleStart: 0.6, duration: 400 });
+    this.fx.glint(x, y, 0xffffff, 34, 200);
+    this.fx.sparks(x, y, count, 0xffe9a0, { speed: [80, 170], size: 0.8 });
   }
 
-  /** Gold particles (loot/gold pickup, monster kill) */
+  /** Gold coins popping out and bouncing (loot/gold pickup, monster kill). */
   goldBurst(x: number, y: number, count: number = 6): void {
-    this.burstParticles(x, y, count, 'particle_circle',
-      [0xffd700, 0xffaa00, 0xffcc33],
-      { speedMin: 15, speedMax: 35, duration: 500, gravityY: 80 });
+    const e = this.fx.e;
+    for (let i = 0; i < count; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
+      const sp = 50 + Math.random() * 50;
+      e.spawn('fx_coin', x, y, 420 + Math.random() * 160).normal().at(IMPACT_DEPTH - 2)
+        .vel(Math.cos(a) * sp, Math.sin(a) * sp - 70).accel(0, 420)
+        .scaleXY(0.9, 0.9, 0.2, 0.9).spinning(0, 0).fade(1, 0, 0, 5);
+    }
+    this.fx.motes(x, y - 4, Math.ceil(count / 2), 'fx_spark', [PAL.holy.core, PAL.holy.mid], { speed: [20, 50], size: [0.15, 0.25], life: [300, 500], rise: 30 });
   }
 
-  /** Heal particles at a world position */
+  /** Heal: green crosses and motes rising from a soft glow. */
   healBurst(x: number, y: number, count: number = 8): void {
-    this.burstParticles(x, y, count, 'particle_circle',
-      [0x2ecc71, 0x27ae60, 0x66ff66],
-      { speedMin: 10, speedMax: 30, duration: 600 });
+    const P = PAL.nature;
+    this.fx.glow(x, y, P.rim, 50, 420, 1.2, 0.55);
+    this.fx.ring(x, y + 16, P.mid, 6, 28, 380, { alpha: 0.8 });
+    this.fx.motes(x, y, Math.max(2, Math.round(count / 3)), 'fx_plus', [P.mid, P.core], { radius: 12, speed: [5, 15], rise: 60, drag: 2, size: [0.3, 0.45], life: [500, 750] });
+    this.fx.motes(x, y + 6, count, 'fx_ember', [P.mid, P.rim, P.core], { radius: 14, speed: [10, 30], rise: 70, size: [0.22, 0.34], life: [450, 700], spin: 4 });
   }
 
-  /** Death particles at monster kill location */
+  /** Monster death: a puff of dark smoke, motes of its colour, a fading soul wisp. */
   deathBurst(x: number, y: number, color: number = 0xff4444): void {
-    this.burstParticles(x, y, 10, 'particle_circle',
-      [color, 0x888888, 0x444444],
-      { speedMin: 20, speedMax: 50, scaleStart: 0.4, duration: 500, gravityY: 60 });
+    this.fx.flash(x, y, color, 22, 170);
+    this.fx.smoke(x, y + 4, 7, 0x5a5060, { radius: 12, speed: [25, 60], size: [0.4, 0.65], life: [480, 700], rise: 18, alpha: 0.8 });
+    this.fx.motes(x, y, 8, 'fx_ember', [color, 0xffffff], { radius: 8, speed: [30, 70], rise: 60, size: [0.22, 0.34], life: [400, 650], spin: 5 });
+    this.fx.ring(x, y + 16, color, 6, 30, 360, { alpha: 0.7 });
+    this.fx.e.spawn('fx_glow', x, y - 4, 700).color(color).vel(0, -45).scaleXY(0.3, 0.42, 0.12, 0.3).fade(0.7, 0, 0.1).wait(80);
   }
 
-  /** Level-up celebration particles */
+  /** Level-up: golden pillar, rune circle, rising stars. */
   levelUpBurst(x: number, y: number): void {
-    this.burstParticles(x, y, 20, 'particle_star',
-      [0xffd700, 0xff8800, 0xffcc33, 0xffffff],
-      { speedMin: 30, speedMax: 70, scaleStart: 0.5, duration: 800, gravityY: 40 });
+    const P = PAL.holy;
+    const gy = y + 16;
+    this.fx.decal(x, gy, 'fx_rune', P.rim, 40, 1100, { add: true, alpha: 0.95, spin: 1, grow: 1.1, fadeIn: 0.08 });
+    this.fx.beam(x, gy, P.mid, 150, 44, 900, { alpha: 0.85, fadeIn: 0.05 });
+    this.fx.beam(x, gy, 0xffffff, 130, 14, 700, { alpha: 0.8 });
+    this.fx.flash(x, y, P.mid, 36, 240);
+    this.fx.shock(x, gy, P.rim, 8, 70, 520, 0.8);
+    this.fx.ring(x, gy, P.mid, 10, 80, 640, { delay: 120 });
+    this.fx.motes(x, y, 16, 'fx_spark', [P.core, P.mid, P.rim], { radius: 18, speed: [20, 60], rise: 90, size: [0.25, 0.45], life: [700, 1100], spin: 3 });
+    this.fx.motes(x, y + 10, 10, 'fx_ember', [P.mid, P.rim], { radius: 22, speed: [10, 30], rise: 120, size: [0.25, 0.4], life: [700, 1000], spin: 4, delay: 150 });
   }
 
   // ── Low HP Danger Vignette ──────────────────────────────
@@ -351,6 +432,12 @@ export class VFXManager {
   // ── Cleanup ─────────────────────────────────────────────
 
   destroy(): void {
+    if (this.slowMoTimer) {
+      this.slowMoTimer.remove(false);
+      this.slowMoTimer = null;
+      this.scene.tweens.timeScale = 1;
+      this.scene.anims.globalTimeScale = 1;
+    }
     EventBus.off(GameEvents.COMBAT_DAMAGE, this.handleCombatDamage);
     EventBus.off(GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp);
     EventBus.off(GameEvents.PLAYER_DIED, this.handlePlayerDied);

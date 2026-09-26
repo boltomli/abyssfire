@@ -27,6 +27,7 @@ import { SkillEffectSystem } from '../systems/SkillEffectSystem';
 import { MobileControlsSystem, isMobileDevice } from '../systems/MobileControlsSystem';
 import { LightingSystem } from '../systems/LightingSystem';
 import { VFXManager } from '../systems/VFXManager';
+import { classifyHit, HIT_PROFILES, type HitWeight } from '../systems/HitFeedback';
 import { WeatherSystem } from '../systems/WeatherSystem';
 import { TrailRenderer } from '../systems/TrailRenderer';
 import { StatusEffectSystem } from '../systems/StatusEffectSystem';
@@ -40,6 +41,7 @@ import { audioManager } from '../systems/audio/AudioManager';
 import { applyColorGrading } from '../graphics/ColorGradePipeline';
 import { profileForQuality, resolveRenderQuality } from '../rendering/RenderQuality';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
+import { CAMP_THEMES } from '../data/camp-themes';
 import { setCurrentZonePalette } from '../graphics/ZonePalette';
 import { AllClasses } from '../data/classes/index';
 import { AllMaps } from '../data/maps/index';
@@ -49,7 +51,7 @@ import { LoreByZone } from '../data/loreCollectibles';
 import type { LoreEntry } from '../data/loreCollectibles';
 import { NPCDefinitions } from '../data/npcs';
 import { AllQuests } from '../data/quests/all_quests';
-import type { MapData, ClassDefinition, ItemInstance, SaveData, HiddenArea, SubDungeonEntrance, StoryDecoration, SubDungeonMapData } from '../data/types';
+import type { MapData, ClassDefinition, ItemInstance, SaveData, HiddenArea, SubDungeonEntrance, StoryDecoration, SubDungeonMapData, SkillDefinition } from '../data/types';
 import { AllSubDungeons, SubDungeonMiniBosses } from '../data/subDungeons';
 import { DungeonSystem } from '../systems/DungeonSystem';
 import type { DungeonRunState, DungeonFloorConfig } from '../systems/DungeonSystem';
@@ -60,6 +62,7 @@ import { DungeonBossDef, DungeonMidBossDef } from '../data/dungeonData';
 import { computeNPCIndicator } from '../ui/QuestNPCIndicators';
 import type { UIScene } from './UIScene';
 import { GameSession } from '../game/GameSession';
+import { ZoneTerrain } from '../graphics/terrain/ZoneTerrain';
 
 const TILE_KEYS = ['tile_grass', 'tile_dirt', 'tile_stone', 'tile_water', 'tile_wall', 'tile_camp', 'tile_camp_wall'];
 const CAMPFIRE_RECOVERY_RADIUS = 5;
@@ -67,6 +70,12 @@ const CAMPFIRE_RECOVERY_RADIUS_SQ = CAMPFIRE_RECOVERY_RADIUS * CAMPFIRE_RECOVERY
 const CAMPFIRE_HP_REGEN_MULTIPLIER = 50;
 const CAMPFIRE_MANA_REGEN_MULTIPLIER = 50;
 const ZONE_FLOATING_TEXT_DEPTH = 4500;
+/** Spark/flash tint for each class's basic-attack impacts. */
+const CLASS_IMPACT_COLORS: Record<string, number> = {
+  warrior: 0xffd98a,
+  mage: 0xc7a6ff,
+  rogue: 0x9dffc8,
+};
 const ZONE_SCREEN_UI_DEPTH = 5000;
 
 function fs(basePx: number): string {
@@ -98,6 +107,8 @@ export class ZoneScene extends Phaser.Scene {
   achievementSystem!: AchievementSystem;
   saveSystem!: SaveSystem;
   private tileSprites: (Phaser.GameObjects.Image | null)[][] = [];
+  /** Zone-themed ground / wall textures and wall overlays. */
+  private terrain: ZoneTerrain | null = null;
   private decorSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private exitSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private campDecorSprites: Map<string, Phaser.GameObjects.GameObject> = new Map();
@@ -105,6 +116,8 @@ export class ZoneScene extends Phaser.Scene {
   private campDecorPositions: { col: number; row: number; type: string }[] = [];
   private tileWorldPositions: { x: number; y: number }[][] = [];
   private decorWorldPositions: Array<{ key: string; type: string; x: number; y: number }> = [];
+  /** Visible tall decorations (trees, tents, statues) checked each frame for player occlusion. */
+  private occluderDecor: Set<Phaser.GameObjects.Image> = new Set();
   private campDecorWorldPositions: Array<{ key: string; type: string; x: number; y: number }> = [];
   private exitLookup: Map<string, MapData['exits'][number]> = new Map();
   private visibleTiles: Set<number> = new Set();
@@ -250,6 +263,7 @@ export class ZoneScene extends Phaser.Scene {
   // ─── Performance Pools ─────────────────────────────────────────────
   /** Pool of floating damage text objects to avoid per-hit allocation. */
   private floatingTextPool: Phaser.GameObjects.Text[] = [];
+  private damageTextStacks = new Map<string, { time: number; index: number }>();
 
   /** Squared distance beyond which monster AI updates are skipped (monsters still render). */
   private static readonly MONSTER_AI_CULL_DIST_SQ = 30 * 30;
@@ -350,6 +364,7 @@ export class ZoneScene extends Phaser.Scene {
     this.lastVisibleTileBounds = '';
     this.exitLabels = new Map();
     this.decorSprites = new Map();
+    this.occluderDecor = new Set();
     this.exitSprites = new Map();
     this.campDecorSprites = new Map();
     this.campParticles = new Map();
@@ -421,7 +436,9 @@ export class ZoneScene extends Phaser.Scene {
       }
     }
 
-    // Initial tile render
+    // Initial tile render (zone-themed terrain; on-screen transitions built now, the rest time-sliced)
+    this.terrain?.destroy();
+    this.terrain = new ZoneTerrain(this, this.mapData);
     this.updateVisibleTiles();
 
     // Camera
@@ -963,6 +980,14 @@ export class ZoneScene extends Phaser.Scene {
     this.checkStoryDecorationProximity();
     this.checkSubDungeonEntranceProximity();
 
+    this.updateDecorOcclusion(delta);
+    if (this.terrain) {
+      if (this.terrain.hasPending()) {
+        this.terrain.flush(4, (c, r) => !!this.tileSprites[r]?.[c], (c, r, key) => { this.tileSprites[r]?.[c]?.setTexture(key); });
+      }
+      this.terrain.updateOcclusion(this.player.sprite.x, this.player.sprite.y, delta);
+    }
+
     // Throttled viewport tile update
     if (this.simulationScheduler.due('world-visibility', time, 100)) {
       this.lastTileUpdate = time;
@@ -1082,42 +1107,37 @@ export class ZoneScene extends Phaser.Scene {
   // --- Viewport culling tile rendering ---
   private updateVisibleTiles(): void {
     const margin = 4;
-    const { minCol, maxCol, minRow, maxRow } = this.getVisibleTileBounds(margin);
+    const { minCol, maxCol, minRow, maxRow, left, right, top, bottom } = this.getVisibleTileBounds(margin);
     const boundsKey = `${minCol}:${maxCol}:${minRow}:${maxRow}`;
     if (boundsKey === this.lastVisibleTileBounds) return;
     this.lastVisibleTileBounds = boundsKey;
     const newVisible = new Set<number>();
+    if (this.terrain && this.player) {
+      this.terrain.beginPass(Math.round(this.player.tileCol), Math.round(this.player.tileRow), 2);
+    }
 
     for (let row = minRow; row <= maxRow; row++) {
       for (let col = minCol; col <= maxCol; col++) {
         const pos = this.tileWorldPositions[row][col];
+        // The cart-space bounds cover about twice the iso view; skip tiles outside
+        // the expanded world rect (extra room below for tall wall overlays).
+        if (pos.x < left - 32 || pos.x > right + 32 || pos.y < top - 16 || pos.y > bottom + 64) continue;
         const tileIndex = row * this.mapData.cols + col;
         const exitKey = `${col},${row}`;
         newVisible.add(tileIndex);
         if (!this.tileSprites[row][col]) {
-          const tileType = this.mapData.tiles[row][col];
-          const tiles = this.mapData.tiles;
-          const tr = row > 0 ? tiles[row - 1][col] : tileType;
-          const tl = col > 0 ? tiles[row][col - 1] : tileType;
-          const br = col < this.mapData.cols - 1 ? tiles[row][col + 1] : tileType;
-          const bl = row < this.mapData.rows - 1 ? tiles[row + 1][col] : tileType;
-          const needsBlend = tr !== tileType || tl !== tileType || br !== tileType || bl !== tileType;
           let tileKey: string;
-          if (needsBlend) {
-            tileKey = SpriteGenerator.generateTransitionTile(this, tileType, [tr, tl, br, bl]);
-          } else if (tileType === 5 && this.mapData.theme) {
-            tileKey = `tile_camp_ground_${this.mapData.theme}`;
-            if (!this.textures.exists(tileKey)) tileKey = 'tile_camp';
-          } else if (tileType === 6 && this.mapData.theme) {
-            tileKey = `tile_camp_wall_${this.mapData.theme}`;
-            if (!this.textures.exists(tileKey)) tileKey = 'tile_camp_wall';
+          if (this.terrain) {
+            tileKey = this.terrain.groundKey(col, row);
+            this.terrain.showOverlay(col, row, pos.x, pos.y);
           } else {
-            const variantCount = SpriteGenerator.TILE_VARIANTS;
-            const variant = ((col * 374761393 + row * 668265263) >>> 0) % variantCount;
+            const tileType = this.mapData.tiles[row][col];
+            const variant = ((col * 374761393 + row * 668265263) >>> 0) % SpriteGenerator.TILE_VARIANTS;
             const variantKey = `${TILE_KEYS[tileType] || 'tile_grass'}_${variant}`;
             tileKey = this.textures.exists(variantKey) ? variantKey : (TILE_KEYS[tileType] || 'tile_grass');
           }
           const tile = this.acquireTileImage(pos.x, pos.y, tileKey);
+          if (this.terrain) tile.setScale(this.terrain.tileScale(tileKey));
           // Depth batching: use row-based depth so all tiles in the same row
           // share the same depth value, reducing Phaser's depth sort overhead.
           tile.setDepth(row);
@@ -1165,6 +1185,7 @@ export class ZoneScene extends Phaser.Scene {
           this.releaseTileImage(sprite);
           this.tileSprites[r][c] = null;
         }
+        this.terrain?.hideOverlay(c, r);
         const exitSprite = this.exitSprites.get(exitKey);
         if (exitSprite) {
           exitSprite.destroy();
@@ -1198,10 +1219,11 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private updateVisibleDecorations(): void {
-    const { left, right, top, bottom } = this.getExpandedWorldBounds(TILE_WIDTH * 5, TILE_HEIGHT * 5);
+    const { left, right, top, bottom } = this.getExpandedWorldBounds(TILE_WIDTH * 5, TILE_HEIGHT * 7);
     const visibleDecorKeys = new Set<string>();
 
-    for (const decor of this.decorWorldPositions) {
+    for (let i = 0; i < this.decorWorldPositions.length; i++) {
+      const decor = this.decorWorldPositions[i];
       if (decor.x < left || decor.x > right || decor.y < top || decor.y > bottom) continue;
 
       visibleDecorKeys.add(decor.key);
@@ -1209,8 +1231,7 @@ export class ZoneScene extends Phaser.Scene {
         const texKey = `decor_${decor.type}`;
         SpriteGenerator.ensureDecoration(this, decor.type);
         if (this.textures.exists(texKey)) {
-          const sprite = this.add.image(decor.x, decor.y - 6, texKey).setScale(1 / TEXTURE_SCALE);
-          sprite.setDepth(decor.y + 20);
+          const sprite = this.placeDecorSprite(decor.x, decor.y, texKey, i + 1);
           this.decorSprites.set(decor.key, sprite);
         }
       }
@@ -1219,8 +1240,82 @@ export class ZoneScene extends Phaser.Scene {
     // Remove out-of-view decorations
     for (const [key, sprite] of this.decorSprites) {
       if (!visibleDecorKeys.has(key)) {
+        this.occluderDecor.delete(sprite);
         sprite.destroy();
         this.decorSprites.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Place a decoration so its base sits on the tile: origin at the drawer's
+   * ground line, small deterministic jitter/scale for variety, and depth by
+   * layer (flat ground cover under everything, upright props sorted with
+   * characters by their base).
+   */
+  private placeDecorSprite(x: number, y: number, texKey: string, seed: number): Phaser.GameObjects.Image {
+    const meta = SpriteGenerator.getDecorMeta(texKey);
+    const h = ((seed * 2654435761) >>> 0) / 4294967296;
+    const h2 = ((seed * 1597334677 + 12345) >>> 0) / 4294967296;
+    const jx = meta ? (h - 0.5) * 18 : 0;
+    const jy = meta ? (h2 - 0.5) * 8 : -6;
+    const scale = meta ? 0.9 + ((h + h2) % 1) * 0.2 : 1;
+    const sprite = this.add.image(x + jx, y + jy, texKey)
+      .setOrigin(0.5, meta ? meta.anchorY : 0.5)
+      .setScale(scale / TEXTURE_SCALE);
+    if (!meta) {
+      sprite.setDepth(y + 20);
+    } else if (meta.flat) {
+      sprite.setDepth(y + jy + 5);
+    } else {
+      // Player depth is y+100, monsters y+50: +70 keeps a character one tile
+      // in front drawn over the prop and one tile behind drawn under it.
+      sprite.setDepth(y + jy + 70);
+      if (meta.tall) this.occluderDecor.add(sprite);
+    }
+    return sprite;
+  }
+
+  /** Reused scratch list of occlusion targets (player + nearby living monsters). */
+  private occlusionTargets: number[] = [];
+
+  /**
+   * Fade tall props that hide the player, or a living monster near the player,
+   * standing behind them; restore smoothly when clear.
+   */
+  private updateDecorOcclusion(delta: number): void {
+    if (this.occluderDecor.size === 0 || !this.player?.sprite) return;
+    const px = this.player.sprite.x;
+    const py = this.player.sprite.y;
+    const targets = this.occlusionTargets;
+    targets.length = 0;
+    targets.push(px, py);
+    // Monsters within ~6 tiles of the player (iso: 6 tiles ≈ 384 × 192 px).
+    for (const m of this.monsters) {
+      if (!m.isAlive() || !m.sprite) continue;
+      const mx = m.sprite.x;
+      const my = m.sprite.y;
+      if (Math.abs(mx - px) < 384 && Math.abs(my - py) < 192) targets.push(mx, my);
+    }
+    const k = Math.min(1, delta / 110);
+    for (const sprite of this.occluderDecor) {
+      const halfW = sprite.displayWidth * 0.42;
+      const baseY = sprite.y;
+      const topY = baseY - sprite.displayHeight * sprite.originY;
+      let target = 1;
+      for (let i = 0; i < targets.length; i += 2) {
+        const tx = targets[i];
+        const ty = targets[i + 1];
+        // Behind the prop (depth-sorted under it) and the body (~60px above the
+        // feet) overlaps the sprite's bounds.
+        if (Math.abs(sprite.x - tx) < halfW && ty < baseY - 28 && ty > topY + 12) {
+          target = 0.25;
+          break;
+        }
+      }
+      if (sprite.alpha !== target) {
+        const a = sprite.alpha + (target - sprite.alpha) * k;
+        sprite.setAlpha(Math.abs(a - target) < 0.02 ? target : a);
       }
     }
   }
@@ -1335,8 +1430,8 @@ export class ZoneScene extends Phaser.Scene {
       } else if (decor.type === 'torch') {
         this.lighting.addLight({
           x: pos.x,
-          y: pos.y - 12,
-          radius: 60,
+          y: pos.y - 40,
+          radius: 70,
           color: 0xff6600,
           intensity: 0.65,
           flicker: true,
@@ -1347,8 +1442,9 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private updateCampDecorations(): void {
-    const { left, right, top, bottom } = this.getExpandedWorldBounds(TILE_WIDTH * 4, TILE_HEIGHT * 4);
+    const { left, right, top, bottom } = this.getExpandedWorldBounds(TILE_WIDTH * 4, TILE_HEIGHT * 6);
     const visibleKeys = new Set<string>();
+    const theme = this.mapData.theme;
 
     for (const decor of this.campDecorWorldPositions) {
       if (decor.x < left || decor.x > right || decor.y < top || decor.y > bottom) continue;
@@ -1357,78 +1453,73 @@ export class ZoneScene extends Phaser.Scene {
       visibleKeys.add(key);
       if (this.campDecorSprites.has(key)) continue;
 
-      const texKey = `camp_${decor.type}`;
+      const texKey = SpriteGenerator.ensureCampDecoration(this, decor.type, theme);
       if (!this.textures.exists(texKey)) continue;
 
-      const sprite = this.add.image(decor.x, decor.y - 16, texKey).setScale(1 / TEXTURE_SCALE);
-      sprite.setDepth(decor.y + 10);
+      const meta = SpriteGenerator.getDecorMeta(texKey);
+      const sprite = this.add.image(decor.x, decor.y, texKey)
+        .setOrigin(0.5, meta ? meta.anchorY : 0.5)
+        .setScale(1 / TEXTURE_SCALE);
+      sprite.setDepth(meta?.flat ? decor.y + 5 : decor.y + 70);
+      if (meta?.tall && decor.type === 'tent') this.occluderDecor.add(sprite);
       this.campDecorSprites.set(key, sprite);
 
-      // Torch: small particle flame on top of pole
-      if (decor.type === 'torch') {
-        const torchFire = this.add.particles(decor.x, decor.y - 28, 'particle_flame', {
-          speed: { min: 5, max: 20 },
-          angle: { min: 255, max: 285 },
-          scale: { start: 0.5, end: 0.05 },
-          alpha: { start: 0.85, end: 0 },
-          lifespan: { min: 250, max: 500 },
-          frequency: 80,
-          tint: [0xff6600, 0xff8800, 0xffaa00],
-          blendMode: Phaser.BlendModes.ADD,
-          emitting: true,
+      if (decor.type === 'torch' || decor.type === 'campfire') {
+        const isFire = decor.type === 'campfire';
+        const flameKey = SpriteGenerator.ensureCampDecoration(this, 'flame', theme);
+        const flameY = isFire ? decor.y - 6 : decor.y - 62;
+        const flameScale = isFire ? 1 : 0.5;
+        const flameColor = this.getCampFlameColor();
+        // Warm pulsing glow behind the flame.
+        const glow = this.add.circle(decor.x, flameY - (isFire ? 12 : 6), isFire ? 46 : 18, flameColor, isFire ? 0.12 : 0.14);
+        glow.setBlendMode(Phaser.BlendModes.ADD);
+        glow.setDepth(decor.y + 69);
+        this.tweens.add({
+          targets: glow,
+          alpha: { from: isFire ? 0.08 : 0.1, to: isFire ? 0.18 : 0.22 },
+          scaleX: { from: 0.9, to: 1.1 }, scaleY: { from: 0.9, to: 1.1 },
+          duration: isFire ? 700 : 450 + Math.random() * 200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
         });
-        torchFire.setDepth(decor.y + 12);
-        this.campParticles.set(key, torchFire);
+        this.campDecorSprites.set(`${key}|glow`, glow);
+        if (this.textures.exists(flameKey)) {
+          const meta2 = SpriteGenerator.getDecorMeta(flameKey);
+          const flame = this.add.sprite(decor.x, flameY, flameKey)
+            .setOrigin(0.5, meta2 ? meta2.anchorY : 0.9)
+            .setScale(flameScale / TEXTURE_SCALE)
+            .setDepth(decor.y + 71);
+          if (this.anims.exists(`${flameKey}_anim`)) {
+            flame.play({ key: `${flameKey}_anim`, startFrame: Math.floor(Math.random() * 6) });
+          }
+          // Cheap flicker on top of the frame animation.
+          this.tweens.add({
+            targets: flame,
+            scaleY: { from: flameScale / TEXTURE_SCALE * 0.94, to: flameScale / TEXTURE_SCALE * 1.08 },
+            duration: 180 + Math.random() * 120, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+          });
+          this.campDecorSprites.set(`${key}|flame`, flame);
+        }
       }
-      // Campfire: particle fire + glow
       if (decor.type === 'campfire') {
-        // Fire particles
-        const fireEmitter = this.add.particles(decor.x, decor.y - 20, 'particle_flame', {
-          speed: { min: 10, max: 40 },
-          angle: { min: 250, max: 290 },
-          scale: { start: 0.8, end: 0.1 },
-          alpha: { start: 0.9, end: 0 },
-          lifespan: { min: 400, max: 800 },
-          frequency: 50,
-          tint: [0xff6600, 0xff8800, 0xffaa00, 0xffcc22],
-          blendMode: Phaser.BlendModes.ADD,
-          emitting: true,
-        });
-        fireEmitter.setDepth(decor.y + 12);
-        this.campParticles.set(key, fireEmitter);
-        // Spark particles (smaller, faster)
-        const sparkKey = `${key}_spark`;
-        const sparkEmitter = this.add.particles(decor.x, decor.y - 18, 'particle_circle', {
-          speed: { min: 15, max: 50 },
-          angle: { min: 240, max: 300 },
-          scale: { start: 0.4, end: 0 },
+        // Sparks drifting up from the fire.
+        const sparkEmitter = this.add.particles(decor.x, decor.y - 14, 'particle_circle', {
+          speed: { min: 15, max: 45 },
+          angle: { min: 245, max: 295 },
+          scale: { start: 0.3, end: 0 },
           alpha: { start: 1, end: 0 },
-          lifespan: { min: 300, max: 600 },
-          frequency: 150,
+          lifespan: { min: 400, max: 900 },
+          frequency: 180,
           tint: [0xffdd44, 0xff8800],
           blendMode: Phaser.BlendModes.ADD,
           emitting: true,
         });
-        sparkEmitter.setDepth(decor.y + 13);
-        this.campParticles.set(sparkKey, sparkEmitter);
-        // Glow circle (pulsing)
-        const glow = this.add.circle(decor.x, decor.y - 8, 60, 0xff8800, 0.08);
-        glow.setBlendMode(Phaser.BlendModes.ADD);
-        glow.setDepth(decor.y + 5);
-        this.tweens.add({
-          targets: glow,
-          alpha: { from: 0.06, to: 0.14 },
-          scaleX: { from: 0.9, to: 1.1 }, scaleY: { from: 0.9, to: 1.1 },
-          duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-        });
-        const glowKey = `${key}_glow`;
-        this.campDecorSprites.set(glowKey, glow as unknown as Phaser.GameObjects.Image);
+        sparkEmitter.setDepth(decor.y + 72);
+        this.campParticles.set(`${key}|spark`, sparkEmitter);
       }
-      // Banner sway
+      // Banner sway (pivot at the pole base)
       if (decor.type === 'banner') {
         this.tweens.add({
           targets: sprite,
-          angle: { from: -3, to: 3 },
+          angle: { from: -1.5, to: 1.5 },
           duration: 1500 + Math.random() * 500,
           yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
         });
@@ -1436,20 +1527,23 @@ export class ZoneScene extends Phaser.Scene {
     }
 
     for (const [key, sprite] of this.campDecorSprites) {
-      const baseKey = key.replace(/_glow$/, '');
-      if (!visibleKeys.has(baseKey)) {
+      if (!visibleKeys.has(key.split('|')[0])) {
+        this.occluderDecor.delete(sprite as Phaser.GameObjects.Image);
         sprite.destroy();
         this.campDecorSprites.delete(key);
       }
     }
-    // Clean up particle emitters for off-screen campfires
     for (const [key, emitter] of this.campParticles) {
-      const baseKey = key.replace(/_spark$/, '');
-      if (!visibleKeys.has(baseKey)) {
+      if (!visibleKeys.has(key.split('|')[0])) {
         emitter.destroy();
         this.campParticles.delete(key);
       }
     }
+  }
+
+  private getCampFlameColor(): number {
+    const theme = this.mapData.theme;
+    return theme ? CAMP_THEMES[theme]?.torchFlame ?? 0xff8800 : 0xff8800;
   }
 
   private handleKeyboardMovement(delta: number): void {
@@ -1806,18 +1900,40 @@ export class ZoneScene extends Phaser.Scene {
       EventBus.emit(GameEvents.PLAYER_MANA_CHANGED, { mana: this.player.mana, maxMana: this.player.maxMana });
     }
 
+    let releaseDelay: number;
     if (skill.buff || skill.aoe || skill.range > 2) {
-      this.player.playCast();
+      releaseDelay = this.player.playCast();
     } else {
       const animTarget = this.findPreferredSkillTarget();
       if (animTarget) {
-        this.player.playAttack(animTarget.sprite.x, animTarget.sprite.y);
+        releaseDelay = this.player.playAttack(animTarget.sprite.x, animTarget.sprite.y);
       } else {
-        this.player.playCast();
+        releaseDelay = this.player.playCast();
       }
     }
 
+    // Blinks stay instant so they work as escapes; everything else resolves
+    // on the animation's release/contact beat so VFX and damage land together.
+    if (skillId === 'teleport' || skillId === 'shadow_step' || releaseDelay <= 0) {
+      this.releaseSkill(skillId, skill, level, target, time, scaledManaCost);
+      return;
+    }
+    this.time.delayedCall(releaseDelay, () => {
+      if (this.player.hp <= 0 || this.isTransitioning) return;
+      // The original target may have died during the wind-up; retarget.
+      const liveTarget = target && target.isAlive() ? target : this.findPreferredSkillTarget();
+      this.releaseSkill(skillId, skill, level, liveTarget, this.time.now, scaledManaCost);
+    });
+  }
 
+  private releaseSkill(
+    skillId: string,
+    skill: SkillDefinition,
+    level: number,
+    target: Monster | null,
+    time: number,
+    scaledManaCost: number,
+  ): void {
     // ── Teleport: instant reposition to walkable tile near target ──
     if (skillId === 'teleport') {
       const pointer = this.input.activePointer;
@@ -1898,7 +2014,7 @@ export class ZoneScene extends Phaser.Scene {
       // Also deal the skill's base damage
       if (skill.damageMultiplier > 0) {
         const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), target.toCombatEntity(), skill, level, this.player.skillLevels);
-        target.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
+        target.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
         this.applySteal(result);
         this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit, false, false, skill.damageType);
         if (!target.isAlive()) this.onMonsterKilled(target);
@@ -1917,7 +2033,7 @@ export class ZoneScene extends Phaser.Scene {
       for (const t of aoeTargets) {
         if (skill.damageMultiplier > 0) {
           const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), t.toCombatEntity(), skill, level, this.player.skillLevels);
-          t.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
+          t.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
           this.applySteal(result);
           this.showDamageText(t.sprite.x, t.sprite.y, result.damage, result.isCrit, false, false, skill.damageType);
           if (!t.isAlive()) { this.onMonsterKilled(t); continue; }
@@ -1975,30 +2091,6 @@ export class ZoneScene extends Phaser.Scene {
     if (skill.aoe && scaledAoeRadius > 0) {
       const aoeTargets = this.monsterGrid.queryRadius(this.player.tileCol, this.player.tileRow, scaledAoeRadius)
         .filter(m => m.isAlive());
-      for (const t of aoeTargets) {
-        const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), t.toCombatEntity(), skill, level, this.player.skillLevels);
-        // Combustion: +50% damage on burning targets
-        let finalDmg = result.damage;
-        if (skillId === 'combustion' && this.statusEffects.hasEffect(t.id, 'burn')) {
-          finalDmg = Math.floor(finalDmg * 1.5);
-        }
-        t.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y);
-        this.applySteal(result);
-        this.showDamageText(t.sprite.x, t.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
-        // Apply status effects from skill damage type
-        this.applySkillStatusEffect(t, skill, finalDmg, time);
-        if (!t.isAlive()) this.onMonsterKilled(t);
-        if (this.vfx && skill.damageType !== 'physical') {
-          const impactColor = skillId.includes('fire') || skillId === 'meteor' ? 0xff6600
-            : skillId.includes('ice') || skillId === 'blizzard' ? 0x4488ff
-            : skillId.includes('lightning') || skillId === 'chain_lightning' ? 0x5dade2
-            : 0xf39c12;
-          this.vfx.skillImpactBloom(t.sprite.x, t.sprite.y - 16, impactColor);
-        }
-      }
-      if (this.vfx && aoeTargets.length > 0) {
-        this.vfx.cameraShake(100, 0.004 + aoeTargets.length * 0.001);
-      }
       if (skillId === 'chain_lightning') {
         this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
           undefined, undefined,
@@ -2007,30 +2099,81 @@ export class ZoneScene extends Phaser.Scene {
         this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
           this.player.sprite.x, this.player.sprite.y);
       }
+      // Effects with a fall/travel time (meteor) land their damage on impact.
+      const aoeDelay = this.skillEffects.getProjectileTravelMs(skillId, this.player.sprite.x, this.player.sprite.y, this.player.sprite.x, this.player.sprite.y);
+      const applyAoe = (): void => {
+        for (const t of aoeTargets) {
+          // Something else may have killed it during the fall delay.
+          if (!t.isAlive()) continue;
+          const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), t.toCombatEntity(), skill, level, this.player.skillLevels);
+          // Combustion: +50% damage on burning targets
+          let finalDmg = result.damage;
+          if (skillId === 'combustion' && this.statusEffects.hasEffect(t.id, 'burn')) {
+            finalDmg = Math.floor(finalDmg * 1.5);
+          }
+          t.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
+          this.applySteal(result);
+          this.showDamageText(t.sprite.x, t.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
+          // Apply status effects from skill damage type
+          this.applySkillStatusEffect(t, skill, finalDmg, this.time.now);
+          if (!t.isAlive()) this.onMonsterKilled(t);
+          if (this.vfx && skill.damageType !== 'physical') {
+            const impactColor = skillId.includes('fire') || skillId === 'meteor' ? 0xff6600
+              : skillId.includes('ice') || skillId === 'blizzard' ? 0x4488ff
+              : skillId.includes('lightning') || skillId === 'chain_lightning' ? 0x5dade2
+              : 0xf39c12;
+            this.vfx.skillImpactBloom(t.sprite.x, t.sprite.y - 16, impactColor);
+          }
+        }
+        if (this.vfx && aoeTargets.length > 0) {
+          this.vfx.cameraShake(100, 0.004 + aoeTargets.length * 0.001);
+        }
+      };
+      if (aoeDelay > 0) {
+        this.time.delayedCall(aoeDelay, () => {
+          if (this.player.hp <= 0 || this.isTransitioning) return;
+          applyAoe();
+        });
+      } else {
+        applyAoe();
+      }
     } else if (target) {
-      const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), target.toCombatEntity(), skill, level, this.player.skillLevels);
-      // Combustion: +50% damage on burning targets
-      let finalDmg = result.damage;
-      if (skillId === 'combustion' && this.statusEffects.hasEffect(target.id, 'burn')) {
-        finalDmg = Math.floor(finalDmg * 1.5);
-      }
-      target.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y);
-      this.applySteal(result);
-      this.showDamageText(target.sprite.x, target.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
-      // Apply status effects from skill damage type
-      this.applySkillStatusEffect(target, skill, finalDmg, time);
-      if (!target.isAlive()) this.onMonsterKilled(target);
-      this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
-        target.sprite.x, target.sprite.y);
-      if (this.vfx) {
-        const impactColor = skill.damageType !== 'physical' ? 0xff6600 : 0xf1c40f;
-        this.vfx.skillImpactBloom(target.sprite.x, target.sprite.y - 16, impactColor);
-      }
-      if (this.trails && (skill.damageType !== 'physical' || skill.damageMultiplier > 1.5)) {
-        const scorchType = skillId.includes('fire') || skillId === 'meteor' ? 'fire'
-          : skillId.includes('ice') || skillId === 'blizzard' ? 'ice'
-          : 'lightning';
-        this.trails.stampGround(target.sprite.x, target.sprite.y, scorchType);
+      const fromX = this.player.sprite.x;
+      const fromY = this.player.sprite.y;
+      this.skillEffects.play(skillId, fromX, fromY, target.sprite.x, target.sprite.y);
+      const applyHit = (): void => {
+        const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), target.toCombatEntity(), skill, level, this.player.skillLevels);
+        // Combustion: +50% damage on burning targets
+        let finalDmg = result.damage;
+        if (skillId === 'combustion' && this.statusEffects.hasEffect(target.id, 'burn')) {
+          finalDmg = Math.floor(finalDmg * 1.5);
+        }
+        target.takeDamage(finalDmg, fromX, fromY, { isCrit: result.isCrit });
+        this.applySteal(result);
+        this.showDamageText(target.sprite.x, target.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
+        // Apply status effects from skill damage type
+        this.applySkillStatusEffect(target, skill, finalDmg, this.time.now);
+        if (!target.isAlive()) this.onMonsterKilled(target);
+        if (this.vfx) {
+          const impactColor = skill.damageType !== 'physical' ? 0xff6600 : 0xf1c40f;
+          this.vfx.skillImpactBloom(target.sprite.x, target.sprite.y - 16, impactColor);
+        }
+        if (this.trails && (skill.damageType !== 'physical' || skill.damageMultiplier > 1.5)) {
+          const scorchType = skillId.includes('fire') || skillId === 'meteor' ? 'fire'
+            : skillId.includes('ice') || skillId === 'blizzard' ? 'ice'
+            : 'lightning';
+          this.trails.stampGround(target.sprite.x, target.sprite.y, scorchType);
+        }
+      };
+      // Projectiles deal damage on arrival, not on launch.
+      const travelMs = this.skillEffects.getProjectileTravelMs(skillId, fromX, fromY, target.sprite.x, target.sprite.y);
+      if (travelMs > 0) {
+        this.time.delayedCall(travelMs, () => {
+          if (!target.isAlive() || this.player.hp <= 0 || this.isTransitioning) return;
+          applyHit();
+        });
+      } else {
+        applyHit();
       }
     }
   }
@@ -2052,110 +2195,8 @@ export class ZoneScene extends Phaser.Scene {
       if (this.statusEffects.isImmobilized(monster.id)) continue;
       if (time - monster.lastAttackTime >= monster.definition.attackSpeed) {
         monster.lastAttackTime = time;
-        monster.playAttack(this.player.sprite.x, this.player.sprite.y);
-        const result = this.combatSystem.calculateDamage(monster.toCombatEntity(), this.player.toCombatEntity(this.getEquipStats()));
-        if (this.dodgeController.isInvulnerable(time)) {
-          if (this.dodgeController.claimAvoidanceReward(time)) {
-            this.player.gainSpirit('dodge');
-          }
-          this.showDamageText(this.player.sprite.x, this.player.sprite.y, 0, false, true);
-          EventBus.emit(GameEvents.COMBAT_DAMAGE, {
-            targetId: 'player', damage: 0, isDodged: true,
-            isCrit: false, isPlayerTarget: true,
-            targetMaxHP: this.player.maxHp,
-          });
-          if (this.vfx) {
-            this.vfx.hitSparks(this.player.sprite.x, this.player.sprite.y - 16, 6);
-          }
-        } else if (result.isDodged) {
-          this.player.gainSpirit('dodge');
-          this.showDamageText(this.player.sprite.x, this.player.sprite.y, 0, false, true);
-          // dodgeCounter: after dodging, next attack is guaranteed crit
-          const eqDc = this.getEquipStats();
-          if (eqDc.dodgeCounter > 0) {
-            this._dodgeCounterReady = true;
-            EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.dodgeCounterReady'), type: 'combat' });
-          }
-        } else {
-          // Difficulty damage scaling is already applied at monster spawn time via DifficultySystem.scaleMonster
-          const finalDmg = result.damage;
-          this.player.hp = Math.max(0, this.player.hp - finalDmg);
-
-          // Thorns heal (set bonus: recover % maxHp on hit taken)
-          const eq = this.getEquipStats();
-          if (eq.thornsHeal > 0 && this.player.hp > 0) {
-            const heal = Math.floor(this.player.maxHp * eq.thornsHeal / 100);
-            this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
-            EventBus.emit(GameEvents.PLAYER_HEALTH_CHANGED, { hp: this.player.hp, maxHp: this.player.maxHp });
-          }
-
-          this.player.playHurt(monster.sprite.x, monster.sprite.y);
-          this.showDamageText(this.player.sprite.x, this.player.sprite.y, finalDmg, result.isCrit, false, true);
-          if (monster.definition.attackRange > 2.5) {
-            const projColor = monster.definition.spriteKey.includes('fire') || monster.definition.spriteKey.includes('phoenix')
-              ? 0xff6600 : monster.definition.spriteKey.includes('ice') ? 0x4488ff : 0xcc44cc;
-            this.skillEffects.playMonsterRangedAttack(
-              monster.sprite.x, monster.sprite.y,
-              this.player.sprite.x, this.player.sprite.y, projColor,
-            );
-          } else {
-            this.skillEffects.playMonsterAttack(this.player.sprite.x, this.player.sprite.y);
-          }
-          EventBus.emit(GameEvents.COMBAT_DAMAGE, {
-            targetId: 'player', damage: finalDmg, isDodged: false,
-            isCrit: result.isCrit, isPlayerTarget: true,
-            targetMaxHP: this.player.maxHp,
-          });
-
-          // Monster applies status effects to player based on monster type
-          this.applyMonsterStatusEffect(monster, time);
-
-          // ── Elite Affix: on-hit effects ──
-          if (monster.eliteAffixes.length > 0) {
-            const affixStats = this.eliteAffixSystem.getCombinedStats(monster.eliteAffixes);
-
-            // Fire Enhanced: extra fire damage
-            if (affixStats.extraFireDamage > 0) {
-              const fireDmg = Math.floor(finalDmg * affixStats.extraFireDamage);
-              if (fireDmg > 0) {
-                this.player.hp = Math.max(0, this.player.hp - fireDmg);
-                this.showDamageText(this.player.sprite.x + 10, this.player.sprite.y - 5, fireDmg, false, false, true, 'fire');
-                EventBus.emit(GameEvents.COMBAT_DAMAGE, {
-                  targetId: 'player', damage: fireDmg, isDodged: false,
-                  isCrit: false, isPlayerTarget: true, targetMaxHP: this.player.maxHp,
-                });
-              }
-            }
-
-            // Vampiric: lifesteal on hit
-            if (affixStats.lifestealFraction > 0) {
-              const heal = Math.floor(finalDmg * affixStats.lifestealFraction);
-              if (heal > 0) {
-                monster.hp = Math.min(monster.maxHp, monster.hp + heal);
-              }
-            }
-
-            // Frozen: chance to apply slow on hit
-            if (affixStats.freezeChance > 0 && Math.random() < affixStats.freezeChance) {
-              this.statusEffects.apply('player', 'slow', 30, 2500, monster.id, time);
-              EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.freezeSlow'), type: 'combat' });
-            }
-          }
-
-          if (this.player.hp <= 0) {
-            // Death save check (set bonus / legendary)
-            const eqDs = this.getEquipStats();
-            if (eqDs.deathSave > 0 && !this._deathSaveUsed) {
-              this.player.hp = Math.floor(this.player.maxHp * 0.3);
-              this._deathSaveUsed = true;
-              this.time.delayedCall(60000, () => { this._deathSaveUsed = false; });
-              EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.deathImmunity'), type: 'system' });
-              if (this.vfx) this.vfx.healBurst(this.player.sprite.x, this.player.sprite.y - 16, 20);
-            } else {
-              this.player.die(); break;
-            }
-          }
-        }
+        const impactDelay = monster.playAttack(this.player.sprite.x, this.player.sprite.y);
+        this.time.delayedCall(impactDelay, () => this.resolveMonsterStrike(monster));
       }
     }
 
@@ -2168,83 +2209,230 @@ export class ZoneScene extends Phaser.Scene {
       const dSq = distanceSq(this.player.tileCol, this.player.tileRow, target.tileCol, target.tileRow);
       if (dSq <= this.player.attackRange * this.player.attackRange && time - this.player.lastAttackTime >= this.player.attackSpeed) {
         this.player.lastAttackTime = time;
-        this.player.playAttack(target.sprite.x, target.sprite.y);
-        const eq = this.getEquipStats();
+        // Damage lands on the swing's contact beat, not at wind-up start.
+        const impactDelay = this.player.playAttack(target.sprite.x, target.sprite.y);
+        this.time.delayedCall(impactDelay, () => this.resolvePlayerStrike(target));
+      }
+    }
+  }
 
-        // dodgeCounter: guaranteed crit after dodge
-        const forceCrit = this._dodgeCounterReady;
-        if (forceCrit) {
-          this._dodgeCounterReady = false;
-          EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.dodgeCounterCrit'), type: 'combat' });
-        }
+  /** Resolve a basic attack at the moment the swing connects. */
+  private resolvePlayerStrike(target: Monster): void {
+    if (this.player.hp <= 0 || !target.isAlive() || this.isTransitioning) return;
+    const eq = this.getEquipStats();
 
-        const result = this.combatSystem.calculateDamage(
+    // dodgeCounter: guaranteed crit after dodge
+    const forceCrit = this._dodgeCounterReady;
+    if (forceCrit) {
+      this._dodgeCounterReady = false;
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.dodgeCounterCrit'), type: 'combat' });
+    }
+
+    const fromX = this.player.sprite.x;
+    const fromY = this.player.sprite.y;
+    const result = this.combatSystem.calculateDamage(
+      this.player.toCombatEntity(eq), target.toCombatEntity(),
+      undefined, 1, undefined, forceCrit,
+    );
+    if (result.isDodged) {
+      // Target sidestepped: show a whiff, no flash or impact.
+      this.showDamageText(target.sprite.x, target.sprite.y, 0, false, true);
+      return;
+    }
+    const weight = target.takeDamage(result.damage, fromX, fromY, { isCrit: result.isCrit });
+    this.applySteal(result);
+    this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
+
+    // Consume stealthDamage buff after attack (it multiplies next attack only)
+    if (this.player.buffs.some(b => b.stat === 'stealthDamage')) {
+      this.player.buffs = this.player.buffs.filter(b => b.stat !== 'stealthDamage');
+    }
+
+    if (result.isCrit || result.damage > 0) {
+      EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+        targetId: target.id, damage: result.damage, isDodged: false,
+        isCrit: result.isCrit, isPlayerTarget: false,
+        targetMaxHP: target.maxHp,
+      });
+      this.playHitImpact(target, weight, fromX, fromY);
+    }
+    // Weapon slash trail on basic attack
+    if (this.trails) {
+      const angle = Math.atan2(target.sprite.y - fromY, target.sprite.x - fromX);
+      this.trails.stampSlash(target.sprite.x, target.sprite.y - 16, angle, 0xffffcc);
+    }
+
+    // critDoubleStrike: on crit, X% chance for immediate extra attack
+    if (result.isCrit && eq.critDoubleStrike > 0 && target.isAlive()) {
+      if (this.combatSystem.checkCritDoubleStrike(eq.critDoubleStrike, true)) {
+        const extraResult = this.combatSystem.calculateDamage(
           this.player.toCombatEntity(eq), target.toCombatEntity(),
-          undefined, 1, undefined, forceCrit,
         );
-        target.takeDamage(result.damage, this.player.sprite.x, this.player.sprite.y);
-        this.applySteal(result);
-        this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
-        this.skillEffects.playAttack(this.player.sprite.x, this.player.sprite.y, target.sprite.x, target.sprite.y, true);
+        const extraWeight = target.takeDamage(extraResult.damage, fromX, fromY, { isCrit: extraResult.isCrit });
+        this.applySteal(extraResult);
+        this.showDamageText(target.sprite.x, target.sprite.y - 20, extraResult.damage, extraResult.isCrit);
+        EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.comboTrigger'), type: 'combat' });
+        this.playHitImpact(target, extraWeight, fromX, fromY);
+      }
+    }
 
-        // Consume stealthDamage buff after attack (it multiplies next attack only)
-        if (this.player.buffs.some(b => b.stat === 'stealthDamage')) {
-          this.player.buffs = this.player.buffs.filter(b => b.stat !== 'stealthDamage');
-        }
+    // doubleShot: X% chance to fire double projectile on ranged auto-attack
+    if (eq.doubleShot > 0 && target.isAlive()) {
+      if (this.combatSystem.checkDoubleShot(eq.doubleShot, this.player.attackRange)) {
+        const extraResult = this.combatSystem.calculateDamage(
+          this.player.toCombatEntity(eq), target.toCombatEntity(),
+        );
+        const extraWeight = target.takeDamage(extraResult.damage, fromX, fromY, { isCrit: extraResult.isCrit });
+        this.applySteal(extraResult);
+        this.showDamageText(target.sprite.x + 15, target.sprite.y - 15, extraResult.damage, extraResult.isCrit);
+        EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.doubleArrow'), type: 'combat' });
+        this.skillEffects.playAttack(fromX, fromY, target.sprite.x, target.sprite.y, true);
+        this.playHitImpact(target, extraWeight, fromX, fromY);
+      }
+    }
 
-        // VFX for player attacks — crit flash + hit sparks
-        if (result.isCrit || result.damage > 0) {
-          EventBus.emit(GameEvents.COMBAT_DAMAGE, {
-            targetId: target.id, damage: result.damage, isDodged: false,
-            isCrit: result.isCrit, isPlayerTarget: false,
-            targetMaxHP: target.maxHp,
-          });
-          // Hit-freeze and flash
-          target.animator.triggerHitFreeze(35);
-          this.player.animator.triggerHitFreeze(35);
-          if (this.vfx) this.vfx.hitFlash(target.sprite);
-          if (result.isCrit && this.vfx) {
-            this.vfx.hitSparks(target.sprite.x, target.sprite.y - 16, 12);
+    if (!target.isAlive()) {
+      this.onMonsterKilled(target);
+      if (this.player.attackTarget === target.id) this.player.attackTarget = null;
+      EventBus.emit(GameEvents.TARGET_CHANGED, { targetId: null, targetName: null });
+    }
+  }
+
+  /** Attacker-side hit feedback: hit-stop on the player, impact burst, shake. */
+  private playHitImpact(target: Monster, weight: HitWeight, fromX: number, fromY: number): void {
+    const profile = HIT_PROFILES[weight];
+    this.player.animator.triggerHitFreeze(profile.attackerStopMs);
+    if (!this.vfx) return;
+    const angle = Math.atan2(target.sprite.y - fromY, target.sprite.x - fromX);
+    const color = CLASS_IMPACT_COLORS[this.player.classData.id] ?? 0xfff2c0;
+    this.vfx.impactBurst(target.sprite.x, target.sprite.y - 18, angle, weight, color);
+    if (weight === 'kill' && target.definition.elite) {
+      this.vfx.slowMotion(200, 0.4);
+    }
+  }
+
+  /** Launch a monster's attack; its damage resolves when the blow (or projectile) lands. */
+  private resolveMonsterStrike(monster: Monster): void {
+    if (!monster.isAlive() || this.player.hp <= 0 || this.isTransitioning) return;
+    // Stunned/rooted mid-swing: the attack is interrupted.
+    if (this.statusEffects.isImmobilized(monster.id)) return;
+    const ranged = monster.definition.attackRange > 2.5;
+    if (ranged) {
+      const spriteKey = monster.definition.spriteKey;
+      const projColor = spriteKey.includes('fire') || spriteKey.includes('phoenix')
+        ? 0xff6600 : spriteKey.includes('ice') ? 0x4488ff : 0xcc44cc;
+      this.skillEffects.playMonsterRangedAttack(
+        monster.sprite.x, monster.sprite.y,
+        this.player.sprite.x, this.player.sprite.y, projColor,
+        () => {
+          if (!monster.isAlive() || this.player.hp <= 0 || this.isTransitioning) return;
+          this.applyMonsterHit(monster, true);
+        },
+      );
+      return;
+    }
+    // Melee whiffs if the player stepped out of reach during the wind-up.
+    const reach = monster.definition.attackRange * 1.35 + 0.5;
+    if (distanceSq(this.player.tileCol, this.player.tileRow, monster.tileCol, monster.tileRow) > reach * reach) return;
+    this.applyMonsterHit(monster, false);
+  }
+
+  private applyMonsterHit(monster: Monster, ranged: boolean): void {
+    const time = this.time.now;
+    const result = this.combatSystem.calculateDamage(monster.toCombatEntity(), this.player.toCombatEntity(this.getEquipStats()));
+    if (this.dodgeController.isInvulnerable(time)) {
+      if (this.dodgeController.claimAvoidanceReward(time)) {
+        this.player.gainSpirit('dodge');
+      }
+      this.showDamageText(this.player.sprite.x, this.player.sprite.y, 0, false, true);
+      EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+        targetId: 'player', damage: 0, isDodged: true,
+        isCrit: false, isPlayerTarget: true,
+        targetMaxHP: this.player.maxHp,
+      });
+      if (this.vfx) {
+        this.vfx.hitSparks(this.player.sprite.x, this.player.sprite.y - 16, 6);
+      }
+    } else if (result.isDodged) {
+      this.player.gainSpirit('dodge');
+      this.showDamageText(this.player.sprite.x, this.player.sprite.y, 0, false, true);
+      // dodgeCounter: after dodging, next attack is guaranteed crit
+      const eqDc = this.getEquipStats();
+      if (eqDc.dodgeCounter > 0) {
+        this._dodgeCounterReady = true;
+        EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.dodgeCounterReady'), type: 'combat' });
+      }
+    } else {
+      // Difficulty damage scaling is already applied at monster spawn time via DifficultySystem.scaleMonster
+      const finalDmg = result.damage;
+      this.player.hp = Math.max(0, this.player.hp - finalDmg);
+
+      // Thorns heal (set bonus: recover % maxHp on hit taken)
+      const eq = this.getEquipStats();
+      if (eq.thornsHeal > 0 && this.player.hp > 0) {
+        const heal = Math.floor(this.player.maxHp * eq.thornsHeal / 100);
+        this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
+        EventBus.emit(GameEvents.PLAYER_HEALTH_CHANGED, { hp: this.player.hp, maxHp: this.player.maxHp });
+      }
+
+      const hurtWeight = classifyHit({ damage: finalDmg, maxHp: this.player.maxHp, isCrit: result.isCrit });
+      this.player.playHurt(monster.sprite.x, monster.sprite.y, HIT_PROFILES[hurtWeight].recoil);
+      monster.animator.triggerHitFreeze(Math.round(HIT_PROFILES[hurtWeight].attackerStopMs * 0.6));
+      this.showDamageText(this.player.sprite.x, this.player.sprite.y, finalDmg, result.isCrit, false, true);
+      // Ranged hits already showed their projectile burst on arrival.
+      if (!ranged) this.skillEffects.playMonsterAttack(this.player.sprite.x, this.player.sprite.y);
+      EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+        targetId: 'player', damage: finalDmg, isDodged: false,
+        isCrit: result.isCrit, isPlayerTarget: true,
+        targetMaxHP: this.player.maxHp,
+      });
+
+      // Monster applies status effects to player based on monster type
+      this.applyMonsterStatusEffect(monster, time);
+
+      // ── Elite Affix: on-hit effects ──
+      if (monster.eliteAffixes.length > 0) {
+        const affixStats = this.eliteAffixSystem.getCombinedStats(monster.eliteAffixes);
+
+        // Fire Enhanced: extra fire damage
+        if (affixStats.extraFireDamage > 0) {
+          const fireDmg = Math.floor(finalDmg * affixStats.extraFireDamage);
+          if (fireDmg > 0) {
+            this.player.hp = Math.max(0, this.player.hp - fireDmg);
+            this.showDamageText(this.player.sprite.x + 10, this.player.sprite.y - 5, fireDmg, false, false, true, 'fire');
+            EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+              targetId: 'player', damage: fireDmg, isDodged: false,
+              isCrit: false, isPlayerTarget: true, targetMaxHP: this.player.maxHp,
+            });
           }
         }
-        // Weapon slash trail on basic attack
-        if (this.trails) {
-          const angle = Math.atan2(target.sprite.y - this.player.sprite.y, target.sprite.x - this.player.sprite.x);
-          this.trails.stampSlash(target.sprite.x, target.sprite.y - 16, angle, 0xffffcc);
-        }
 
-        // critDoubleStrike: on crit, X% chance for immediate extra attack
-        if (result.isCrit && eq.critDoubleStrike > 0 && target.isAlive()) {
-          if (this.combatSystem.checkCritDoubleStrike(eq.critDoubleStrike, true)) {
-            const extraResult = this.combatSystem.calculateDamage(
-              this.player.toCombatEntity(eq), target.toCombatEntity(),
-            );
-            target.takeDamage(extraResult.damage, this.player.sprite.x, this.player.sprite.y);
-            this.applySteal(extraResult);
-            this.showDamageText(target.sprite.x, target.sprite.y - 20, extraResult.damage, extraResult.isCrit);
-            EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.comboTrigger'), type: 'combat' });
-            if (this.vfx) this.vfx.hitSparks(target.sprite.x, target.sprite.y - 16, 8);
+        // Vampiric: lifesteal on hit
+        if (affixStats.lifestealFraction > 0) {
+          const heal = Math.floor(finalDmg * affixStats.lifestealFraction);
+          if (heal > 0) {
+            monster.hp = Math.min(monster.maxHp, monster.hp + heal);
           }
         }
 
-        // doubleShot: X% chance to fire double projectile on ranged auto-attack
-        if (eq.doubleShot > 0 && target.isAlive()) {
-          if (this.combatSystem.checkDoubleShot(eq.doubleShot, this.player.attackRange)) {
-            const extraResult = this.combatSystem.calculateDamage(
-              this.player.toCombatEntity(eq), target.toCombatEntity(),
-            );
-            target.takeDamage(extraResult.damage, this.player.sprite.x, this.player.sprite.y);
-            this.applySteal(extraResult);
-            this.showDamageText(target.sprite.x + 15, target.sprite.y - 15, extraResult.damage, extraResult.isCrit);
-            EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.doubleArrow'), type: 'combat' });
-            this.skillEffects.playAttack(this.player.sprite.x, this.player.sprite.y, target.sprite.x, target.sprite.y, true);
-          }
+        // Frozen: chance to apply slow on hit
+        if (affixStats.freezeChance > 0 && Math.random() < affixStats.freezeChance) {
+          this.statusEffects.apply('player', 'slow', 30, 2500, monster.id, time);
+          EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.freezeSlow'), type: 'combat' });
         }
+      }
 
-        if (!target.isAlive()) {
-          this.onMonsterKilled(target);
-          this.player.attackTarget = null;
-          EventBus.emit(GameEvents.TARGET_CHANGED, { targetId: null, targetName: null });
+      if (this.player.hp <= 0) {
+        // Death save check (set bonus / legendary)
+        const eqDs = this.getEquipStats();
+        if (eqDs.deathSave > 0 && !this._deathSaveUsed) {
+          this.player.hp = Math.floor(this.player.maxHp * 0.3);
+          this._deathSaveUsed = true;
+          this.time.delayedCall(60000, () => { this._deathSaveUsed = false; });
+          EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.combat.deathImmunity'), type: 'system' });
+          if (this.vfx) this.vfx.healBurst(this.player.sprite.x, this.player.sprite.y - 16, 20);
+        } else {
+          this.player.die(); return;
         }
       }
     }
@@ -4630,14 +4818,22 @@ export class ZoneScene extends Phaser.Scene {
     for (const decoration of this.mapData.storyDecorations) {
       const { x: worldX, y: worldY } = cartToIso(decoration.col, decoration.row);
       const container = this.add.container(worldX, worldY);
-      container.setDepth(worldY + 50);
+      container.setDepth(worldY + 70);
 
       // Try to use decoration sprite by type
       const texKey = `decor_${decoration.spriteType}`;
       SpriteGenerator.ensureDecoration(this, decoration.spriteType);
+      let propTop = -28 * DPR;
       if (this.textures.exists(texKey)) {
-        const sprite = this.add.image(0, -8, texKey).setScale(1 / TEXTURE_SCALE);
+        const meta = SpriteGenerator.getDecorMeta(texKey);
+        const sprite = this.add.image(0, meta ? 0 : -8, texKey)
+          .setOrigin(0.5, meta ? meta.anchorY : 0.5)
+          .setScale(1 / TEXTURE_SCALE);
         container.add(sprite);
+        if (meta) {
+          if (meta.flat) container.setDepth(worldY + 5);
+          propTop = Math.min(propTop, -sprite.displayHeight * meta.anchorY - 6);
+        }
       } else {
         // Fallback: colored rectangle
         const color = this.getStoryDecorationColor(decoration.spriteType);
@@ -4647,7 +4843,7 @@ export class ZoneScene extends Phaser.Scene {
       }
 
       // Name label
-      const label = this.add.text(0, -28 * DPR, decoration.name, {
+      const label = this.add.text(0, propTop, decoration.name, {
         fontSize: fs(8),
         color: '#CCCCAA',
         fontFamily: '"Noto Sans SC", sans-serif',
@@ -4657,7 +4853,7 @@ export class ZoneScene extends Phaser.Scene {
       container.add(label);
 
       // Interaction indicator (small sparkle)
-      const sparkle = this.add.ellipse(8 * DPR, -20 * DPR, Math.round(4 * DPR), Math.round(4 * DPR), 0xFFFFCC, 0.6);
+      const sparkle = this.add.ellipse(8 * DPR, Math.max(propTop + 12, -40), Math.round(4 * DPR), Math.round(4 * DPR), 0xFFFFCC, 0.6);
       container.add(sparkle);
       this.tweens.add({ targets: sparkle, alpha: 0.2, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
@@ -4886,42 +5082,84 @@ export class ZoneScene extends Phaser.Scene {
       poison: '#66ff66', arcane: '#cc66ff',
     };
     if (isDodged) { text = 'MISS'; color = '#7f8c8d'; size = fs(14); }
-    else if (isPlayer) { text = `-${damage}`; color = isCrit ? '#ff4444' : '#e74c3c'; if (isCrit) size = fs(28); }
+    else if (isPlayer) { text = `-${damage}`; color = isCrit ? '#ff4444' : '#e74c3c'; if (isCrit) size = fs(24); }
     else {
       text = `${damage}`;
       color = isCrit ? '#ffd700' : (damageType && elementColors[damageType]) || '#ffffff';
-      if (isCrit) size = fs(32);
+      if (isCrit) size = fs(26);
     }
+
+    // Stack numbers that spawn on the same spot in quick succession so
+    // multi-hits and AoE ticks stay readable instead of overprinting.
+    const now = this.time.now;
+    const stackKey = `${Math.round(x / 28)},${Math.round(y / 28)}`;
+    const prev = this.damageTextStacks.get(stackKey);
+    const stackIndex = prev && now - prev.time < 320 ? Math.min(prev.index + 1, 4) : 0;
+    this.damageTextStacks.set(stackKey, { time: now, index: stackIndex });
+    if (this.damageTextStacks.size > 64) {
+      for (const [key, entry] of this.damageTextStacks) {
+        if (now - entry.time > 1000) this.damageTextStacks.delete(key);
+      }
+    }
+    const drift = (stackIndex % 2 === 0 ? 1 : -1) * (isCrit ? 14 : 10) + randomInt(-4, 4);
+    const startX = x + randomInt(-6, 6);
+    const startY = y - 30 - stackIndex * 11;
 
     // Acquire from pool or create new
     let t: Phaser.GameObjects.Text;
     const poolIdx = this.floatingTextPool.findIndex(obj => !obj.active);
     if (poolIdx !== -1) {
       t = this.floatingTextPool[poolIdx];
+      this.tweens.killTweensOf(t);
       t.setActive(true).setVisible(true);
-      t.setPosition(x + randomInt(-15, 15), y - 30);
+      t.setPosition(startX, startY);
       t.setText(text);
       t.setStyle({ fontSize: size, color, fontFamily: '"Cinzel", serif', fontStyle: isCrit ? 'bold' : 'normal', stroke: '#000000', strokeThickness: Math.round((isCrit ? 4 : 3) * DPR) });
-      t.setAlpha(1);
-      t.setScale(1);
     } else {
-      t = this.add.text(x + randomInt(-15, 15), y - 30, text, {
+      t = this.add.text(startX, startY, text, {
         fontSize: size, color, fontFamily: '"Cinzel", serif', fontStyle: isCrit ? 'bold' : 'normal',
         stroke: '#000000', strokeThickness: Math.round((isCrit ? 4 : 3) * DPR),
       });
       this.floatingTextPool.push(t);
     }
-    t.setOrigin(0.5).setDepth(ZONE_FLOATING_TEXT_DEPTH);
+    t.setOrigin(0.5).setDepth(ZONE_FLOATING_TEXT_DEPTH + stackIndex);
+    t.setAlpha(1).setAngle(0);
 
     const releaseToPool = (): void => { t.setActive(false).setVisible(false); };
 
-    if (isCrit) {
-      t.setScale(1.5);
-      this.tweens.add({ targets: t, scale: 1, duration: 200, ease: 'Back.easeOut' });
-      this.tweens.add({ targets: t, y: t.y - 70, alpha: 0, duration: 1500, ease: 'Power2', onComplete: releaseToPool });
-    } else {
-      this.tweens.add({ targets: t, y: t.y - 50, alpha: 0, duration: 1200, ease: 'Power2', onComplete: releaseToPool });
+    if (isDodged) {
+      t.setScale(0.8);
+      this.tweens.add({ targets: t, scale: 1, duration: 90, ease: 'Quad.easeOut' });
+      this.tweens.add({ targets: t, y: startY - 22, alpha: 0, duration: 650, delay: 120, ease: 'Quad.easeOut', onComplete: releaseToPool });
+      return;
     }
+
+    // Pop: overshoot then settle — sells the impact of the number itself.
+    const peak = isCrit ? 1.5 : 1.2;
+    const rest = isCrit ? 1.1 : 1;
+    t.setScale(isCrit ? 0.35 : 0.5);
+    if (isCrit) t.setAngle(-8);
+    this.tweens.add({
+      targets: t, scale: peak, angle: 0, duration: isCrit ? 90 : 70, ease: 'Quad.easeOut',
+      onComplete: () => {
+        if (!t.active) return;
+        this.tweens.add({ targets: t, scale: rest, duration: isCrit ? 160 : 110, ease: 'Back.easeOut' });
+      },
+    });
+    // Arc: drift sideways while rising, then sink slightly as it fades.
+    const rise = isCrit ? 40 : 28;
+    const life = isCrit ? 1050 : 780;
+    this.tweens.add({ targets: t, x: startX + drift, duration: life, ease: 'Sine.easeOut' });
+    this.tweens.add({
+      targets: t, y: startY - rise, duration: life * 0.45, ease: 'Quad.easeOut',
+      onComplete: () => {
+        if (!t.active) return;
+        this.tweens.add({
+          targets: t, y: startY - rise + 8, alpha: 0, duration: life * 0.55, ease: 'Quad.easeIn',
+          onComplete: releaseToPool,
+        });
+      },
+    });
   }
 
   /** Convert a desired screen-fraction position to scrollFactor(0) object position, accounting for camera zoom. */
@@ -5257,7 +5495,7 @@ export class ZoneScene extends Phaser.Scene {
           const monster = this.monsters.find(m => m.id === entityId && m.isAlive());
           if (monster) {
             // Bleed ignores defense (damage applied directly via takeDamage)
-            monster.takeDamage(tick.damage);
+            monster.takeDamage(tick.damage, undefined, undefined, { isTick: true });
             this.showDamageText(
               monster.sprite.x, monster.sprite.y,
               tick.damage, false, false, false,
@@ -5597,7 +5835,7 @@ export class ZoneScene extends Phaser.Scene {
           const entity = this.mercenarySystem.toCombatEntity();
           if (entity) {
             const result = this.combatSystem.calculateDamage(entity, target.toCombatEntity());
-            target.takeDamage(result.damage, this.mercenarySprite?.x ?? 0, this.mercenarySprite?.y ?? 0);
+            target.takeDamage(result.damage, this.mercenarySprite?.x ?? 0, this.mercenarySprite?.y ?? 0, { isCrit: result.isCrit });
             this.showDamageText(target.sprite.x, target.sprite.y, result.damage, result.isCrit);
             if (!target.isAlive()) {
               this.onMonsterKilled(target);
@@ -6366,12 +6604,15 @@ export class ZoneScene extends Phaser.Scene {
       for (const tile of row) tile?.destroy();
     }
     this.tileSprites = [];
+    this.terrain?.destroy();
+    this.terrain = null;
     this.visibleTiles.clear();
     for (const tile of this.tilePool) tile.destroy();
     this.tilePool = [];
     this.lastVisibleTileBounds = '';
     for (const sprite of this.decorSprites.values()) sprite.destroy();
     this.decorSprites.clear();
+    this.occluderDecor.clear();
     for (const sprite of this.exitSprites.values()) sprite.destroy();
     this.exitSprites.clear();
     for (const label of this.exitLabels.values()) label.destroy();
@@ -6391,6 +6632,7 @@ export class ZoneScene extends Phaser.Scene {
     // Clean up floating text pool
     for (const t of this.floatingTextPool) t.destroy();
     this.floatingTextPool = [];
+    this.damageTextStacks.clear();
     for (const sprite of this.campDecorSprites.values()) sprite.destroy();
     this.campDecorSprites.clear();
     for (const emitter of this.campParticles.values()) emitter.destroy();

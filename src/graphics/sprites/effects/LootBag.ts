@@ -1,100 +1,26 @@
 // src/graphics/sprites/effects/LootBag.ts
-import type { EntityDrawer } from '../types';
+// Drawn in light, low-saturation tones: ZoneScene tints the bag by item
+// quality (setTint multiplies), so the base must stay bright to carry colour.
+import { defineDecor, contactShadow, shade, tone, blobP, line, flat, ellipseP, glow } from '../decorations/DecorKit';
 
-export const LootBagDrawer: EntityDrawer = {
+export const LootBagDrawer = defineDecor({
   key: 'loot_bag',
-  frameW: 24,
-  frameH: 24,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 24;
-    const cx = w / 2;
-
-    // Ground shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    utils.fillEllipse(ctx, cx, h - 1.5 * s, 8 * s, 2.2 * s);
-
-    // Soft outline glow (warm/golden — loot)
-    utils.softOutline(ctx, 'rgba(180,140,60,0.2)', 5);
-
-    // Main bag body — bulging leather pouch shape
-    utils.drawLeatherTexture(ctx, cx - 7 * s, h * 0.28, 14 * s, 13 * s, 0x4a3020);
-
-    // Bulge highlight to give rounded shape
-    const bulgeGrad = ctx.createRadialGradient(cx - 2 * s, h * 0.36, 0, cx, h * 0.48, 8 * s);
-    bulgeGrad.addColorStop(0, 'rgba(110,75,40,0.35)');
-    bulgeGrad.addColorStop(0.55, 'rgba(0,0,0,0)');
-    bulgeGrad.addColorStop(1, 'rgba(20,10,5,0.30)');
-    ctx.fillStyle = bulgeGrad;
-    utils.roundRect(ctx, cx - 7 * s, h * 0.28, 14 * s, 13 * s, 3 * s);
-    ctx.fill();
-
-    // Drawstring neck — slightly narrower section
-    utils.drawLeatherTexture(ctx, cx - 5 * s, h * 0.16, 10 * s, 5 * s, 0x3a2416);
-
-    // Drawstring tie at top
-    ctx.strokeStyle = utils.rgb(0x6a4a28, 0.85);
-    ctx.lineWidth = 1.2 * s;
-    ctx.lineCap = 'round';
-    // Left loop of bow
-    ctx.beginPath();
-    ctx.moveTo(cx - 1 * s, h * 0.14);
-    ctx.quadraticCurveTo(cx - 4 * s, h * 0.06, cx - 2 * s, h * 0.16);
-    ctx.stroke();
-    // Right loop of bow
-    ctx.beginPath();
-    ctx.moveTo(cx + 1 * s, h * 0.14);
-    ctx.quadraticCurveTo(cx + 4 * s, h * 0.06, cx + 2 * s, h * 0.16);
-    ctx.stroke();
-
-    // End soft outline
-    utils.softOutlineEnd(ctx);
-
-    // Visible stitching — dashed line down center
-    ctx.strokeStyle = utils.rgb(0x2a1808, 0.55);
-    ctx.lineWidth = 0.6 * s;
-    ctx.setLineDash([1.2 * s, 1.0 * s]);
-    ctx.beginPath();
-    ctx.moveTo(cx, h * 0.30);
-    ctx.lineTo(cx, h * 0.38);
-    ctx.moveTo(cx, h * 0.38); // slight curve for bulge
-    ctx.quadraticCurveTo(cx + 0.5 * s, h * 0.50, cx, h * 0.60);
-    ctx.lineTo(cx, h * 0.38);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Side stitching lines
-    ctx.strokeStyle = utils.rgb(0x2a1808, 0.30);
-    ctx.lineWidth = 0.5 * s;
-    ctx.setLineDash([0.8 * s, 0.8 * s]);
-    // Left seam
-    ctx.beginPath();
-    ctx.moveTo(cx - 6.5 * s, h * 0.30);
-    ctx.lineTo(cx - 6.5 * s, h * 0.40);
-    ctx.stroke();
-    // Right seam
-    ctx.beginPath();
-    ctx.moveTo(cx + 6.5 * s, h * 0.30);
-    ctx.lineTo(cx + 6.5 * s, h * 0.40);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Metallic buckle/clasp with sheen — small rect
-    utils.drawMetalSurface(ctx, cx - 2.5 * s, h * 0.50, 5 * s, 3.5 * s, 0x8a7020);
-    // Buckle border
-    ctx.strokeStyle = utils.rgb(0x5a4c10, 0.7);
-    ctx.lineWidth = 0.6 * s;
-    ctx.strokeRect(cx - 2.5 * s, h * 0.50, 5 * s, 3.5 * s);
-    // Buckle pin
-    ctx.strokeStyle = utils.rgb(0xc0a830, 0.8);
-    ctx.lineWidth = 0.7 * s;
-    ctx.beginPath();
-    ctx.moveTo(cx, h * 0.50);
-    ctx.lineTo(cx, h * 0.50 + 3.5 * s);
-    ctx.stroke();
-    // Buckle sheen highlight
-    ctx.fillStyle = 'rgba(220,200,80,0.30)';
-    ctx.fillRect(cx - 2.0 * s, h * 0.51, 1.5 * s, 1.2 * s);
+  w: 28,
+  h: 28,
+  ground: 23,
+  draw(ctx, { cx, gy }) {
+    contactShadow(ctx, cx + 1, gy, 10, 3, 0.45);
+    const cloth = tone(0xe8dcc4, { light: 0.45, shadow: 0.38 });
+    shade(ctx, blobP(ctx, [[cx - 9, gy - 1], [cx - 11, gy - 9], [cx - 5, gy - 15], [cx - 2, gy - 14], [cx + 2, gy - 14], [cx + 6, gy - 15], [cx + 11, gy - 8], [cx + 9, gy - 1], [cx, gy + 1]]), cloth, { band: 3.5, hi: 1.2, stroke: 0.8 });
+    // Gathered neck + tie.
+    shade(ctx, blobP(ctx, [[cx - 4, gy - 14], [cx - 5, gy - 20], [cx - 1, gy - 18], [cx + 1, gy - 21], [cx + 5, gy - 19], [cx + 4, gy - 14]]), cloth, { band: 1.5, hi: 0.6, stroke: 0.7 });
+    line(ctx, [[cx - 4.5, gy - 14.5], [cx + 4.5, gy - 14.5]], '#8a6a44', 1.6);
+    line(ctx, [[cx + 3, gy - 14.5], [cx + 6, gy - 11]], '#8a6a44', 1);
+    // Folds.
+    line(ctx, [[cx - 4, gy - 11], [cx - 6, gy - 5]], cloth.shade, 0.7);
+    line(ctx, [[cx + 2, gy - 12], [cx + 3, gy - 6]], cloth.shade, 0.7);
+    // Coin peeking out + sparkle.
+    flat(ctx, ellipseP(ctx, cx - 1, gy - 19, 2, 1.2), '#fff0b0', '#8a6a20', 0.4);
+    glow(ctx, { x: cx - 5, y: gy - 12 }, 4, 0xffffff, 0.6);
   },
-};
+});

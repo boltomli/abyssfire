@@ -1,9 +1,17 @@
 import Phaser from 'phaser';
 import type { MonsterAnimCategory } from '../data/types';
+import { attackSpeedScale, computeImpactDelay } from './HitFeedback';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type AnimState = 'idle' | 'walk' | 'attack' | 'cast' | 'hurt' | 'dodge' | 'death';
+
+export interface AttackOptions {
+  /** Time until the next swing; the animation compresses to fit inside it. */
+  attackIntervalMs?: number;
+  /** Tint pulsed during wind-up so incoming enemy hits are readable. */
+  telegraphColor?: number;
+}
 
 export interface AnimConfig {
   idleBobAmount: number;
@@ -21,6 +29,11 @@ export interface AnimConfig {
   attackSquash: number;
   attackWindup: number;
   attackShake: boolean;
+  /**
+   * Where in the attack frame sequence the blow connects (0 = first frame,
+   * 1 = last). Damage, lunge peak and hit-stop are all timed to this frame.
+   */
+  attackContact: number;
 
   castLean: number;
   castDuration: number;
@@ -62,6 +75,8 @@ const HUMANOID_CONFIG: AnimConfig = {
   attackSquash: 0.25,
   attackWindup: 150,
   attackShake: true,
+  // Monster sheets ramp their strike pose linearly to the final frame.
+  attackContact: 1,
 
   castLean: 5,
   castDuration: 350,
@@ -139,6 +154,8 @@ const PRESETS: Record<string, AnimConfig> = {
 
   warrior: {
     ...HUMANOID_CONFIG,
+    // Player sheets: guard, wind-up, snap (~55%), follow-through, recover.
+    attackContact: 0.55,
     attackLunge: 16,
     attackDuration: 610,
     attackSquash: 0.2,
@@ -157,6 +174,8 @@ const PRESETS: Record<string, AnimConfig> = {
 
   mage: {
     ...HUMANOID_CONFIG,
+    // Player sheets: guard, wind-up, snap (~55%), follow-through, recover.
+    attackContact: 0.55,
     attackLunge: 6,
     attackDuration: 535,
     castDuration: 500,
@@ -175,6 +194,8 @@ const PRESETS: Record<string, AnimConfig> = {
 
   rogue: {
     ...HUMANOID_CONFIG,
+    // Player sheets: guard, wind-up, snap (~55%), follow-through, recover.
+    attackContact: 0.55,
     attackDuration: 445,
     castDuration: 535,
     walkTilt: 7,
@@ -242,6 +263,8 @@ export class CharacterAnimator {
 
   // Hit-freeze
   private hitFreezeTimer = 0;
+  private flashTimer: Phaser.Time.TimerEvent | null = null;
+  private facingLeft = false;
 
   private static readonly TRANSITION_MS: Record<string, number> = {
     'idle->walk': 90,
@@ -322,6 +345,7 @@ export class CharacterAnimator {
     const spr = this.getSpriteChild();
     if (!spr) return;
     const key = `${this.animPrefix}_${action}`;
+    spr.anims.timeScale = 1;
     if (this.scene.anims.exists(key)) {
       spr.play(key, true);
     }
@@ -375,10 +399,54 @@ export class CharacterAnimator {
     if (this.hasFrameAnims) this.clearFrameMotion();
   }
 
-  /** Freeze animation for the given duration (ms). Called on damage. */
+  /**
+   * Hit-stop: freeze frame animation *and* this animator's motion tweens for
+   * the given duration (ms), so the pose visibly "sticks" on impact.
+   */
   triggerHitFreeze(durationMs: number = 35): void {
+    if (this.dead || durationMs <= 0) return;
     this.hitFreezeTimer = Math.max(this.hitFreezeTimer, durationMs);
     this.getSpriteChild()?.anims.pause();
+    for (const tween of this.tweens) {
+      if (tween.isPlaying()) tween.pause();
+    }
+  }
+
+  private releaseHitFreeze(): void {
+    this.hitFreezeTimer = 0;
+    this.getSpriteChild()?.anims.resume();
+    for (const tween of this.tweens) {
+      if (tween.isPaused()) tween.resume();
+    }
+  }
+
+  /** Solid white silhouette for a few frames — the classic impact flash. */
+  flashWhite(durationMs: number = 70, color: number = 0xffffff): void {
+    const sprite = this.getSpriteChild();
+    if (!sprite || durationMs <= 0 || !this.container.active) return;
+    sprite.setTintFill(color);
+    this.flashTimer?.remove(false);
+    this.flashTimer = this.scene.time.delayedCall(durationMs, () => {
+      this.flashTimer = null;
+      if (sprite.active) sprite.clearTint();
+    });
+  }
+
+  /** Face the direction of travel. Sprites are authored facing right. */
+  faceToward(dx: number): void {
+    if (this.dead || Math.abs(dx) < 0.01) return;
+    // Actions own their facing until they finish.
+    if (this.state !== 'idle' && this.state !== 'walk') return;
+    const left = dx < 0;
+    if (left === this.facingLeft) return;
+    this.facingLeft = left;
+    this.getSpriteChild()?.setFlipX(left);
+  }
+
+  private setFacing(dx: number): void {
+    if (Math.abs(dx) < 0.01) return;
+    this.facingLeft = dx < 0;
+    this.getSpriteChild()?.setFlipX(this.facingLeft);
   }
 
   private startTransition(toState: string): void {
@@ -398,10 +466,7 @@ export class CharacterAnimator {
     // Hit-freeze: skip animation updates
     if (this.hitFreezeTimer > 0) {
       this.hitFreezeTimer -= delta;
-      if (this.hitFreezeTimer <= 0) {
-        this.hitFreezeTimer = 0;
-        this.getSpriteChild()?.anims.resume();
-      }
+      if (this.hitFreezeTimer <= 0) this.releaseHitFreeze();
       return;
     }
 
@@ -529,11 +594,14 @@ export class CharacterAnimator {
 
   // ── Attack Animation ─────────────────────────────────────────────────
 
-  playAttack(targetX: number, targetY: number): void {
-    if (this.dead) return;
+  /**
+   * Play an attack toward a point. Returns the delay (ms) until the swing
+   * visually connects, so callers can land damage on the contact beat.
+   */
+  playAttack(targetX: number, targetY: number, options: AttackOptions = {}): number {
+    if (this.dead) return 0;
     if (this.hasFrameAnims) {
-      this.playFrameAttack(targetX, targetY);
-      return;
+      return this.playFrameAttack(targetX, targetY, options);
     }
     this.cancelTweens();
     this.prevState = this.state;
@@ -552,9 +620,10 @@ export class CharacterAnimator {
     const targetAngle = Math.atan2(dy, dx) * (180 / Math.PI);
     const tiltAngle = targetAngle * 0.05;
 
-    const total = this.config.attackDuration;
-    const anticipateMs = this.config.attackWindup;
-    const strikeMs = 80;
+    const speed = attackSpeedScale(this.config.attackDuration, options.attackIntervalMs);
+    const total = this.config.attackDuration * speed;
+    const anticipateMs = this.config.attackWindup * speed;
+    const strikeMs = 80 * speed;
     const impactMs = 40;
     const followMs = Math.max(60, (total - anticipateMs - strikeMs - impactMs) * 0.5);
     const settleMs = Math.max(50, total - anticipateMs - strikeMs - impactMs - followMs);
@@ -633,11 +702,12 @@ export class CharacterAnimator {
         });
       },
     });
+    return computeImpactDelay(anticipateMs, strikeMs);
   }
 
-  private playFrameAttack(targetX: number, targetY: number): void {
+  private playFrameAttack(targetX: number, targetY: number, options: AttackOptions): number {
     const sprite = this.getSpriteChild();
-    if (!sprite) return;
+    if (!sprite) return 0;
 
     this.cancelTweens();
     this.clearFrameMotion();
@@ -652,13 +722,25 @@ export class CharacterAnimator {
     const distance = Math.hypot(dx, dy) || 1;
     const nx = dx / distance;
     const ny = dy / distance;
-    sprite.setFlipX(dx < 0);
+    this.setFacing(dx);
 
-    const total = this.config.attackDuration;
-    const windupMs = Math.min(this.config.attackWindup, total * 0.35);
-    const strikeMs = Math.max(55, total * 0.2);
-    const recoverMs = Math.max(80, total - windupMs - strikeMs);
+    const speed = attackSpeedScale(this.config.attackDuration, options.attackIntervalMs);
+    // Frame playback keeps pace with the compressed tween timeline.
+    sprite.anims.timeScale = 1 / speed;
+    const total = this.config.attackDuration * speed;
+    // Lunge peak == contact frame == damage beat.
+    const contactMs = (this.frameContactMs() ?? this.config.attackWindup + 60) * speed;
+    const windupMs = contactMs * 0.62;
+    const strikeMs = contactMs - windupMs;
+    const recoverMs = Math.max(70, total - contactMs);
     const localLunge = Math.min(10, this.config.attackLunge * 0.55);
+
+    if (options.telegraphColor !== undefined && windupMs > 0) {
+      sprite.setTint(options.telegraphColor);
+      this.scene.time.delayedCall(windupMs, () => {
+        if (sprite.active && !sprite.tintFill) sprite.clearTint();
+      });
+    }
 
     this.addTween({
       targets: sprite,
@@ -682,9 +764,6 @@ export class CharacterAnimator {
           ease: 'Expo.easeOut',
           onComplete: () => {
             if (this.state !== 'attack') return;
-            if (this.config.attackShake && this.scene.cameras?.main) {
-              this.scene.cameras.main.shake(45, 0.0025);
-            }
             this.addTween({
               targets: sprite,
               x: this.frameBaseX,
@@ -700,15 +779,24 @@ export class CharacterAnimator {
         });
       },
     });
+    return Math.round(contactMs);
+  }
+
+  /** ms from attack start to the contact frame of the registered sheet animation. */
+  private frameContactMs(): number | null {
+    const anim = this.scene.anims.get(`${this.animPrefix}_attack`);
+    if (!anim || anim.frames.length === 0 || !anim.msPerFrame) return null;
+    const contactFrame = Math.round((anim.frames.length - 1) * this.config.attackContact);
+    return contactFrame * anim.msPerFrame;
   }
 
   // ── Cast Animation ────────────────────────────────────────────────────
 
-  playCast(): void {
-    if (this.dead) return;
+  /** Play a cast. Returns ms until the spell releases (the charge peak). */
+  playCast(): number {
+    if (this.dead) return 0;
     if (this.hasFrameAnims) {
-      this.playFrameCast();
-      return;
+      return this.playFrameCast();
     }
     this.cancelTweens();
     this.prevState = this.state;
@@ -761,11 +849,12 @@ export class CharacterAnimator {
         });
       },
     });
+    return Math.round(chargeMs);
   }
 
-  private playFrameCast(): void {
+  private playFrameCast(): number {
     const sprite = this.getSpriteChild();
-    if (!sprite) return;
+    if (!sprite) return 0;
 
     this.cancelTweens();
     this.clearFrameMotion();
@@ -816,6 +905,7 @@ export class CharacterAnimator {
         });
       },
     });
+    return Math.round(chargeMs);
   }
 
   playDodge(directionX: number, directionY: number): void {
@@ -837,7 +927,7 @@ export class CharacterAnimator {
     const distance = Math.hypot(directionX, directionY) || 1;
     const nx = directionX / distance;
     const ny = directionY / distance;
-    sprite.setFlipX(nx < 0);
+    this.setFacing(nx);
 
     const tuckMs = this.config.dodgeDuration * 0.3;
     const releaseMs = this.config.dodgeDuration - tuckMs;
@@ -917,11 +1007,15 @@ export class CharacterAnimator {
 
   // ── Hurt Animation ────────────────────────────────────────────────────
 
-  playHurt(sourceX: number, sourceY: number): void {
+  /**
+   * @param strength recoil multiplier from the hit weight (0 = flash only).
+   */
+  playHurt(sourceX: number, sourceY: number, strength: number = 1): void {
     if (this.dead) return;
     if (this.state === 'death') return;
+    if (strength <= 0) return;
     if (this.hasFrameAnims) {
-      this.playFrameHurt(sourceX, sourceY);
+      this.playFrameHurt(sourceX, sourceY, strength);
       return;
     }
 
@@ -944,8 +1038,8 @@ export class CharacterAnimator {
       this.tintFlash(0xff4444, 100);
     }
 
-    this.container.x = originX + nx * this.config.hurtKnockback;
-    this.container.y = originY + ny * this.config.hurtKnockback;
+    this.container.x = originX + nx * this.config.hurtKnockback * strength;
+    this.container.y = originY + ny * this.config.hurtKnockback * strength;
     this.container.scaleX = 0.9;
     this.container.scaleY = 1.1;
 
@@ -968,9 +1062,15 @@ export class CharacterAnimator {
     });
   }
 
-  private playFrameHurt(sourceX: number, sourceY: number): void {
+  private playFrameHurt(sourceX: number, sourceY: number, strength: number): void {
     const sprite = this.getSpriteChild();
     if (!sprite) return;
+    // Don't let a flinch cancel our own committed swing or dodge — just
+    // jolt the sprite so the hit still reads.
+    if (this.state === 'attack' || this.state === 'cast' || this.state === 'dodge') {
+      this.jolt(strength);
+      return;
+    }
 
     const savedState = this.state === 'walk' ? 'walk' : 'idle';
     this.cancelTweens();
@@ -985,17 +1085,24 @@ export class CharacterAnimator {
     const distance = Math.hypot(dx, dy) || 1;
     const nx = dx / distance;
     const ny = dy / distance;
-    const recoil = Math.min(8, this.config.hurtKnockback * 0.65);
-    if (this.config.hurtFlash) this.tintFlash(0xff5b5b, 90);
+    // Red pain tint unless a white impact flash is already showing.
+    if (this.config.hurtFlash && !this.flashTimer) this.tintFlash(0xff6b6b, 100);
+    const recoil = Math.min(14, this.config.hurtKnockback * 0.65 * strength);
+    const squash = Math.min(0.2, 0.1 * strength);
+    // Snap to the recoil pose instantly (the hit-stop holds it), then ease back.
+    sprite.x = this.frameBaseX + nx * recoil;
+    sprite.y = this.frameBaseY + ny * recoil * 0.45 + 2;
+    sprite.scaleX = this.frameBaseScaleX * (1 + squash);
+    sprite.scaleY = this.frameBaseScaleY * (1 - squash * 0.8);
+    sprite.angle = this.frameBaseAngle + Math.sign(nx || 1) * 5 * Math.min(1.6, strength);
 
     this.addTween({
       targets: sprite,
-      x: this.frameBaseX + nx * recoil,
-      y: this.frameBaseY + ny * recoil * 0.45 + 2,
-      scaleX: this.frameBaseScaleX * 0.9,
-      scaleY: this.frameBaseScaleY * 1.08,
-      angle: this.frameBaseAngle + Math.sign(nx || 1) * 4,
-      duration: this.config.hurtDuration * 0.38,
+      x: this.frameBaseX + nx * recoil * 0.7,
+      y: this.frameBaseY + ny * recoil * 0.3 + 1,
+      scaleX: this.frameBaseScaleX * 0.94,
+      scaleY: this.frameBaseScaleY * 1.06,
+      duration: this.config.hurtDuration * 0.3,
       ease: 'Expo.easeOut',
       onComplete: () => {
         if (this.state !== 'hurt') return;
@@ -1021,8 +1128,13 @@ export class CharacterAnimator {
 
   // ── Death Animation ───────────────────────────────────────────────────
 
-  playDeath(onComplete?: () => void): void {
+  /**
+   * @param fromX/fromY where the killing blow came from; the body is thrown
+   *   away from it. Omit for an in-place collapse (player death).
+   */
+  playDeath(onComplete?: () => void, fromX?: number, fromY?: number): void {
     this.cancelTweens();
+    this.releaseHitFreeze();
     this.dead = true;
     this.state = 'death';
 
@@ -1032,6 +1144,10 @@ export class CharacterAnimator {
     const sprite = this.getSpriteChild();
     if (this.hasFrameAnims && sprite) {
       this.clearFrameMotion();
+      if (fromX !== undefined && fromY !== undefined) {
+        this.playThrownDeath(sprite, fromX, fromY, duration, onComplete);
+        return;
+      }
       this.addTween({
         targets: sprite,
         y: this.frameBaseY + 5,
@@ -1109,10 +1225,78 @@ export class CharacterAnimator {
     }
   }
 
+  /** Killing blow: the body is flung away in a short arc, lands, then fades. */
+  private playThrownDeath(
+    sprite: Phaser.GameObjects.Sprite,
+    fromX: number,
+    fromY: number,
+    duration: number,
+    onComplete?: () => void,
+  ): void {
+    const dx = this.container.x - fromX;
+    const dy = this.container.y - fromY;
+    const dist = Math.hypot(dx, dy) || 1;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const heavy = this.config.deathDuration >= 750;
+    const throwDist = heavy ? 6 : 16;
+    const airMs = Math.max(160, duration * 0.35);
+    const dir = Math.sign(nx || 1);
+    this.setFacing(-nx);
+
+    // Horizontal travel + spin
+    this.addTween({
+      targets: sprite,
+      x: this.frameBaseX + nx * throwDist,
+      angle: this.frameBaseAngle + dir * (heavy ? 8 : 22),
+      duration: airMs,
+      ease: 'Quad.easeOut',
+    });
+    // Vertical hop: up, then land slightly further along the ground plane
+    this.addTween({
+      targets: sprite,
+      y: this.frameBaseY - (heavy ? 3 : 9),
+      duration: airMs * 0.4,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        this.addTween({
+          targets: sprite,
+          y: this.frameBaseY + ny * throwDist * 0.5 + 3,
+          scaleY: this.frameBaseScaleY * 0.9,
+          scaleX: this.frameBaseScaleX * 1.08,
+          duration: airMs * 0.6,
+          ease: 'Quad.easeIn',
+          onComplete: () => {
+            this.addTween({
+              targets: sprite,
+              alpha: 0,
+              y: sprite.y + 4,
+              duration: Math.max(200, duration * 0.6),
+              delay: 120,
+              ease: 'Cubic.easeIn',
+              onComplete,
+            });
+          },
+        });
+      },
+    });
+  }
+
+  /**
+   * Flinch without leaving the current action (hit while swinging): a pain
+   * tint plus a short micro-freeze. Position is owned by the action's tweens.
+   */
+  private jolt(strength: number): void {
+    if (this.config.hurtFlash && !this.flashTimer) this.tintFlash(0xff6b6b, 90);
+    this.triggerHitFreeze(Math.min(40, 20 * strength));
+  }
+
   // ── Private Helpers ──────────────────────────────────────────────────
 
   private finishFrameAction(expectedState: AnimState): void {
     if (this.dead || this.state !== expectedState) return;
+    const sprite = this.getSpriteChild();
+    if (sprite) sprite.anims.timeScale = 1;
     this.clearFrameMotion();
     this.prevState = this.state;
     this.state = 'idle';
@@ -1137,7 +1321,8 @@ export class CharacterAnimator {
 
   private cancelTweens(): void {
     for (const tween of this.tweens) {
-      if (tween && tween.isPlaying()) {
+      // Include tweens paused by hit-stop, or they'd linger in the manager.
+      if (tween && (tween.isPlaying() || tween.isPaused())) {
         tween.stop();
         tween.destroy();
       }
@@ -1187,6 +1372,8 @@ export class CharacterAnimator {
 
   cleanup(): void {
     this.cancelTweens();
+    this.flashTimer?.remove(false);
+    this.flashTimer = null;
     this.dead = true;
   }
 }

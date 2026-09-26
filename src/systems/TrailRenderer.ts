@@ -1,94 +1,45 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT } from '../config';
+import { FxEngine } from '../graphics/vfx/FxEngine';
+import { FxKit } from '../graphics/vfx/FxKit';
 
 /**
- * Render-texture based trail effects: weapon slash trails, ground scorch marks, dash ghosts.
- * Uses two RenderTextures: one for weapon trails (entity depth), one for ground marks.
+ * Weapon slash trails, ground scorch marks and dash ghosts.
+ *
+ * Everything is a pooled world-space sprite from FxEngine, so marks stay
+ * pinned to the ground while the camera moves and cost nothing when idle
+ * (the old version redrew two full-screen RenderTextures every frame).
  */
 export class TrailRenderer {
-  private scene: Phaser.Scene;
-  private trailRT: Phaser.GameObjects.RenderTexture;
-  private groundRT: Phaser.GameObjects.RenderTexture;
-  private trailImage: Phaser.GameObjects.Image;
-  private groundImage: Phaser.GameObjects.Image;
-  private slashStamp: Phaser.GameObjects.Image;
-  private groundStamp: Phaser.GameObjects.Image;
-  private ghostStamp: Phaser.GameObjects.Image;
-  private fadeCounter = 0;
+  private fx: FxKit;
 
   constructor(scene: Phaser.Scene) {
-    this.scene = scene;
-
-    // Weapon trail layer — between entities and UI
-    this.trailRT = scene.make.renderTexture({ x: 0, y: 0, width: GAME_WIDTH, height: GAME_HEIGHT }, false);
-    this.trailImage = scene.add.image(0, 0, '__DEFAULT').setOrigin(0, 0);
-    this.trailImage.setTexture(this.trailRT.texture.key);
-    this.trailImage.setScrollFactor(0);
-    this.trailImage.setDepth(1499);
-    this.trailImage.setBlendMode(Phaser.BlendModes.ADD);
-
-    // Ground scorch layer — below entities
-    this.groundRT = scene.make.renderTexture({ x: 0, y: 0, width: GAME_WIDTH, height: GAME_HEIGHT }, false);
-    this.groundImage = scene.add.image(0, 0, '__DEFAULT').setOrigin(0, 0);
-    this.groundImage.setTexture(this.groundRT.texture.key);
-    this.groundImage.setScrollFactor(0);
-    this.groundImage.setDepth(1);
-    this.groundImage.setAlpha(0.7);
-
-    this.slashStamp = scene.make.image({ x: 0, y: 0, key: 'particle_slash' }, false);
-    this.groundStamp = scene.make.image({ x: 0, y: 0, key: 'particle_smoke' }, false);
-    this.ghostStamp = scene.make.image({ x: 0, y: 0, key: 'particle_circle' }, false);
+    this.fx = new FxKit(FxEngine.for(scene));
   }
 
   // ── Weapon Slash Trail ──────────────────────────────────
 
   stampSlash(worldX: number, worldY: number, angle: number, color: number = 0xffffff, length: number = 30): void {
-    const cam = this.scene.cameras.main;
-    const screenX = (worldX - cam.scrollX) * cam.zoom;
-    const screenY = (worldY - cam.scrollY) * cam.zoom;
-    const scaleX = Math.max(0.4, (length * 2) / 32);
-
-    this.slashStamp
-      .setPosition(screenX, screenY)
-      .setRotation(angle)
-      .setTint(color)
-      .setAlpha(0.28)
-      .setScale(scaleX * 1.25, 1.1);
-    this.trailRT.draw(this.slashStamp);
-
-    this.slashStamp
-      .setAlpha(0.85)
-      .setScale(scaleX, 0.45);
-    this.trailRT.draw(this.slashStamp);
+    const e = this.fx.e;
+    const k = length / 30;
+    // thin lens-shaped smear along the swing + faint wide afterglow
+    e.spawn('fx_streak', worldX + Math.cos(angle) * 6 * k, worldY + Math.sin(angle) * 3 * k, 170)
+      .color(color).spinning(angle).scaleXY(1.1 * k, 1.1, 1.3 * k, 0.3, 2).fade(0.85, 0, 0, 1.4);
+    e.spawn('fx_streak', worldX, worldY, 220)
+      .color(color).spinning(angle).scaleXY(1.2 * k, 2.4, 1.4 * k, 1.2, 2).fade(0.25, 0);
   }
 
   // ── Ground Scorch Mark ──────────────────────────────────
 
   stampGround(worldX: number, worldY: number, type: 'fire' | 'ice' | 'lightning' = 'fire', radius: number = 20): void {
-    const cam = this.scene.cameras.main;
-    const screenX = (worldX - cam.scrollX) * cam.zoom;
-    const screenY = (worldY - cam.scrollY) * cam.zoom;
-
-    const colors: Record<string, number> = {
-      fire: 0x331100,
-      ice: 0x112233,
-      lightning: 0x111133,
-    };
-
-    const r = radius * cam.zoom;
-    const scale = Math.max(0.2, (r * 2) / 24);
-
-    this.groundStamp
-      .setPosition(screenX, screenY)
-      .setTint(colors[type] || 0x222222)
-      .setAlpha(0.28)
-      .setScale(scale);
-    this.groundRT.draw(this.groundStamp);
-
-    this.groundStamp
-      .setAlpha(0.16)
-      .setScale(scale * 0.6);
-    this.groundRT.draw(this.groundStamp);
+    if (type === 'ice') {
+      this.fx.decal(worldX, worldY, 'fx_frost', 0xffffff, radius * 0.9, 1600, { alpha: 0.6 });
+    } else if (type === 'lightning') {
+      this.fx.decal(worldX, worldY, 'fx_scorch', 0x9a9ab8, radius * 0.7, 1400, { alpha: 0.5 });
+      this.fx.decal(worldX, worldY, 'fx_crack_glow', 0x8c8cff, radius * 0.8, 360, { add: true, alpha: 0.9, pow: 1.5 });
+    } else {
+      this.fx.decal(worldX, worldY, 'fx_scorch', 0xffffff, radius * 0.8, 1800, { alpha: 0.6 });
+      this.fx.decal(worldX, worldY, 'fx_glow', 0xff6a1a, radius * 0.6, 500, { add: true, alpha: 0.5 });
+    }
   }
 
   // ── Dash Ghost Trail ────────────────────────────────────
@@ -107,50 +58,23 @@ export class TrailRenderer {
       angle?: number;
     } = {},
   ): void {
-    const cam = this.scene.cameras.main;
-    const screenX = (worldX - cam.scrollX) * cam.zoom;
-    const screenY = (worldY - cam.scrollY) * cam.zoom;
-
-    if (this.scene.textures.exists(textureKey)) {
-      this.ghostStamp
-        .setTexture(textureKey)
-        .setFrame(options.frame ?? 0)
-        .setPosition(screenX, screenY)
-        .setAlpha(options.alpha ?? 0.4)
-        .setTint(options.tint ?? 0x4444ff)
-        .setScale(
-          (options.scaleX ?? 1) * cam.zoom,
-          (options.scaleY ?? options.scaleX ?? 1) * cam.zoom,
-        )
-        .setFlipX(options.flipX ?? false)
-        .setAngle(options.angle ?? 0);
-      this.trailRT.draw(this.ghostStamp);
-    }
+    const e = this.fx.e;
+    if (!e.scene.textures.exists(textureKey)) return;
+    const sx = (options.scaleX ?? 1) * (options.flipX ? -1 : 1);
+    const sy = options.scaleY ?? options.scaleX ?? 1;
+    e.spawn(textureKey, worldX, worldY, 260, options.frame ?? 0)
+      .color(options.tint ?? 0x4444ff).world(120)
+      .scaleXY(sx, sy, sx * 1.04, sy * 1.02).spinning(Phaser.Math.DegToRad(options.angle ?? 0))
+      .fade(options.alpha ?? 0.4, 0, 0, 1.3).add();
   }
 
   // ── Per-Frame Fade ──────────────────────────────────────
 
-  update(): void {
-    this.fadeCounter++;
-    // Weapon trails fade fast (every 2 frames)
-    if (this.fadeCounter % 2 === 0) {
-      this.trailRT.fill(0x000000, 0.15);
-    }
-    // Ground marks fade very slowly (every 10 frames)
-    if (this.fadeCounter % 10 === 0) {
-      this.groundRT.fill(0x000000, 0.01);
-    }
-  }
+  /** Kept for API compatibility; FxEngine animates the marks itself. */
+  update(): void { /* no-op */ }
 
   // ── Cleanup ─────────────────────────────────────────────
 
-  destroy(): void {
-    this.trailRT.destroy();
-    this.groundRT.destroy();
-    this.trailImage.destroy();
-    this.groundImage.destroy();
-    this.slashStamp.destroy();
-    this.groundStamp.destroy();
-    this.ghostStamp.destroy();
-  }
+  /** Pooled sprites belong to the scene's FxEngine and are released on shutdown. */
+  destroy(): void { /* no-op */ }
 }

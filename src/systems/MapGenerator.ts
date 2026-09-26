@@ -241,6 +241,175 @@ function cellularAutomata(
   return current;
 }
 
+/** Weighted decoration pools per theme: `grove` fills dense clusters, `open` dots the rest. */
+const DECOR_POOLS: Record<MapTheme, { grove: [string, number][]; open: [string, number][]; tall: string[] }> = {
+  plains: {
+    grove: [['tree', 5], ['tree_round', 3], ['bush', 3], ['grass', 2]],
+    open: [['grass', 6], ['flower', 4], ['rock', 1.5], ['bush', 1], ['mushroom_red', 0.6], ['boulder', 0.5], ['tree_round', 0.5]],
+    tall: ['tree', 'tree_round', 'boulder'],
+  },
+  forest: {
+    grove: [['tree_forest', 5], ['tree_forest_tall', 3], ['fern', 3], ['mushroom', 2]],
+    open: [['grass_forest', 5], ['fern', 2], ['rock_moss', 2], ['mushroom', 1], ['crystal_blue', 0.3], ['tree_forest_tall', 0.6]],
+    tall: ['tree_forest', 'tree_forest_tall', 'crystal_blue'],
+  },
+  mountain: {
+    grove: [['pine', 5], ['boulder_snow', 1], ['rock_slate', 1]],
+    open: [['rock_slate', 4], ['boulder_snow', 1.5], ['grass_dry', 3], ['dry_shrub', 1.5], ['dead_tree', 0.5], ['pine', 0.6]],
+    tall: ['pine', 'boulder_snow', 'dead_tree'],
+  },
+  desert: {
+    grove: [['cactus', 1.6], ['cactus_barrel', 3], ['dry_shrub', 2.5], ['rock_sand', 2], ['boulder_sand', 0.6]],
+    open: [['rock_sand', 3], ['boulder_sand', 1], ['bones', 1.5], ['grass_dry', 2], ['cactus_barrel', 1], ['dead_tree', 0.4]],
+    tall: ['cactus', 'boulder_sand', 'dead_tree'],
+  },
+  abyss: {
+    grove: [['charred_tree', 4], ['crystal', 3], ['boulder_basalt', 1], ['rock_basalt', 1]],
+    open: [['rock_basalt', 4], ['bones', 2], ['grass_ash', 3], ['mushroom', 1], ['crystal', 0.5]],
+    tall: ['charred_tree', 'crystal', 'boulder_basalt'],
+  },
+};
+
+function pickWeighted(pool: [string, number][], r: number): string {
+  const total = pool.reduce((t, [, w]) => t + w, 0);
+  let x = r * total;
+  for (const [type, w] of pool) {
+    x -= w;
+    if (x <= 0) return type;
+  }
+  return pool[pool.length - 1][0];
+}
+
+/** Smooth value noise in [0,1] for grove clustering (independent of the tile RNG). */
+function groveNoise(c: number, r: number, seed: number, scale: number): number {
+  const h = (x: number, y: number) => {
+    let n = (x * 374761393 + y * 668265263 + seed * 2246822519) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  };
+  const x = c / scale;
+  const y = r / scale;
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const fx = x - x0;
+  const fy = y - y0;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const a = h(x0, y0) + (h(x0 + 1, y0) - h(x0, y0)) * sx;
+  const b = h(x0, y0 + 1) + (h(x0 + 1, y0 + 1) - h(x0, y0 + 1)) * sx;
+  return a + (b - a) * sy;
+}
+
+function scatterDecorations(
+  map: MapData,
+  theme: MapTheme,
+  tiles: number[][],
+  collisions: boolean[][],
+  rng: SeededRandom,
+  config: ThemeConfig,
+): { col: number; row: number; type: string }[] {
+  const { cols, rows } = map;
+  const pool = DECOR_POOLS[theme] ?? { grove: config.decorTypes.map(t => [t, 1] as [string, number]), open: config.decorTypes.map(t => [t, 1] as [string, number]), tall: [] };
+  const tallSet = new Set(pool.tall);
+  const seed = map.seed ?? 42;
+
+  // Keep-out zones for everything: exits, camps, player start, NPCs, entrances.
+  const blocked = create2D(cols, rows, false);
+  // Wider keep-out for tall props (they hide combat): start / camps / exits.
+  const noTall = create2D(cols, rows, false);
+  const block = (grid: boolean[][], col: number, row: number, rad: number) => {
+    for (let r = row - rad; r <= row + rad; r++) {
+      for (let c = col - rad; c <= col + rad; c++) {
+        if (r >= 0 && r < rows && c >= 0 && c < cols) grid[r][c] = true;
+      }
+    }
+  };
+  for (const exit of map.exits) { block(blocked, exit.col, exit.row, 3); block(noTall, exit.col, exit.row, 5); }
+  for (const camp of map.camps) { block(blocked, camp.col, camp.row, 6); block(noTall, camp.col, camp.row, 9); }
+  block(blocked, map.playerStart.col, map.playerStart.row, 2);
+  block(noTall, map.playerStart.col, map.playerStart.row, 5);
+  for (const npc of map.fieldNpcs ?? []) { block(blocked, npc.col, npc.row, 1); block(noTall, npc.col, npc.row, 2); }
+  for (const e of map.subDungeonEntrances ?? []) { block(blocked, e.col, e.row, 2); block(noTall, e.col, e.row, 3); }
+  for (const d of map.storyDecorations ?? []) block(noTall, d.col, d.row, 2);
+  for (const sp of map.spawns) block(noTall, sp.col, sp.row, 2);
+
+  const dirtIsGround = config.primaryTile === TILE_DIRT;
+  // Chebyshev distance (capped) to the nearest path tile and nearest obstacle.
+  const distTo = (isSource: (r: number, c: number) => boolean, cap: number): number[][] => {
+    const d = create2D(cols, rows, cap);
+    let frontier: [number, number][] = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if (isSource(r, c)) { d[r][c] = 0; frontier.push([r, c]); }
+    for (let k = 1; k < cap && frontier.length; k++) {
+      const next: [number, number][] = [];
+      for (const [r, c] of frontier) {
+        for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+          const rr = r + dr, cc = c + dc;
+          if (rr < 0 || rr >= rows || cc < 0 || cc >= cols || d[rr][cc] <= k) continue;
+          d[rr][cc] = k;
+          next.push([rr, cc]);
+        }
+      }
+      frontier = next;
+    }
+    return d;
+  };
+  // Paths are carved as connected dirt runs; the secondary-tile scatter leaves
+  // isolated dirt specks, which should not push trees away.
+  const isPath = (r: number, c: number): boolean => {
+    if (tiles[r][c] !== TILE_DIRT) return false;
+    let n = 0;
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      if ((dr || dc) && tiles[r + dr]?.[c + dc] === TILE_DIRT) n++;
+    }
+    return n >= 2;
+  };
+  const pathDist = dirtIsGround ? create2D(cols, rows, 9) : distTo(isPath, 3);
+  const obstacleDist = distTo((r, c) => tiles[r][c] === TILE_WALL || tiles[r][c] === TILE_WATER, 3);
+  // Groves hug the map rim and obstacles; open ground stays clear for combat.
+  const forest = theme === 'forest';
+  const openTallRate = forest ? 0.04 : 0.1;
+  const groveTallRate = forest ? 0.22 : 0.45;
+  const rimTallRate = forest ? 0.5 : 0.8;
+  const hugTallRate = forest ? 0.2 : 0.3;
+
+  const tallAt = create2D(cols, rows, false);
+  const groundPool = (list: [string, number][]) => list.filter(([t]) => !tallSet.has(t));
+  // Rejected tall spots become low ground cover (not more waist-high bushes).
+  const LOW = /grass|flower|rock|bones|mushroom|fern/;
+  const lowCover = groundPool(pool.open).filter(([t]) => LOW.test(t) && !t.startsWith('boulder'));
+  const decorations: { col: number; row: number; type: string }[] = [];
+  for (let r = 2; r < rows - 2; r++) {
+    for (let c = 2; c < cols - 2; c++) {
+      // Dirt marks paths — except in the desert, where sand (dirt) is the ground itself.
+      if (!collisions[r][c] || isCampTile(tiles[r][c]) || (tiles[r][c] === TILE_DIRT && !dirtIsGround) || blocked[r][c]) continue;
+      const n = groveNoise(c, r, seed, 9);
+      const inGrove = n > 0.6;
+      const density = inGrove ? config.decorDensity * 3.2 : config.decorDensity * 1.3;
+      if (!rng.chance(density)) continue;
+      let type = pickWeighted(inGrove ? pool.grove : pool.open, rng.next());
+      if (tallSet.has(type)) {
+        const rim = Math.min(c, r, cols - 1 - c, rows - 1 - r) <= 6;
+        const hugsObstacle = obstacleDist[r][c] <= 1;
+        const rate = rim ? rimTallRate : hugsObstacle ? hugTallRate : inGrove ? groveTallRate : openTallRate;
+        let ok = !noTall[r][c] && pathDist[r][c] > 2 && rng.chance(rate);
+        // Canopies must not pile up: no neighbour, and nothing stacked straight
+        // above/below on screen (iso dr == dc) within 2 tiles.
+        for (let dr = -2; dr <= 2 && ok; dr++) {
+          for (let dc = -2; dc <= 2; dc++) {
+            const near = Math.abs(dr) <= 1 && Math.abs(dc) <= 1;
+            const stacked = dr === dc || Math.abs(dr - dc) === 1;
+            if ((near || stacked) && tallAt[r + dr]?.[c + dc]) { ok = false; break; }
+          }
+        }
+        if (ok) tallAt[r][c] = true;
+        else type = pickWeighted(lowCover.length ? lowCover : pool.open, rng.next());
+      }
+      decorations.push({ col: c, row: r, type });
+    }
+  }
+  return decorations;
+}
+
 export class MapGenerator {
   /**
    * Generate tiles, collisions, and decorations for a MapData
@@ -485,18 +654,8 @@ export class MapGenerator {
       }
     }
 
-    // (k) Place decorations
-    const decorations: { col: number; row: number; type: string }[] = [];
-    for (let r = 2; r < rows - 2; r++) {
-      for (let c = 2; c < cols - 2; c++) {
-        if (collisions[r][c] && !isCampTile(tiles[r][c]) && tiles[r][c] !== TILE_DIRT) {
-          if (rng.chance(config.decorDensity)) {
-            const decorType = config.decorTypes[rng.nextInt(0, config.decorTypes.length - 1)];
-            decorations.push({ col: c, row: r, type: decorType });
-          }
-        }
-      }
-    }
+    // (k) Place decorations — clustered groves + open-ground cover
+    const decorations = scatterDecorations(map, theme, tiles, collisions, rng, config);
 
     return {
       ...map,

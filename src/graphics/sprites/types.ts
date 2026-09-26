@@ -53,6 +53,11 @@ export interface EntityDrawer {
   readonly frameW: number;       // before TEXTURE_SCALE
   readonly frameH: number;       // before TEXTURE_SCALE
   readonly totalFrames: number;
+  /**
+   * True when the drawer already applies the ink outline itself (rigged
+   * characters). Otherwise the sheet generator runs the shared ink pass.
+   */
+  readonly inked?: boolean;
 
   drawFrame(
     ctx: CanvasRenderingContext2D,
@@ -70,40 +75,40 @@ export type FrameSizeRegistry = Record<string, { frameWidth: number; frameHeight
 /** Build frame-size registry from the existing configs. Used by BootScene for spritesheet loading. */
 export function buildFrameSizeRegistry(): FrameSizeRegistry {
   return {
-    // Players (64x96, PLAYER_TOTAL_FRAMES frames)
-    player_warrior: { frameWidth: 64, frameHeight: 96 },
-    player_mage: { frameWidth: 64, frameHeight: 96 },
-    player_rogue: { frameWidth: 64, frameHeight: 96 },
+    // Players (96x96, PLAYER_TOTAL_FRAMES frames; wide for weapon reach)
+    player_warrior: { frameWidth: 96, frameHeight: 96 },
+    player_mage: { frameWidth: 96, frameHeight: 96 },
+    player_rogue: { frameWidth: 96, frameHeight: 96 },
     // Monsters (various sizes, 20 frames)
-    monster_slime: { frameWidth: 48, frameHeight: 40 },
-    monster_goblin: { frameWidth: 48, frameHeight: 56 },
-    monster_goblin_chief: { frameWidth: 60, frameHeight: 68 },
-    monster_skeleton: { frameWidth: 44, frameHeight: 64 },
-    monster_zombie: { frameWidth: 44, frameHeight: 60 },
-    monster_werewolf: { frameWidth: 52, frameHeight: 64 },
-    monster_werewolf_alpha: { frameWidth: 56, frameHeight: 68 },
-    monster_gargoyle: { frameWidth: 52, frameHeight: 60 },
-    monster_stone_golem: { frameWidth: 60, frameHeight: 68 },
-    monster_mountain_troll: { frameWidth: 64, frameHeight: 72 },
-    monster_fire_elemental: { frameWidth: 48, frameHeight: 60 },
-    monster_desert_scorpion: { frameWidth: 52, frameHeight: 44 },
-    monster_sandworm: { frameWidth: 56, frameHeight: 48 },
-    monster_phoenix: { frameWidth: 56, frameHeight: 56 },
-    monster_imp: { frameWidth: 40, frameHeight: 48 },
-    monster_lesser_demon: { frameWidth: 52, frameHeight: 64 },
-    monster_succubus: { frameWidth: 48, frameHeight: 64 },
-    monster_demon_lord: { frameWidth: 72, frameHeight: 84 },
-    monster_dungeon_shade: { frameWidth: 48, frameHeight: 60 },
-    monster_dungeon_fiend: { frameWidth: 56, frameHeight: 68 },
-    monster_dungeon_boss: { frameWidth: 80, frameHeight: 96 },
-    monster_dungeon_mid_boss: { frameWidth: 64, frameHeight: 76 },
-    monster_goblin_shaman: { frameWidth: 52, frameHeight: 60 },
-    monster_shadow_weaver: { frameWidth: 52, frameHeight: 64 },
-    monster_iron_guardian: { frameWidth: 60, frameHeight: 72 },
-    monster_sand_wraith: { frameWidth: 52, frameHeight: 64 },
-    monster_void_herald: { frameWidth: 56, frameHeight: 68 },
-    monster_sub_mine_guardian: { frameWidth: 56, frameHeight: 68 },
-    monster_sub_altar_keeper: { frameWidth: 56, frameHeight: 68 },
+    monster_slime: { frameWidth: 72, frameHeight: 40 },
+    monster_goblin: { frameWidth: 72, frameHeight: 56 },
+    monster_goblin_chief: { frameWidth: 84, frameHeight: 68 },
+    monster_skeleton: { frameWidth: 76, frameHeight: 64 },
+    monster_zombie: { frameWidth: 68, frameHeight: 60 },
+    monster_werewolf: { frameWidth: 88, frameHeight: 64 },
+    monster_werewolf_alpha: { frameWidth: 96, frameHeight: 68 },
+    monster_gargoyle: { frameWidth: 84, frameHeight: 60 },
+    monster_stone_golem: { frameWidth: 84, frameHeight: 68 },
+    monster_mountain_troll: { frameWidth: 96, frameHeight: 72 },
+    monster_fire_elemental: { frameWidth: 60, frameHeight: 60 },
+    monster_desert_scorpion: { frameWidth: 72, frameHeight: 44 },
+    monster_sandworm: { frameWidth: 72, frameHeight: 48 },
+    monster_phoenix: { frameWidth: 72, frameHeight: 56 },
+    monster_imp: { frameWidth: 64, frameHeight: 48 },
+    monster_lesser_demon: { frameWidth: 72, frameHeight: 64 },
+    monster_succubus: { frameWidth: 100, frameHeight: 64 },
+    monster_demon_lord: { frameWidth: 120, frameHeight: 84 },
+    monster_dungeon_shade: { frameWidth: 64, frameHeight: 60 },
+    monster_dungeon_fiend: { frameWidth: 80, frameHeight: 68 },
+    monster_dungeon_boss: { frameWidth: 128, frameHeight: 96 },
+    monster_dungeon_mid_boss: { frameWidth: 100, frameHeight: 76 },
+    monster_goblin_shaman: { frameWidth: 80, frameHeight: 60 },
+    monster_shadow_weaver: { frameWidth: 88, frameHeight: 64 },
+    monster_iron_guardian: { frameWidth: 104, frameHeight: 72 },
+    monster_sand_wraith: { frameWidth: 76, frameHeight: 64 },
+    monster_void_herald: { frameWidth: 96, frameHeight: 68 },
+    monster_sub_mine_guardian: { frameWidth: 80, frameHeight: 68 },
+    monster_sub_altar_keeper: { frameWidth: 84, frameHeight: 68 },
     // NPCs (80x120, 24 frames)
     npc_blacksmith: { frameWidth: 80, frameHeight: 120 },
     npc_blacksmith_advanced: { frameWidth: 80, frameHeight: 120 },
@@ -129,5 +134,34 @@ export function buildFrameSizeRegistry(): FrameSizeRegistry {
     npc_mercenary_ranged: { frameWidth: 80, frameHeight: 120 },
     npc_mercenary_healer: { frameWidth: 80, frameHeight: 120 },
     npc_mercenary_mage: { frameWidth: 80, frameHeight: 120 },
+  };
+}
+
+/**
+ * Widest texture we emit. 4096 is the WebGL MAX_TEXTURE_SIZE floor on older
+ * mobile / integrated GPUs; a single-row strip wider than the device limit
+ * uploads as a black rectangle, so sheets wrap into a grid instead.
+ */
+export const MAX_SHEET_DIMENSION = 4096;
+
+export interface SheetGrid {
+  frameW: number;
+  frameH: number;
+  cols: number;
+  rows: number;
+  width: number;
+  height: number;
+}
+
+export function computeSheetGrid(frameW: number, frameH: number, totalFrames: number): SheetGrid {
+  const cols = Math.max(1, Math.min(totalFrames, Math.floor(MAX_SHEET_DIMENSION / frameW)));
+  const rows = Math.max(1, Math.ceil(totalFrames / cols));
+  return { frameW, frameH, cols, rows, width: cols * frameW, height: rows * frameH };
+}
+
+export function sheetFrameOrigin(grid: SheetGrid, index: number): { x: number; y: number } {
+  return {
+    x: (index % grid.cols) * grid.frameW,
+    y: Math.floor(index / grid.cols) * grid.frameH,
   };
 }

@@ -1,391 +1,512 @@
 // src/graphics/sprites/monsters/Succubus.ts
-import type { EntityDrawer, MonsterAction } from '../types';
-import type { DrawUtils } from '../../DrawUtils';
+//
+// 魅魔 — a tall, poised archfiend duelist: swept-back ram horns over a
+// gold circlet, a long mane of violet-black hair, folded bat wings and a
+// spaded tail. She wears a high-collared obsidian cuirass with rose-gold
+// filigree over a split crimson battle robe, armoured greaves and clawed
+// gauntlets, and fights with a barbed whip wreathed in magenta abyssfire —
+// cocking it back in a looping wind-up and cracking it out to full reach.
+import type { MonsterAction } from '../types';
+import {
+  CENTER_X,
+  GROUND_Y,
+  along,
+  blobPath,
+  capsulePath,
+  cel,
+  clothChain,
+  ellipsePath,
+  glow,
+  inBone,
+  limb,
+  polyPath,
+  samplePoseTrack,
+  tone,
+  vec,
+  type Key,
+  type V,
+} from '../rig/Rig';
+import { basePose, solveSkeleton, spun, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
+import { humanoidMonster } from '../rig/MonsterKit';
+import { batWing, curlChain, demonTail, embers, hornPath, hornRidges, localPt, taperPath, type WingLook } from './Imp';
 
-const SKIN_MID   = 0x611032;
-const SKIN_DARK  = 0x3f0721;
-const SKIN_LIGHT = 0x821c49;
-const HAIR_COLOR = 0x1d0712;
-const WING_COLOR = 0x3f0b21;
-const HORN_COLOR = 0x290610;
-const EYE_COLOR  = 0xff44aa;
-const CLOTH_COLOR = 0x1d0610;
-const LIP_COLOR  = 0x771638;
+// ── Palette ─────────────────────────────────────────────────────────────
+const SKIN = tone(0x9c6490, { light: 0.34 });
+const SKIN_FAR = tone(0x683c64, { light: 0.18 });
+const HAIR = tone(0x3a1848, { light: 0.3 });
+const HAIR_FAR = tone(0x24102e, { light: 0.2 });
+const OBSIDIAN = tone(0x2e2238, { light: 0.4 });
+const OBSIDIAN_FAR = tone(0x1e1626, { light: 0.25 });
+const GILT = tone(0xd49a62, { light: 0.45 });
+const ROBE = tone(0x8a1638, { light: 0.28 });
+const ROBE_IN = tone(0x4e0c24, { light: 0.15 });
+const HORN = tone(0xd6bcc4, { light: 0.4, shadow: 0.5 });
+const LEATHER = tone(0x3a1e2a, { light: 0.3 });
+const WING: WingLook = { membrane: tone(0x5c1a4a, { light: 0.25, shadow: 0.5 }), bone: tone(0x7c2a52, { light: 0.3 }), tatter: 0.3 };
+const WING_FAR: WingLook = { membrane: tone(0x3a1030, { light: 0.15, shadow: 0.5 }), bone: tone(0x52183a), tatter: 0.3 };
+const ABYSSFIRE = 0xff2a86;
+const FIRE_CORE = 0xffb0e0;
+const EYE = 0xff4ad0;
 
-export const SuccubusDrawer: EntityDrawer = {
-  key: 'monster_succubus',
-  frameW: 48,
-  frameH: 64,
-  totalFrames: 20,
+const WHIP_LEN = 35;
 
-  drawFrame(ctx, frame, action, w, h, utils) {
-    const act = action as MonsterAction;
-    const s = w / 48;
+const PROP = {
+  thigh: 12, shin: 12.5, upperArm: 9.6, foreArm: 9.2,
+  torso: 15.5, neck: 7, ankle: 2.8,
+  hipN: vec(2, 0), hipF: vec(-2.2, -0.4),
+  shN: vec(1.2, 3.6), shF: vec(-3.8, 3),
+};
 
-    const frameCounts: Record<MonsterAction, number> = { idle: 4, walk: 6, attack: 4, hurt: 2, death: 4 };
-    const count = frameCounts[act] || 4;
-    const localFrame = frame % count;
-    const t = count > 1 ? localFrame / (count - 1) : 0;
-    const phase = (localFrame / count) * Math.PI * 2;
+// ── Parts ───────────────────────────────────────────────────────────────
 
-    let alpha = 1;
-    let bodyOffsetX = 0;
-    let bodyOffsetY = 0;
-    let wingSpread = 0.35;
-    let attackLunge = 0;
-    let globalRot = 0;
+function greave(ctx: CanvasRenderingContext2D, hip: V, knee: V, ankle: V, sole: V, far: boolean): void {
+  const plate = far ? OBSIDIAN_FAR : OBSIDIAN;
+  limb(ctx, hip, knee, 3.4, 2.6, far ? SKIN_FAR : SKIN);
+  limb(ctx, knee, ankle, 2.5, 1.7, plate);
+  // Pointed knee cop
+  cel(ctx, () => polyPath(ctx, [vec(knee.x - 1.6, knee.y - 2.6), vec(knee.x + 2.6, knee.y - 1), vec(knee.x + 1.4, knee.y + 2.6), vec(knee.x - 1.2, knee.y + 1.4)]), plate, { band: 0.5 });
+  ctx.fillStyle = far ? GILT.shade : GILT.base;
+  ctx.fillRect(knee.x + 0.2, knee.y - 0.4, 0.9, 0.9);
+  // Heeled, pointed sabaton
+  cel(ctx, () => polyPath(ctx, [
+    vec(ankle.x - 1.8, ankle.y - 1), vec(ankle.x + 1.4, ankle.y - 1.2),
+    vec(sole.x + 6, sole.y - 0.6), vec(sole.x + 2, sole.y), vec(sole.x - 0.6, sole.y - 1.2), vec(sole.x - 1.6, sole.y),
+    vec(sole.x - 2.2, sole.y), vec(ankle.x - 2, ankle.y + 1),
+  ]), plate, { band: 0.6 });
+}
 
-    switch (act) {
-      case 'idle':
-        bodyOffsetY = Math.sin(phase) * 1.5 * s;
-        wingSpread = 0.3 + Math.abs(Math.sin(phase)) * 0.25;
-        break;
-      case 'walk':
-        bodyOffsetX = Math.sin(phase) * 1.5 * s;
-        bodyOffsetY = -Math.abs(Math.sin(phase)) * 2 * s;
-        wingSpread = 0.35 + Math.abs(Math.sin(phase)) * 0.3;
-        break;
-      case 'attack':
-        attackLunge = t;
-        bodyOffsetX = t * 6 * s;
-        bodyOffsetY = -t * 3 * s;
-        wingSpread = 0.5 + t * 0.5;
-        break;
-      case 'hurt':
-        bodyOffsetX = -t * 4 * s;
-        alpha = 0.7 + t * 0.3;
-        wingSpread = 0.2;
-        break;
-      case 'death':
-        globalRot = t * Math.PI * 0.45;
-        bodyOffsetY = t * h * 0.4;
-        alpha = 1 - t * 0.8;
-        break;
-    }
+function arm(ctx: CanvasRenderingContext2D, sh: V, el: V, hand: V, far: boolean): void {
+  const plate = far ? OBSIDIAN_FAR : OBSIDIAN;
+  limb(ctx, sh, el, 2.2, 1.8, far ? SKIN_FAR : SKIN);
+  // Flared gauntlet from elbow to wrist
+  const ang = Math.atan2(hand.y - el.y, hand.x - el.x);
+  cel(ctx, () => blobPath(ctx, [localPt(el, ang, -1, -2.6), localPt(el, ang, 1.2, -2.2), localPt(hand, ang, -0.6, -1.8), localPt(hand, ang, -0.6, 1.8), localPt(el, ang, 1.2, 2.2), localPt(el, ang, -0.8, 1.8)]), plate, { band: 0.6 });
+  ctx.strokeStyle = far ? GILT.shade : GILT.base;
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  const g1 = localPt(el, ang, 1.2, -2.2);
+  const g2 = localPt(el, ang, 1.2, 2.2);
+  ctx.moveTo(g1.x, g1.y);
+  ctx.lineTo(g2.x, g2.y);
+  ctx.stroke();
+}
 
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    const cx = w / 2;
-    const baseY = h * 0.96;
-
-    ctx.translate(cx, baseY);
-    ctx.rotate(globalRot);
-    ctx.translate(-cx, -baseY);
-
-    // ── Shadow ────────────────────────────────────────────────────────────────
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    utils.fillEllipse(ctx, cx + bodyOffsetX, baseY + 1 * s, 11 * s, 2.5 * s);
-
-    // ── Elegant bat wings (behind body) ──────────────────────────────────────
-    const wingBaseX = cx + bodyOffsetX;
-    const wingBaseY = baseY - 36 * s + bodyOffsetY;
-
-    for (const side of [-1, 1]) {
-      const wSpan = (14 + wingSpread * 12) * s;
-      const wH = (10 + wingSpread * 9) * s;
-
-      // Main membrane — smooth curves
-      ctx.fillStyle = utils.rgb(WING_COLOR, 0.72);
-      ctx.beginPath();
-      ctx.moveTo(wingBaseX, wingBaseY);
-      ctx.quadraticCurveTo(
-        wingBaseX + side * wSpan * 0.55,
-        wingBaseY - wH * 1.3,
-        wingBaseX + side * wSpan,
-        wingBaseY - wH
-      );
-      ctx.quadraticCurveTo(
-        wingBaseX + side * wSpan * 0.75,
-        wingBaseY - wH * 0.1,
-        wingBaseX + side * 5 * s,
-        wingBaseY + 2 * s
-      );
-      ctx.closePath();
-      ctx.fill();
-
-      // Lower membrane lobe
-      ctx.fillStyle = utils.rgb(utils.darken(WING_COLOR, 15), 0.6);
-      ctx.beginPath();
-      ctx.moveTo(wingBaseX + side * 4 * s, wingBaseY + 2 * s);
-      ctx.quadraticCurveTo(
-        wingBaseX + side * wSpan * 0.7,
-        wingBaseY + 6 * s,
-        wingBaseX + side * wSpan * 0.85,
-        wingBaseY - wH * 0.3
-      );
-      ctx.quadraticCurveTo(
-        wingBaseX + side * wSpan * 0.6,
-        wingBaseY + 4 * s,
-        wingBaseX + side * 6 * s,
-        wingBaseY + 4 * s
-      );
-      ctx.closePath();
-      ctx.fill();
-
-      // Subtle vein
-      ctx.strokeStyle = utils.rgb(utils.darken(WING_COLOR, 25), 0.45);
-      ctx.lineWidth = 0.6 * s;
-      ctx.beginPath();
-      ctx.moveTo(wingBaseX, wingBaseY);
-      ctx.quadraticCurveTo(
-        wingBaseX + side * wSpan * 0.4,
-        wingBaseY - wH * 0.8,
-        wingBaseX + side * wSpan * 0.8,
-        wingBaseY - wH * 0.7
-      );
-      ctx.stroke();
-
-      // Wing edge highlight
-      ctx.strokeStyle = utils.rgb(SKIN_MID, 0.2);
-      ctx.lineWidth = 0.8 * s;
-      ctx.beginPath();
-      ctx.moveTo(wingBaseX, wingBaseY);
-      ctx.quadraticCurveTo(
-        wingBaseX + side * wSpan * 0.55,
-        wingBaseY - wH * 1.3,
-        wingBaseX + side * wSpan,
-        wingBaseY - wH
-      );
-      ctx.stroke();
-    }
-
-    // ── Slender legs ──────────────────────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const legPhase = act === 'walk' ? phase + (side === -1 ? 0 : Math.PI) : 0;
-      const hipX = cx + side * 4 * s + bodyOffsetX;
-      const hipY = baseY - 16 * s + bodyOffsetY;
-      const kneeX = hipX + side * 2 * s + Math.sin(legPhase) * 2 * s;
-      const kneeY = hipY + 8 * s;
-      const footX = kneeX - side * 0.5 * s + Math.sin(legPhase) * s;
-      const footY = baseY - 1 * s;
-
-      utils.drawLimb(ctx, [
-        { x: hipX, y: hipY },
-        { x: kneeX, y: kneeY },
-        { x: footX, y: footY },
-      ], 2.5 * s, SKIN_MID);
-
-      // Pointed toe
-      ctx.fillStyle = utils.rgb(CLOTH_COLOR);
-      ctx.beginPath();
-      ctx.moveTo(footX - 1.5 * s, footY);
-      ctx.lineTo(footX + 1.5 * s, footY);
-      ctx.lineTo(footX + side * 3 * s, footY + 2 * s);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    // ── Body with narrow waist ────────────────────────────────────────────────
-    const torsoX = cx + bodyOffsetX;
-    const torsoY = baseY - 32 * s + bodyOffsetY;
-
-    // Soft outline glow (red/orange — demonic)
-    utils.zoneEntityOutline(ctx, w, h);
-
-    // Hips
-    const hipGrad = ctx.createRadialGradient(torsoX - 2 * s, torsoY + 4 * s, 0, torsoX, torsoY + 6 * s, 9 * s);
-    hipGrad.addColorStop(0, utils.rgb(SKIN_LIGHT));
-    hipGrad.addColorStop(0.5, utils.rgb(SKIN_MID));
-    hipGrad.addColorStop(1, utils.rgb(SKIN_DARK));
-    ctx.fillStyle = hipGrad;
-    utils.fillEllipse(ctx, torsoX, torsoY + 6 * s, 8 * s, 9 * s);
-
-    // Dark clothing overlay on lower body
-    ctx.fillStyle = utils.rgb(CLOTH_COLOR, 0.65);
-    utils.fillEllipse(ctx, torsoX, torsoY + 7 * s, 7.5 * s, 8.5 * s);
-
-    // Waist (narrow inward)
-    const waistGrad = ctx.createRadialGradient(torsoX, torsoY, 0, torsoX, torsoY, 5 * s);
-    waistGrad.addColorStop(0, utils.rgb(SKIN_LIGHT, 0.9));
-    waistGrad.addColorStop(1, utils.rgb(SKIN_MID, 0.9));
-    ctx.fillStyle = waistGrad;
-    utils.fillEllipse(ctx, torsoX, torsoY, 5 * s, 4 * s);
-
-    // Upper torso / chest
-    const chestGrad = ctx.createRadialGradient(torsoX - 2 * s, torsoY - 7 * s, 0, torsoX, torsoY - 7 * s, 8 * s);
-    chestGrad.addColorStop(0, utils.rgb(SKIN_LIGHT));
-    chestGrad.addColorStop(0.5, utils.rgb(SKIN_MID));
-    chestGrad.addColorStop(1, utils.rgb(SKIN_DARK));
-    ctx.fillStyle = chestGrad;
-    utils.fillEllipse(ctx, torsoX, torsoY - 8 * s, 7.5 * s, 9 * s);
-
-    // Dark clothing overlay on upper body
-    ctx.fillStyle = utils.rgb(CLOTH_COLOR, 0.6);
-    utils.fillEllipse(ctx, torsoX, torsoY - 9 * s, 7 * s, 8.5 * s);
-
-    // End soft outline
-    utils.softOutlineEnd(ctx);
-
-    // Rim light on chest
-    utils.zoneEntityRimLight(ctx, torsoX, torsoY - 8 * s, 7.5 * s, 9 * s);
-
-    // ── Slender arms ──────────────────────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const isRight = side === 1;
-      const armPhase = act === 'walk' ? phase + (isRight ? Math.PI : 0) : 0;
-      const shoulderX = torsoX + side * 7 * s;
-      const shoulderY = torsoY - 15 * s;
-
-      let elbowX: number, elbowY: number, handX: number, handY: number;
-
-      if (act === 'attack' && isRight) {
-        elbowX = shoulderX + side * 4 * s + attackLunge * 2 * s;
-        elbowY = shoulderY + 4 * s - attackLunge * 5 * s;
-        handX = elbowX + side * 4 * s + attackLunge * 2 * s;
-        handY = elbowY + 3 * s - attackLunge * 5 * s;
-      } else {
-        elbowX = shoulderX + side * 3 * s + Math.sin(armPhase) * 1.5 * s;
-        elbowY = shoulderY + 7 * s - Math.abs(Math.sin(armPhase)) * 2 * s;
-        handX = elbowX + side * 2 * s;
-        handY = elbowY + 7 * s + Math.sin(armPhase) * 2 * s;
-      }
-
-      utils.drawLimb(ctx, [
-        { x: shoulderX, y: shoulderY },
-        { x: elbowX, y: elbowY },
-        { x: handX, y: handY },
-      ], 2 * s, SKIN_MID);
-
-      // Clawed fingertips
-      ctx.strokeStyle = utils.rgb(SKIN_DARK);
-      ctx.lineWidth = 0.7 * s;
-      ctx.lineCap = 'round';
-      for (let fi = -1; fi <= 1; fi++) {
-        ctx.beginPath();
-        ctx.moveTo(handX + fi * 1 * s, handY);
-        ctx.lineTo(handX + fi * 1.5 * s + side * 0.5 * s, handY + 2.5 * s);
-        ctx.stroke();
-      }
-    }
-
-    // ── Dark flowing hair (layered curve paths) ───────────────────────────────
-    const headCX = torsoX;
-    const headCY = torsoY - 26 * s;
-
-    // Back hair layers
-    for (let hl = 0; hl < 4; hl++) {
-      const hAlpha = 0.8 - hl * 0.12;
-      const hOffset = hl * 1.5 * s;
-      ctx.strokeStyle = utils.rgb(HAIR_COLOR, hAlpha);
-      ctx.lineWidth = (3 - hl * 0.5) * s;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(headCX - 5 * s + hOffset * 0.5, headCY - 5 * s);
-      ctx.quadraticCurveTo(
-        headCX - 8 * s - hOffset,
-        headCY + 4 * s,
-        headCX - 6 * s - hOffset,
-        headCY + 16 * s
-      );
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(headCX + 5 * s - hOffset * 0.5, headCY - 5 * s);
-      ctx.quadraticCurveTo(
-        headCX + 8 * s + hOffset,
-        headCY + 4 * s,
-        headCX + 6 * s + hOffset,
-        headCY + 16 * s
-      );
-      ctx.stroke();
-    }
-
-    // ── Head ──────────────────────────────────────────────────────────────────
-    const headGrad = ctx.createRadialGradient(headCX - 2 * s, headCY - 3 * s, 0, headCX, headCY, 7 * s);
-    headGrad.addColorStop(0, utils.rgb(SKIN_LIGHT));
-    headGrad.addColorStop(0.5, utils.rgb(SKIN_MID));
-    headGrad.addColorStop(1, utils.rgb(SKIN_DARK));
-    ctx.fillStyle = headGrad;
-    utils.fillEllipse(ctx, headCX, headCY, 6.5 * s, 7.5 * s);
-
-    // ── Swept-back graceful horns ─────────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const hornBaseX = headCX + side * 4 * s;
-      const hornBaseY = headCY - 6.5 * s;
-      ctx.strokeStyle = utils.rgb(HORN_COLOR);
-      ctx.lineWidth = 2 * s;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(hornBaseX, hornBaseY);
-      ctx.quadraticCurveTo(
-        hornBaseX + side * 5 * s,
-        hornBaseY - 5 * s,
-        hornBaseX + side * 7 * s,
-        hornBaseY - 2 * s
-      );
-      ctx.stroke();
-    }
-
-    // Front hair over forehead
-    ctx.fillStyle = utils.rgb(HAIR_COLOR, 0.9);
+function clawHand(ctx: CanvasRenderingContext2D, el: V, hand: V, far: boolean): void {
+  const ang = Math.atan2(hand.y - el.y, hand.x - el.x);
+  const plate = far ? OBSIDIAN_FAR : OBSIDIAN;
+  cel(ctx, () => ellipsePath(ctx, hand, 1.9, 1.6, ang), plate, { band: 0.5 });
+  ctx.strokeStyle = far ? GILT.shade : GILT.light;
+  ctx.lineWidth = 0.45;
+  ctx.lineCap = 'round';
+  for (let i = -1; i <= 1; i++) {
+    const a = localPt(hand, ang + i * 0.4, 1.4, 0);
+    const b = localPt(hand, ang + i * 0.4 + 0.3, 3.2, 0);
     ctx.beginPath();
-    ctx.ellipse(headCX, headCY - 6 * s, 5.5 * s, 3.5 * s, 0, Math.PI, Math.PI * 2);
-    ctx.fill();
-
-    // ── Glowing pink eyes ──────────────────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const ex = headCX + side * 2.5 * s;
-      const ey = headCY - 1.5 * s;
-
-      // Glow
-      const eyeGrad = ctx.createRadialGradient(ex, ey, 0, ex, ey, 3.5 * s);
-      eyeGrad.addColorStop(0, utils.rgb(EYE_COLOR, 0.85));
-      eyeGrad.addColorStop(0.5, utils.rgb(EYE_COLOR, 0.4));
-      eyeGrad.addColorStop(1, 'rgba(255,68,170,0)');
-      ctx.fillStyle = eyeGrad;
-      utils.fillCircle(ctx, ex, ey, 3.5 * s);
-
-      ctx.fillStyle = '#1a0410';
-      utils.fillEllipse(ctx, ex, ey, 2.8 * s, 2.2 * s);
-
-      ctx.fillStyle = utils.rgb(EYE_COLOR);
-      utils.fillEllipse(ctx, ex, ey, 2 * s, 1.6 * s);
-
-      // White highlight
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      utils.fillCircle(ctx, ex - 0.5 * s, ey - 0.5 * s, 0.65 * s);
-    }
-
-    // ── Dark lips ─────────────────────────────────────────────────────────────
-    const lipY = headCY + 3.5 * s;
-    ctx.fillStyle = utils.rgb(LIP_COLOR);
-    ctx.beginPath();
-    ctx.moveTo(headCX - 2.8 * s, lipY);
-    ctx.quadraticCurveTo(headCX - 1 * s, lipY - 1.2 * s, headCX, lipY - 0.5 * s);
-    ctx.quadraticCurveTo(headCX + 1 * s, lipY - 1.2 * s, headCX + 2.8 * s, lipY);
-    ctx.quadraticCurveTo(headCX, lipY + 1.5 * s, headCX - 2.8 * s, lipY);
-    ctx.fill();
-
-    // ── Spade-tipped tail ─────────────────────────────────────────────────────
-    const tailBaseX = torsoX - 3 * s;
-    const tailBaseY = baseY - 16 * s + bodyOffsetY;
-    const tailWag = Math.sin(phase + 0.5) * 4 * s;
-
-    ctx.strokeStyle = utils.rgb(SKIN_MID);
-    ctx.lineWidth = 2.5 * s;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(tailBaseX, tailBaseY);
-    ctx.quadraticCurveTo(
-      tailBaseX - 9 * s + tailWag,
-      tailBaseY + 6 * s,
-      tailBaseX - 11 * s + tailWag,
-      tailBaseY
-    );
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
     ctx.stroke();
+  }
+}
 
-    // Spade tip
-    const spadeX = tailBaseX - 11 * s + tailWag;
-    const spadeY = tailBaseY;
-    ctx.fillStyle = utils.rgb(SKIN_DARK);
+function pauldron(ctx: CanvasRenderingContext2D, sh: V, lean: number, far: boolean): void {
+  const plate = far ? OBSIDIAN_FAR : OBSIDIAN;
+  ctx.save();
+  ctx.translate(sh.x, sh.y);
+  ctx.rotate(lean * 0.6);
+  cel(ctx, () => blobPath(ctx, [vec(-3.6, 1.4), vec(-3, -1.8), vec(0.4, -3), vec(3.4, -1.6), vec(3.8, 1.6), vec(0, 2.6)]), plate, { band: 0.7 });
+  // Swept thorn
+  cel(ctx, () => polyPath(ctx, [vec(-1.6, -2.2), vec(-5.4, -5.2), vec(0.8, -2.8)]), plate, { band: 0.3 });
+  ctx.strokeStyle = far ? GILT.shade : GILT.base;
+  ctx.lineWidth = 0.55;
+  ctx.beginPath();
+  ctx.ellipse(0.2, 0, 3.4, 2.2, 0, Math.PI * 0.05, Math.PI * 0.95);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Long mane streaming from the back of the head. */
+function mane(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+  const faceAng = sk.headAng;
+  const anchor = localPt(sk.head, faceAng, -3.6, -2.4);
+  const chain = clothChain(anchor, 23, 6, 0.25 + p.flow * 0.9, 1.4, t * Math.PI * 2 + 0.6);
+  const left: V[] = [];
+  const right: V[] = [];
+  chain.forEach((pt, i) => {
+    const k = i / (chain.length - 1);
+    const half = 4.2 - k * 2.6;
+    left.push(vec(pt.x - half, pt.y + k * 0.5));
+    right.push(vec(pt.x + half * 0.8, pt.y));
+  });
+  const tip = chain[chain.length - 1];
+  const outline = [...left, vec(tip.x - 1.2, tip.y + 2.4), ...right.reverse()];
+  cel(ctx, () => blobPath(ctx, outline), HAIR_FAR, { band: 1.3 });
+  // Strand highlights
+  ctx.strokeStyle = HAIR.light;
+  ctx.lineWidth = 0.4;
+  ctx.globalAlpha = 0.55;
+  for (const off of [-1.4, 0.8]) {
     ctx.beginPath();
-    ctx.moveTo(spadeX, spadeY - 3 * s);
-    ctx.quadraticCurveTo(spadeX + 2.5 * s, spadeY - 1 * s, spadeX + 1.5 * s, spadeY + 1 * s);
-    ctx.lineTo(spadeX, spadeY - 0.5 * s);
-    ctx.lineTo(spadeX - 1.5 * s, spadeY + 1 * s);
-    ctx.quadraticCurveTo(spadeX - 2.5 * s, spadeY - 1 * s, spadeX, spadeY - 3 * s);
-    ctx.fill();
+    ctx.moveTo(chain[1].x + off, chain[1].y);
+    for (let i = 2; i < chain.length - 1; i++) ctx.lineTo(chain[i].x + off * (1 - i / chain.length), chain[i].y);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
 
-    ctx.restore();
+function robeBack(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+  const belt = along(sk.pelvis, p.lean, 1);
+  const chain = clothChain(vec(belt.x - 2.5, belt.y), 24, 6, 0.3 + p.flow, 1, t * Math.PI * 2);
+  const left: V[] = [];
+  const right: V[] = [];
+  chain.forEach((pt, i) => {
+    const k = i / (chain.length - 1);
+    left.push(vec(pt.x - 2.8 - k * 4.4, pt.y));
+    right.push(vec(pt.x + 2.6 + k * 1.2, pt.y + k * 0.4));
+  });
+  cel(ctx, () => blobPath(ctx, [...left, ...right.reverse()]), ROBE_IN, { band: 1.2 });
+}
+
+function robeFront(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+  const belt = along(sk.pelvis, p.lean, 1);
+  const sway = Math.sin(t * Math.PI * 2) * 0.6 - p.flow * 3.5;
+  const top = vec(belt.x + 1.2, belt.y);
+  // Front tasset panel, split to show the greaves
+  const pts = [
+    vec(top.x - 4.4, top.y - 0.4), vec(top.x + 4.8, top.y - 0.8),
+    vec(top.x + 5.6 + sway * 0.3, top.y + 10), vec(top.x + 2 + sway * 0.8, top.y + 14.5),
+    vec(top.x - 1.2 + sway, top.y + 12), vec(top.x - 4.6 + sway * 0.9, top.y + 15),
+  ];
+  cel(ctx, () => polyPath(ctx, pts), ROBE, { band: 1.1 });
+  ctx.strokeStyle = GILT.base;
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(pts[2].x - 0.3, pts[2].y - 0.2);
+  ctx.lineTo(pts[3].x, pts[3].y - 0.8);
+  ctx.lineTo(pts[4].x, pts[4].y - 0.8);
+  ctx.lineTo(pts[5].x + 0.3, pts[5].y - 0.8);
+  ctx.stroke();
+}
+
+function cuirass(ctx: CanvasRenderingContext2D, sk: Skeleton): void {
+  inBone(ctx, sk.neck, sk.pelvis, (len) => {
+    // Slim armoured torso: cuirass flaring over the hips
+    const body = [vec(-4.8, 0.4), vec(0.4, -0.8), vec(5, 1.2), vec(6.2, 5.6), vec(4, len * 0.62), vec(5.6, len + 0.6), vec(-4.6, len + 0.8), vec(-4.2, len * 0.6), vec(-5.6, 5)];
+    cel(ctx, () => blobPath(ctx, body), OBSIDIAN, { band: 1.5, hi: 0.8 });
+    // Filigree: plunge-free V-lines and waist bands
+    ctx.strokeStyle = GILT.base;
+    ctx.lineWidth = 0.55;
+    ctx.beginPath();
+    ctx.moveTo(-3.8, 1.8);
+    ctx.quadraticCurveTo(1.4, 6.6, 4.6, 2.2);
+    ctx.moveTo(4.4, len * 0.56);
+    ctx.quadraticCurveTo(0, len * 0.66, -4, len * 0.58);
+    ctx.moveTo(4.8, len * 0.74);
+    ctx.quadraticCurveTo(0, len * 0.82, -4.2, len * 0.76);
+    ctx.stroke();
+    // Ruby heart brooch
+    cel(ctx, () => polyPath(ctx, [vec(3.2, 4.6), vec(4.6, 5.8), vec(3.4, 7.8), vec(2, 5.8)]), tone(0xe0205a, { light: 0.5 }), { band: 0.3, stroke: 0.35 });
+    // High collar (gorget)
+    cel(ctx, () => polyPath(ctx, [vec(-3.8, 0.8), vec(-3, -3.6), vec(1, -2), vec(4.4, -3), vec(4.4, 1.2), vec(0.6, 2)]), OBSIDIAN, { band: 0.6 });
+    ctx.strokeStyle = GILT.light;
+    ctx.lineWidth = 0.45;
+    ctx.beginPath();
+    ctx.moveTo(-3, -3.4);
+    ctx.lineTo(1, -1.8);
+    ctx.lineTo(4.3, -2.8);
+    ctx.stroke();
+    // Belt with a gilt clasp
+    cel(ctx, () => polyPath(ctx, [vec(-4.8, len - 1.2), vec(6, len - 1.6), vec(6.2, len + 0.8), vec(-4.8, len + 1.2)]), LEATHER, { band: 0.4 });
+    cel(ctx, () => ellipsePath(ctx, vec(4, len - 0.4), 1.4, 1.4), GILT, { band: 0.4 });
+  });
+}
+
+function head(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+  ctx.save();
+  ctx.translate(sk.head.x, sk.head.y);
+  ctx.rotate(sk.headAng);
+  // Far horn
+  const f = [vec(-2.6, -5), vec(0.4, -6), vec(-9.6, -12), vec(-11.6, -3)] as const;
+  cel(ctx, () => hornPath(ctx, f[0], f[1], f[2], f[3], 0.6), tone(0x8a7080), { band: 0.5 });
+  // Face: slender with a pointed chin
+  const face = [vec(-4.6, -1), vec(-3.8, -5.2), vec(1, -6.4), vec(4.8, -4.4), vec(5.8, -1), vec(5.8, 2), vec(4.2, 4.8), vec(1.6, 5.8), vec(-1.6, 4.6), vec(-4.2, 2.4)];
+  cel(ctx, () => blobPath(ctx, face), SKIN, { band: 1.2 });
+  // Pointed ear
+  cel(ctx, () => polyPath(ctx, [vec(-1, -0.6), vec(-7.4, -3.8 - Math.sin(t * Math.PI * 2) * 0.3), vec(-2, 1.8)]), SKIN, { band: 0.5 });
+  // Hair cap with a swept fringe
+  const cap = [vec(-6, 0), vec(-5.6, -4.8), vec(-1, -7.4), vec(4, -6.4), vec(6.4, -3.4), vec(4.6, -3.2), vec(2.6, -4.2), vec(0.4, -2.6), vec(-2.2, -3), vec(-2.8, 1), vec(-5.2, 3.4)];
+  cel(ctx, () => blobPath(ctx, cap), HAIR, { band: 1 });
+  ctx.strokeStyle = HAIR.light;
+  ctx.lineWidth = 0.4;
+  ctx.beginPath();
+  ctx.moveTo(-3.6, -5.2);
+  ctx.quadraticCurveTo(0.8, -6.6, 4.2, -4.6);
+  ctx.stroke();
+  // Gilt circlet with a ruby
+  ctx.strokeStyle = GILT.base;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(-3.4, -3.8);
+  ctx.quadraticCurveTo(1.6, -5.2, 5.6, -3.2);
+  ctx.stroke();
+  cel(ctx, () => polyPath(ctx, [vec(4, -5.2), vec(5, -4), vec(4, -2.8), vec(3, -4)]), tone(0xe0205a, { light: 0.5 }), { band: 0.2, stroke: 0.3 });
+  // Glowing eye under a sharp brow
+  ctx.fillStyle = '#1e0818';
+  ctx.beginPath();
+  ctx.moveTo(2.4, -1.2);
+  ctx.quadraticCurveTo(4, -2.2, 5.5, -1.2);
+  ctx.quadraticCurveTo(4, -0.2, 2.4, -1.2);
+  ctx.fill();
+  ctx.fillStyle = `rgb(255,${110 + p.fx * 80},230)`;
+  ctx.beginPath();
+  ctx.ellipse(4.2, -1.15, 0.95, 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#1e0818';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(2, -2.6);
+  ctx.lineTo(5.8, -2.2);
+  ctx.stroke();
+  // Nose and a cool, dark-lipped mouth
+  ctx.strokeStyle = SKIN.shade;
+  ctx.lineWidth = 0.45;
+  ctx.beginPath();
+  ctx.moveTo(5.6, -0.4);
+  ctx.lineTo(6.3, 1.2);
+  ctx.lineTo(5.6, 1.5);
+  ctx.stroke();
+  ctx.strokeStyle = '#4a0c2c';
+  ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(3.6, 3.2);
+  ctx.quadraticCurveTo(4.6, 3.5 - p.fx * 0.4, 5.4, 3.1);
+  ctx.stroke();
+  // Near horn: ram sweep up, back and curling down
+  const b1 = vec(-0.4, -6);
+  const b2 = vec(3.2, -5.6);
+  const ctrl = vec(-4.2, -15.6);
+  const tip = vec(-10.6, -6.2);
+  cel(ctx, () => hornPath(ctx, b1, b2, ctrl, tip, 0.6), HORN, { band: 0.7 });
+  hornRidges(ctx, b1, b2, ctrl, tip, 4, HORN.shade, 0.35, 0.6);
+  ctx.restore();
+}
+
+function whipPoints(sk: Skeleton, p: HumanPose, t: number): V[] {
+  const pts = curlChain(sk.handN, p.wpn, p.off, WHIP_LEN, 14, (0.35 + p.flow * 0.3) * (1 - p.fx * 0.85), t * Math.PI * 2);
+  // Slack whip lies along the ground instead of passing through it.
+  return pts.map(pt => vec(pt.x, Math.min(pt.y, GROUND_Y - 0.7)));
+}
+
+function whip(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
+  const pts = whipPoints(sk, p, t);
+  cel(ctx, () => taperPath(ctx, pts, 0.85, 0.22), LEATHER, { band: 0.3, stroke: 0.4 });
+  // Barbs along the lash
+  ctx.fillStyle = GILT.light;
+  for (let i = 3; i < pts.length - 1; i += 2) {
+    ctx.fillRect(pts[i].x - 0.35, pts[i].y - 0.35, 0.7, 0.7);
+  }
+  // Handle
+  const ang = p.wpn;
+  const back = along(sk.handN, ang + Math.PI, 3.4);
+  cel(ctx, () => capsulePath(ctx, back, along(sk.handN, ang, 1.4), 0.9, 0.9), LEATHER, { band: 0.3 });
+  cel(ctx, () => ellipsePath(ctx, back, 1.2, 1.2), GILT, { band: 0.3 });
+}
+
+// ── Skin ────────────────────────────────────────────────────────────────
+
+function wingRoot(sk: Skeleton, p: HumanPose, far: boolean): V {
+  return localPt(sk.neck, p.lean, far ? -1.6 : -3.4, far ? 3.4 : 4.6);
+}
+
+const SKIN_DEF: HumanSkin = {
+  prop: PROP,
+  back(ctx, sk, p, t) {
+    const beat = Math.sin(t * Math.PI * 2) * 0.08;
+    batWing(ctx, wingRoot(sk, p, true), -0.25 + beat + p.lean * 0.5 + p.flow * -0.2, 22, 0.35, WING_FAR, 11);
+    batWing(ctx, wingRoot(sk, p, false), -0.7 + beat + p.lean * 0.5 + p.flow * -0.35, 25, 0.35, WING, 4);
+    // Tail curls out behind the robe
+    const root = localPt(sk.pelvis, p.lean * 0.3, -3, 1.4);
+    const tail = curlChain(root, -2.4 + p.lean * 0.3, 2.4, 17, 8, 1 + p.flow, t * Math.PI * 2 + 1);
+    demonTail(ctx, tail, 1.1, SKIN_FAR, HORN, 2.2);
+    robeBack(ctx, sk, p, t);
+    mane(ctx, sk, p, t);
+  },
+  armFar(ctx, sk, p) {
+    pauldron(ctx, sk.shF, p.lean, true);
+    arm(ctx, sk.shF, sk.elF, sk.handF, true);
+    clawHand(ctx, sk.elF, sk.handF, true);
+  },
+  legFar(ctx, sk) {
+    greave(ctx, sk.hipF, sk.kneeF, sk.footF, sk.soleF, true);
+  },
+  legNear(ctx, sk) {
+    greave(ctx, sk.hipN, sk.kneeN, sk.footN, sk.soleN, false);
+  },
+  torso(ctx, sk, p, t) {
+    cuirass(ctx, sk);
+    robeFront(ctx, sk, p, t);
+  },
+  head(ctx, sk, p, t) {
+    head(ctx, sk, p, t);
+  },
+  armNear(ctx, sk, p) {
+    arm(ctx, sk.shN, sk.elN, sk.handN, false);
+    pauldron(ctx, sk.shN, p.lean, false);
+  },
+  weapon(ctx, sk, p, t) {
+    whip(ctx, sk, p, t);
+    clawHand(ctx, sk.elN, sk.handN, false);
   },
 };
+
+// ── Animation ───────────────────────────────────────────────────────────
+// `wpn` aims the whip handle, `off` is how hard the lash curls.
+
+const READY: HumanPose = basePose({
+  root: vec(CENTER_X - 3, 63.8),
+  lean: 0.04,
+  head: -0.04,
+  footN: vec(CENTER_X + 3.5, GROUND_Y),
+  footF: vec(CENTER_X - 5.5, GROUND_Y),
+  handN: vec(CENTER_X + 8, 60),
+  handF: vec(CENTER_X - 6.5, 62),
+  wpn: 2.2,
+  off: 2.6,
+  flow: 0.1,
+});
+
+const P = (o: Partial<HumanPose>): HumanPose => ({ ...READY, ...o });
+const R = READY.root;
+
+const ATTACK: Key<HumanPose>[] = [
+  { at: 0, pose: READY },
+  // Cock the whip back overhead, the lash looping behind her
+  { at: 0.33, ease: 'out', pose: P({
+    root: vec(R.x - 2, R.y + 0.6), lean: -0.2, head: -0.12,
+    handN: vec(R.x - 3, 36), handF: vec(R.x + 8, 55),
+    footN: vec(CENTER_X + 6, GROUND_Y), footF: vec(CENTER_X - 7, GROUND_Y),
+    wpn: -1.1, off: -2.6, fx: 0.5, flow: 0.3, stretch: 0.03,
+  }) },
+  // Arm whips forward; the lash still trails, loaded
+  { at: 0.67, ease: 'in', pose: P({
+    root: vec(R.x + 1, R.y + 0.8), lean: 0.14, head: 0,
+    handN: vec(R.x + 12, 42), handF: vec(R.x - 2, 58),
+    footN: vec(CENTER_X + 9, GROUND_Y), footF: vec(CENTER_X - 7, GROUND_Y),
+    wpn: 0.1, off: -3.4, fx: 0.8, flow: 0.5,
+  }) },
+  // Crack: lash snaps straight out to full reach
+  { at: 1, ease: 'linear', pose: P({
+    root: vec(R.x + 3.5, R.y + 1.6), lean: 0.3, head: 0.06,
+    handN: vec(R.x + 18, 57), handF: vec(R.x - 5, 60),
+    footN: vec(CENTER_X + 11, GROUND_Y), footF: vec(CENTER_X - 7, GROUND_Y),
+    wpn: 1.62, off: 0.25, fx: 1, flow: 0.7, stretch: -0.02,
+  }) },
+];
+
+const RECOIL = P({
+  root: vec(R.x - 3.5, R.y + 1), lean: -0.3, head: -0.35,
+  handN: vec(R.x + 4, 55), handF: vec(R.x - 8, 56),
+  footF: vec(CENTER_X - 7, GROUND_Y), wpn: 2.6, off: 1.6, flow: 0.55, stretch: -0.03,
+});
+
+const HURT: Key<HumanPose>[] = [
+  { at: 0, pose: RECOIL },
+  { at: 1, pose: P({ ...RECOIL, root: vec(R.x - 2, R.y + 0.5), lean: -0.12, head: -0.15, handN: vec(R.x + 7, 58), wpn: 2.4, off: 2.2, flow: 0.3 }) },
+];
+
+const DEATH: Key<HumanPose>[] = [
+  { at: 0, pose: RECOIL },
+  // Buckles to her knees, whip slipping from her grasp
+  { at: 0.33, pose: P({
+    root: vec(R.x - 2, 75), lean: 0.2, head: 0.35,
+    footN: vec(CENTER_X + 9, GROUND_Y), footF: vec(CENTER_X - 10, GROUND_Y),
+    handN: vec(R.x + 9, 80), handF: vec(R.x + 3, 76), wpn: 2.9, off: 1.6, flow: 0.3, fx: 0.2,
+  }) },
+  { at: 0.67, ease: 'in', pose: P({
+    root: vec(R.x - 4, 80), spin: 0.85, lean: 0.1, head: 0.2,
+    footN: vec(R.x - 1, 104), footF: vec(R.x - 5, 103),
+    handN: vec(R.x + 10, 82), handF: vec(R.x + 6, 80), wpn: 2.4, off: 1.4, flow: 0.6,
+  }) },
+  { at: 1, ease: 'out', pose: P({
+    root: vec(R.x - 6, GROUND_Y - 5.6), spin: 1.5, lean: 0, head: 0.3,
+    footN: vec(R.x - 5, GROUND_Y - 5.6 + 24), footF: vec(R.x - 8, GROUND_Y - 6 + 24),
+    handN: vec(R.x + 3, GROUND_Y - 21), handF: vec(R.x, GROUND_Y - 19), wpn: 1.4, off: 1.2, flow: 0.05,
+  }) },
+];
+
+export const SuccubusDrawer = humanoidMonster({
+  key: 'monster_succubus',
+  // Wide for the whip's reach; width doesn't move the sprite in-game.
+  frameW: 100,
+  frameH: 64,
+  scale: 1.3,
+  skin: SKIN_DEF,
+  ready: READY,
+  attack: 'overhead',
+  tracks: { attack: ATTACK, hurt: HURT, death: DEATH },
+  walk: { stride: 6, lift: 3.4, bob: 1, lean: 0.04, armSwing: 2, spread: 0.6 },
+  shadowR: 11,
+  idle: (t, ready) => {
+    const ph = t * Math.PI * 2;
+    const b = Math.sin(ph);
+    return {
+      ...ready,
+      root: vec(ready.root.x, ready.root.y + b * 0.5),
+      head: ready.head + Math.sin(ph - 0.6) * 0.04,
+      handN: vec(ready.handN.x, ready.handN.y + b * 0.5),
+      handF: vec(ready.handF.x, ready.handF.y + Math.sin(ph - 0.5) * 0.5),
+      off: ready.off + Math.sin(ph) * 0.25,
+      flow: ready.flow + Math.sin(ph) * 0.08,
+    };
+  },
+  fx: (ctx, p, sk, act, t) => {
+    const dead = act === 'death';
+    // Abyssfire licking along the lash
+    const pts = whipPoints(sk, p, t).map(pt => spun(p, pt, sk));
+    const heat = dead ? Math.max(0, 0.4 - t * 0.5) : 0.25 + p.fx * 0.75;
+    for (let i = 2; i < pts.length; i += 2) {
+      const k = i / (pts.length - 1);
+      glow(ctx, pts[i], 2 + k * 1.5 + p.fx * 1.5, ABYSSFIRE, heat * (0.35 + k * 0.3));
+    }
+    if (act === 'attack' && t > 0.5) {
+      // Ghost of the lash a beat earlier, as a motion blur
+      const prev = samplePoseTrack(ATTACK, t - 0.06);
+      const psk = solveSkeleton(prev, PROP);
+      const ghost = whipPoints(psk, prev, t).map(pt => spun(prev, pt, psk));
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = `rgba(255,120,200,${0.28 * p.fx})`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(ghost[0].x, ghost[0].y);
+      for (let i = 1; i < ghost.length; i++) ctx.lineTo(ghost[i].x, ghost[i].y);
+      ctx.stroke();
+      ctx.restore();
+      if (t > 0.9) {
+        // The crack: a sharp starburst at the tip
+        const tip = pts[pts.length - 1];
+        glow(ctx, tip, 9, ABYSSFIRE, 0.75);
+        glow(ctx, tip, 3.5, FIRE_CORE, 0.95);
+        ctx.strokeStyle = 'rgba(255,230,250,0.95)';
+        ctx.lineWidth = 0.7;
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2 + 0.3;
+          const r = i % 2 ? 3.4 : 6.4;
+          ctx.beginPath();
+          ctx.moveTo(tip.x + Math.cos(a) * 1.6, tip.y + Math.sin(a) * 1.6);
+          ctx.lineTo(tip.x + Math.cos(a) * r, tip.y + Math.sin(a) * r);
+          ctx.stroke();
+        }
+      }
+    }
+    if (!dead || t < 0.5) {
+      const eye = spun(p, localPt(sk.head, sk.headAng, 4.2, -1.15), sk);
+      glow(ctx, eye, 1.9, EYE, 0.4 + p.fx * 0.3);
+    }
+    if (dead) {
+      const c = spun(p, sk.pelvis, sk);
+      embers(ctx, { x: c.x - 16, y: c.y - 10, w: 34, h: 10 }, 12, t, 0.15 + t * 0.6, ABYSSFIRE, 21);
+    }
+  },
+});
+

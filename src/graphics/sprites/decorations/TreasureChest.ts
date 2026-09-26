@@ -1,65 +1,46 @@
-import type { EntityDrawer } from '../types';
+// src/graphics/sprites/decorations/TreasureChest.ts
+// Placed centred at y-12 in ZoneScene, so the ground line sits at h/2 + 12.
+import { defineDecor, contactShadow, shade, tone, polyP, line, glow, flat, ellipseP } from './DecorKit';
 
-export const TreasureChestDrawer: EntityDrawer = {
+export const TreasureChestDrawer = defineDecor({
   key: 'decor_treasure_chest',
-  frameW: 28,
-  frameH: 22,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 28;
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    utils.fillEllipse(ctx, w / 2, h - 1.5 * s, 12 * s, 3 * s);
-
-    // Chest body
-    const bodyGrad = ctx.createLinearGradient(w * 0.15, h * 0.5, w * 0.85, h * 0.9);
-    bodyGrad.addColorStop(0, utils.rgb(0x8B6914));
-    bodyGrad.addColorStop(0.5, utils.rgb(0xDAA520));
-    bodyGrad.addColorStop(1, utils.rgb(0x8B6914));
-    ctx.fillStyle = bodyGrad;
-    utils.roundRect(ctx, w * 0.12, h * 0.45, w * 0.76, h * 0.45, 2 * s);
-    ctx.fill();
-
-    // Metal bands
-    ctx.fillStyle = utils.rgb(0x666666);
-    ctx.fillRect(w * 0.12, h * 0.52, w * 0.76, 1.5 * s);
-    ctx.fillRect(w * 0.12, h * 0.72, w * 0.76, 1.5 * s);
-
-    // Chest lid (domed)
-    const lidGrad = ctx.createLinearGradient(w * 0.1, h * 0.25, w * 0.9, h * 0.5);
-    lidGrad.addColorStop(0, utils.rgb(0xCD853F));
-    lidGrad.addColorStop(0.5, utils.rgb(0xDEB887));
-    lidGrad.addColorStop(1, utils.rgb(0xCD853F));
-    ctx.fillStyle = lidGrad;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.1, h * 0.48);
-    ctx.quadraticCurveTo(w * 0.5, h * 0.15, w * 0.9, h * 0.48);
-    ctx.closePath();
-    ctx.fill();
-
-    // Lid band
-    ctx.strokeStyle = utils.rgb(0x666666);
-    ctx.lineWidth = 1.5 * s;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.18, h * 0.47);
-    ctx.quadraticCurveTo(w * 0.5, h * 0.22, w * 0.82, h * 0.47);
-    ctx.stroke();
-
-    // Lock/clasp
-    ctx.fillStyle = utils.rgb(0xFFD700);
-    utils.roundRect(ctx, w * 0.42, h * 0.42, w * 0.16, h * 0.12, 1.5 * s);
-    ctx.fill();
-    // Keyhole
-    ctx.fillStyle = utils.rgb(0x333333);
-    utils.fillCircle(ctx, w * 0.5, h * 0.47, 1.2 * s);
-    ctx.fillRect(w * 0.49, h * 0.47, 1 * s, 3 * s);
-
-    // Glow sparkles
-    ctx.fillStyle = 'rgba(255,215,0,0.5)';
-    utils.fillCircle(ctx, w * 0.3, h * 0.3, 1 * s);
-    utils.fillCircle(ctx, w * 0.7, h * 0.35, 0.8 * s);
-    utils.fillCircle(ctx, w * 0.55, h * 0.2, 0.6 * s);
+  w: 40,
+  h: 32,
+  ground: 28,
+  draw(ctx, { cx, gy }) {
+    contactShadow(ctx, cx + 2, gy, 17, 4.5, 0.45);
+    const wood = tone(0x9a5a2e, { light: 0.35 });
+    const iron = tone(0xd8a83a, { light: 0.45 });
+    const x0 = cx - 14, x1 = cx + 10, d = 5;
+    // Side face.
+    flat(ctx, polyP(ctx, [[x1, gy], [x1, gy - 13], [x1 + d, gy - 16], [x1 + d, gy - 3]]), wood.shade, wood.line, 0.6);
+    // Front.
+    shade(ctx, polyP(ctx, [[x0, gy], [x0, gy - 13], [x1, gy - 13], [x1, gy]]), wood, { band: 2.5, hi: 0.8 });
+    line(ctx, [[x0 + 1, gy - 7], [x1 - 1, gy - 7]], wood.shade, 0.6);
+    // Domed lid.
+    shade(ctx, () => {
+      ctx.moveTo(x0, gy - 13);
+      ctx.bezierCurveTo(x0, gy - 22, x1, gy - 22, x1, gy - 13);
+      ctx.closePath();
+    }, wood, { band: 2.5, hi: 1 });
+    flat(ctx, () => {
+      ctx.moveTo(x1, gy - 13);
+      ctx.bezierCurveTo(x1, gy - 22, x1 + d, gy - 24, x1 + d, gy - 16);
+      ctx.closePath();
+    }, wood.shade, wood.line, 0.6);
+    // Gold bands + lock (focal accent).
+    for (const bx of [x0 + 3, x1 - 5]) {
+      shade(ctx, () => {
+        ctx.moveTo(bx, gy);
+        ctx.lineTo(bx, gy - 13);
+        ctx.bezierCurveTo(bx, gy - 20, bx + 2, gy - 20.5, bx + 2, gy - 20.5);
+        ctx.lineTo(bx + 2, gy);
+        ctx.closePath();
+      }, iron, { band: 0.8, hi: 0.4, stroke: 0.5 });
+    }
+    line(ctx, [[x0, gy - 13], [x1, gy - 13]], iron.base, 1.6);
+    shade(ctx, polyP(ctx, [[cx - 4.5, gy - 15], [cx + 0.5, gy - 15], [cx + 0.5, gy - 9], [cx - 2, gy - 7.5], [cx - 4.5, gy - 9]]), iron, { band: 1, hi: 0.5, stroke: 0.5 });
+    flat(ctx, ellipseP(ctx, cx - 2, gy - 11.5, 0.8, 1.1), '#3a2410');
+    glow(ctx, { x: cx - 8, y: gy - 18 }, 4, 0xfff0a0, 0.6);
   },
-};
+});

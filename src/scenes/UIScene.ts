@@ -29,25 +29,34 @@ import type { MercenaryState } from '../systems/MercenarySystem';
 import { LoreByZone, AllLoreEntries, getLoreCountByZone } from '../data/loreCollectibles';
 import type { LoreEntry } from '../data/loreCollectibles';
 import { t, getLocale } from '../i18n';
+import { isMobileDevice } from '../systems/MobileControlsSystem';
+import { ensureItemIcon, ensureItemIconFor } from '../graphics/icons/ItemIcons';
+import {
+  addFrame, addCloseButton, addButton, addTitleFlourishes, addDivider, addVDivider, addSectionHeader,
+  addSlot, wireSlotHover, frameTexture, drawCard, drawWell, drawBarFill, tabTexture, backdropTexture, orbTextures,
+  skillSlotTexture, keyBadgeTexture, hudPlateTexture, minimapFrameTexture, coinTexture, pipTexture,
+  barFrameTexture, barFillTexture, barTicksTexture, qualityHex, qualityNum, UI_COLORS,
+  type UiButton, type ButtonOptions, type CardStyle,
+} from '../ui/UiKit';
 import { getItemDisplayName, getItemBaseName, getItemBaseDesc, getAffixName, getStatLabel, isStatPercent, getQualityLabel, getSetName, getSetBonusDesc, getClassName, getDirection as getLocalizedDirection, getSkillName, getSkillDesc, getSkillTreeName, getDamageTypeName, getQuestName, getQuestDesc, getZoneName, getMercenaryName, getMercenaryDesc, getMercenaryTypeLabel, getBuildingName, getBuildingDesc, getPetName, getPetDesc, getAchievementName, getAchievementDesc, getAchievementTitle, getLoreName, getLoreText, getNpcName, getQuestTargetName, getPetStatLabel } from '../i18n/gameAccessors';
 
 const FONT = '"Noto Sans SC", sans-serif';
 const TITLE_FONT = '"Cinzel", "Noto Sans SC", serif';
 const LOG_MAX_LINES = 8;
-const GLOBE_R = Math.round(40 * DPR);
+const GLOBE_R = Math.round(44 * DPR);
 
 /** Unified panel styling config used by ALL panels for visual consistency. */
 const PANEL_STYLE = {
-  /** Panel background */
-  bg: { color: 0x0f0f1e, alpha: 0.95 },
+  /** Panel background (opaque — frames are baked by UiKit) */
+  bg: { color: 0x141116, alpha: 1 },
   /** Panel border — same for all panels */
-  border: { color: 0xc0934a, width: 2, radius: 0 },
+  border: { color: 0xd4a54a, width: 2, radius: 7 },
   /** Header area */
   header: {
     height: 36,
     font: TITLE_FONT,
     fontSize: 18,
-    color: '#c0934a',
+    color: '#f0dcae',
   },
   /** Close button */
   close: {
@@ -67,14 +76,19 @@ const PANEL_STYLE = {
   },
   /** Tooltip styling */
   tooltip: {
-    bg: { color: 0x0a0a18, alpha: 0.97 },
-    border: { color: 0xc0934a, width: 1.5 },
+    bg: { color: 0x141116, alpha: 1 },
+    border: { color: 0xd4a54a, width: 1.5 },
     font: FONT,
     titleSize: 13,
     bodySize: 11,
     lineSpacing: 2,
     padding: 10,
   },
+} as const;
+
+/** Item quality text colours (art-direction.md). */
+const QUALITY_TEXT = {
+  normal: '#c8c8c8', magic: '#4f8cff', rare: '#ffd84a', legendary: '#ff8a2a', set: '#3ecf6a',
 } as const;
 
 const W = GAME_WIDTH * DPR;
@@ -86,6 +100,56 @@ function fs(basePx: number): string {
 
 const px = (n: number) => Math.round(n * DPR);
 
+/** Plate-variant frame texture key (frame margin is 8px on every side). */
+function frameTextureKey(scene: Phaser.Scene, w: number, h: number, alpha = 1): string {
+  return frameTexture(scene, w, h, { variant: 'plate', alpha }).key;
+}
+
+const MINIMAP_SIZE = px(104);
+/** Mobile shows a row of panel buttons along the top-right edge; push the HUD cluster below it. */
+const IS_MOBILE = isMobileDevice();
+const TOP_RIGHT_OFFSET = IS_MOBILE ? px(48) : 0;
+
+/** Fixed HUD layout (logical px). */
+const HUD = (() => {
+  const slot = px(44), gap = px(6);
+  const utilW = px(50), utilGap = px(5), utilCount = 3, sepGap = px(12);
+  const skillsW = 6 * slot + 5 * gap;
+  const utilsW = utilCount * utilW + (utilCount - 1) * utilGap;
+  const barW = skillsW + sepGap + utilsW;
+  const startX = Math.round((W - barW) / 2);
+  const rowY = H - px(44);
+  const plateL = startX - px(18), plateR = startX + barW + px(18);
+  const plateTop = rowY - slot / 2 - px(26);
+  const orbY = H - px(52);
+  const spiritH = px(6);
+  const infoW = px(210), infoH = px(46);
+  const info = { x: W - px(12) - infoW, y: px(12) + TOP_RIGHT_OFFSET, w: infoW, h: infoH };
+  const mmPad = px(9);
+  const minimap = { x: W - px(12) - mmPad - MINIMAP_SIZE, y: info.y + infoH + px(10) + mmPad };
+  return {
+    slot, gap, startX, rowY, barW,
+    utilX: startX + skillsW + sepGap, utilW, utilGap,
+    plateL, plateR, plateTop,
+    orbY, hpX: plateL - GLOBE_R + px(16), mpX: plateR + GLOBE_R - px(16),
+    spiritX: startX + px(40), spiritW: skillsW - px(40), spiritH, spiritY: rowY - slot / 2 - px(12),
+    expX: startX, expW: barW, expH: px(8), expY: H - px(11),
+    // On touch devices the joystick owns the bottom-left corner, so the log moves up
+    log: { x: px(12), y: IS_MOBILE ? H - px(330) : H - px(12) - px(150), w: px(290), h: px(150) },
+    info,
+    minimap,
+    tracker: { x: W - px(222), y: minimap.y + MINIMAP_SIZE + mmPad + px(14) },
+    loot: IS_MOBILE
+      ? { x: Math.round(W / 2 - px(118)), y: plateTop - px(44) }
+      : { x: W - px(12) - px(236), y: H - px(12) - px(34) },
+  };
+})();
+
+/** Strip legacy "[...]" decoration from labels that now render as framed buttons. */
+function btnLabel(s: string): string {
+  return s.replace(/^\s*[\[【]\s*/, '').replace(/\s*[\]】]\s*$/, '');
+}
+
 function getDirection(dc: number, dr: number): string {
   return getLocalizedDirection(dc, dr);
 }
@@ -95,27 +159,43 @@ export class UIScene extends Phaser.Scene {
   private player!: Player;
   private zone!: ZoneScene;
 
-  private hpBar!: Phaser.GameObjects.Rectangle;
+  private hpBar!: Phaser.GameObjects.TileSprite;
   private hpText!: Phaser.GameObjects.Text;
-  private manaBar!: Phaser.GameObjects.Rectangle;
+  private manaBar!: Phaser.GameObjects.TileSprite;
   private manaText!: Phaser.GameObjects.Text;
-  private spiritBar!: Phaser.GameObjects.Rectangle;
-  private spiritBarBg!: Phaser.GameObjects.Rectangle;
+  /** Smoothed orb fill levels (0..1). */
+  private hpLevel = 1;
+  private manaLevel = 1;
+  private orbSurfaceOffset = 7;
+  private spiritBar!: Phaser.GameObjects.Image;
+  private spiritBarBg!: Phaser.GameObjects.Image;
+  private spiritShown = -1;
   private spiritLabel!: Phaser.GameObjects.Text;
   private spiritText!: Phaser.GameObjects.Text;
   private resonanceText!: Phaser.GameObjects.Text;
   private targetText!: Phaser.GameObjects.Text;
+  private targetFrame!: Phaser.GameObjects.Container;
+  private targetHpFill!: Phaser.GameObjects.Image;
+  private targetHpW = 0;
+  private targetHpShown = -1;
+  private nextTargetRefreshAt = 0;
   private currentTargetId: string | null = null;
   private currentTargetName: string | null = null;
   private dodgeText!: Phaser.GameObjects.Text;
-  private expBar!: Phaser.GameObjects.Rectangle;
+  private dodgeDot!: Phaser.GameObjects.Arc;
+  private expBar!: Phaser.GameObjects.Image;
+  private expShown = -1;
   private levelText!: Phaser.GameObjects.Text;
   private goldText!: Phaser.GameObjects.Text;
   private autoCombatText!: Phaser.GameObjects.Text;
   private skillLoadout: Player['classData']['skills'] = [];
   private skillSlots: Phaser.GameObjects.Container[] = [];
-  private skillCooldownOverlays: Phaser.GameObjects.Rectangle[] = [];
+  private skillCooldownOverlays: Phaser.GameObjects.Graphics[] = [];
   private skillCooldownTexts: Phaser.GameObjects.Text[] = [];
+  private skillReadyFlash: Phaser.GameObjects.Rectangle[] = [];
+  private skillCdLastFrac: number[] = [];
+  private skillCdActive: boolean[] = [];
+  private lootNotices: Phaser.GameObjects.Container[] = [];
   private logTexts: Phaser.GameObjects.Text[] = [];
   private logMessages: { text: string; type: string }[] = [];
   private questTracker!: Phaser.GameObjects.Container;
@@ -127,7 +207,7 @@ export class UIScene extends Phaser.Scene {
   /** Cached tracker state for scroll-indicator rendering. */
   private questTrackerState: TrackerState | null = null;
   /** Background rectangle for the tracker panel. */
-  private questTrackerBg: Phaser.GameObjects.Rectangle | null = null;
+  private questTrackerBg: Phaser.GameObjects.Image | null = null;
   /** Scroll indicator text (e.g. "▼ 3 more quests"). */
   private questTrackerScrollText: Phaser.GameObjects.Text | null = null;
   private zoneLabel!: Phaser.GameObjects.Text;
@@ -140,7 +220,7 @@ export class UIScene extends Phaser.Scene {
   private charPanel: Phaser.GameObjects.Container | null = null;
   private homesteadPanel: Phaser.GameObjects.Container | null = null;
   private dialoguePanel: Phaser.GameObjects.Container | null = null;
-  private dialogueBackdrop: Phaser.GameObjects.Rectangle | null = null;
+  private dialogueBackdrop: Phaser.GameObjects.Image | null = null;
   private questLogPanel: Phaser.GameObjects.Container | null = null;
   private questLogTab: 'active' | 'completed' = 'active';
   private questLogPage = 0;
@@ -166,15 +246,15 @@ export class UIScene extends Phaser.Scene {
   private dialogueScrollY = 0;
   /** Mini-boss cinematic dialogue panel. */
   private miniBossDialoguePanel: Phaser.GameObjects.Container | null = null;
-  private miniBossDialogueBackdrop: Phaser.GameObjects.Rectangle | null = null;
+  private miniBossDialogueBackdrop: Phaser.GameObjects.Image | null = null;
   /** Lore text popup panel. */
   private loreTextPanel: Phaser.GameObjects.Container | null = null;
-  private loreTextBackdrop: Phaser.GameObjects.Rectangle | null = null;
+  private loreTextBackdrop: Phaser.GameObjects.Image | null = null;
   /** Lore log sub-tab in quest log. */
   private questLogLoreTab = false;
   /** Compact quest card panel. */
   private questCardPanel: Phaser.GameObjects.Container | null = null;
-  private questCardBackdrop: Phaser.GameObjects.Rectangle | null = null;
+  private questCardBackdrop: Phaser.GameObjects.Image | null = null;
 
   constructor() {
     super({ key: 'UIScene' });
@@ -191,6 +271,15 @@ export class UIScene extends Phaser.Scene {
     this.skillSlots = [];
     this.skillCooldownOverlays = [];
     this.skillCooldownTexts = [];
+    this.skillReadyFlash = [];
+    this.skillCdLastFrac = [];
+    this.skillCdActive = [];
+    this.lootNotices = [];
+    this.hpLevel = 1;
+    this.manaLevel = 1;
+    this.spiritShown = -1;
+    this.expShown = -1;
+    this.targetHpShown = -1;
     this.logTexts = [];
     this.logMessages = [];
     this.questTrackerTexts = [];
@@ -215,38 +304,17 @@ export class UIScene extends Phaser.Scene {
   }
 
   private createHPManaBar(): void {
-    // Compute skill bar width to position globes adjacent to it
-    const slotSize = px(42), gap = px(5);
-    const totalSkillW = 6 * (slotSize + gap) - gap;
-    const utilBtnW = px(50), utilGap = px(6), utilCount = 3;
-    const totalUtilW = utilCount * utilBtnW + (utilCount - 1) * utilGap;
-    const skillUtilGap = gap + px(4);
-    const fullBarW = totalSkillW + skillUtilGap + totalUtilW;
-    const bgPad = px(8);
-    const y = H - px(50);
-
-    const barBgLeft = (W - fullBarW) / 2 - bgPad;
-    const barBgRight = (W + fullBarW) / 2 + bgPad;
-    const globeGap = px(14);
-    const hpGlobeX = barBgLeft - globeGap - GLOBE_R;
-    const mpGlobeX = barBgRight + globeGap + GLOBE_R;
-
-    // Extended bottom panel background connecting globes and skill bar
-    const panelLeft = hpGlobeX - GLOBE_R - px(6);
-    const panelRight = mpGlobeX + GLOBE_R + px(6);
-    this.add.rectangle(
-      (panelLeft + panelRight) / 2, y,
-      panelRight - panelLeft, slotSize + px(12),
-      0x0a0a14, 0.7,
-    ).setStrokeStyle(Math.round(1 * DPR), 0x333344).setDepth(2998);
+    // Carved plate behind the skill row / spirit bar / exp bar, bridging both orbs
+    this.add.image(HUD.plateL, HUD.plateTop, hudPlateTexture(this, HUD.plateR - HUD.plateL, H - HUD.plateTop + px(4)))
+      .setOrigin(0, 0).setDepth(2998);
 
     // HP Globe (left)
-    const hp = this.createGlobe(hpGlobeX, y, GLOBE_R, 0x1a0808, 0xaa2222);
+    const hp = this.createGlobe(HUD.hpX, HUD.orbY, GLOBE_R, 'hp', 0xc0281e);
     this.hpBar = hp.fill;
     this.hpText = hp.text;
 
     // Mana Globe (right)
-    const mp = this.createGlobe(mpGlobeX, y, GLOBE_R, 0x08081a, 0x2244aa);
+    const mp = this.createGlobe(HUD.mpX, HUD.orbY, GLOBE_R, 'mp', 0x2a5fd6);
     this.manaBar = mp.fill;
     this.manaText = mp.text;
   }
@@ -262,46 +330,29 @@ export class UIScene extends Phaser.Scene {
     );
   }
 
+  /** Glass liquid orb: dark back, masked wavy liquid (TileSprite), glass shine, ornate rim. */
   private createGlobe(
     cx: number, cy: number, radius: number,
-    bgColor: number, fillColor: number,
-  ): { fill: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text } {
+    name: string, liquidColor: number,
+  ): { fill: Phaser.GameObjects.TileSprite; text: Phaser.GameObjects.Text } {
     const d = 3000;
+    const tex = orbTextures(this, radius, name, liquidColor);
+    this.orbSurfaceOffset = tex.surface;
 
-    // Outer glow
-    const glow = this.add.graphics().setDepth(d - 2);
-    glow.fillStyle(fillColor, 0.06);
-    glow.fillCircle(cx, cy, radius + px(8));
+    this.add.image(cx, cy, tex.back).setDepth(d - 1);
 
-    // Dark background
-    const bg = this.add.graphics().setDepth(d - 1);
-    bg.fillStyle(bgColor, 1);
-    bg.fillCircle(cx, cy, radius);
-
-    // Geometry mask for fill
     const maskGfx = this.make.graphics({});
     maskGfx.fillStyle(0xffffff);
-    maskGfx.fillCircle(cx, cy, radius - px(2));
+    maskGfx.fillCircle(cx, cy, radius - 1);
     const mask = maskGfx.createGeometryMask();
 
-    // Fill rectangle (height animates, anchored at bottom via update)
-    const fill = this.add.rectangle(cx, cy - radius, radius * 2, radius * 2, fillColor)
+    const fill = this.add.tileSprite(cx, cy + radius, radius * 2, tex.liquidH, tex.liquid)
       .setOrigin(0.5, 0).setDepth(d);
     fill.setMask(mask);
 
-    // Glass highlight
-    const hl = this.add.graphics().setDepth(d + 1);
-    hl.fillStyle(0xffffff, 0.08);
-    hl.fillEllipse(cx - radius * 0.1, cy - radius * 0.3, radius * 0.65, radius * 0.35);
+    this.add.image(cx, cy, tex.glass).setDepth(d + 1);
+    this.add.image(cx, cy, tex.rim).setDepth(d + 2);
 
-    // Gold frame
-    const frame = this.add.graphics().setDepth(d + 2);
-    frame.lineStyle(2.5 * DPR, 0x6a5630, 1);
-    frame.strokeCircle(cx, cy, radius);
-    frame.lineStyle(1 * DPR, 0xc0934a, 0.6);
-    frame.strokeCircle(cx, cy, radius + px(2));
-
-    // Value text
     const text = this.add.text(cx, cy + px(2), '', {
       fontSize: fs(13), color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
       stroke: '#000000', strokeThickness: Math.round(3 * DPR),
@@ -311,206 +362,229 @@ export class UIScene extends Phaser.Scene {
   }
 
   private createExpBar(): void {
-    const barW = W - px(30), barH = px(8), y = H - px(8);
-    this.add.rectangle(px(15), y, barW, barH, 0x1a1a1a).setOrigin(0, 0.5).setStrokeStyle(Math.round(1 * DPR), 0x333333).setDepth(3000);
-    this.expBar = this.add.rectangle(px(15), y, 0, barH - px(2), 0x8e44ad).setOrigin(0, 0.5).setDepth(3001);
-    this.levelText = this.add.text(px(15), y - px(12), '', {
-      fontSize: fs(13), color: '#b08cce', fontFamily: FONT,
-    }).setOrigin(0, 0.5).setDepth(3002);
+    const { key, pad } = barFrameTexture(this, HUD.expW, HUD.expH);
+    this.add.image(HUD.expX - pad, HUD.expY - HUD.expH / 2 - pad, key).setOrigin(0, 0).setDepth(3000);
+    this.expBar = this.add.image(HUD.expX, HUD.expY - HUD.expH / 2, barFillTexture(this, HUD.expW, HUD.expH, 0x9b4fd0))
+      .setOrigin(0, 0).setDepth(3001);
+    this.expBar.setCrop(0, 0, 0, HUD.expH);
+    this.add.image(HUD.expX, HUD.expY - HUD.expH / 2, barTicksTexture(this, HUD.expW, HUD.expH, 10))
+      .setOrigin(0, 0).setDepth(3002);
+    this.levelText = this.add.text(W / 2, HUD.expY, '', {
+      fontSize: fs(10), color: '#ecd9ff', fontFamily: FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5, 0.5).setDepth(3003);
   }
 
   private createCombatFeedback(): void {
-    const barX = px(72);
-    const barY = H - px(112);
-    const barW = px(150);
-    const barH = px(8);
-    this.spiritLabel = this.add.text(barX, barY - px(17), t('ui.hud.spirit'), {
-      fontSize: fs(11),
-      color: '#e09a4d',
+    // Spirit bar — sits on the HUD plate directly above the skill slots
+    const barX = HUD.spiritX;
+    const barY = HUD.spiritY;
+    this.spiritLabel = this.add.text(HUD.startX, barY, t('ui.hud.spirit'), {
+      fontSize: fs(10),
+      color: '#f0b060',
       fontFamily: FONT,
       fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0, 0.5).setDepth(3002);
-    this.spiritBarBg = this.add.rectangle(barX, barY, barW, barH, 0x24170e)
-      .setOrigin(0, 0.5)
-      .setStrokeStyle(Math.round(1 * DPR), 0x6a4320)
-      .setDepth(3000);
-    this.spiritBar = this.add.rectangle(
-      barX,
-      barY,
-      0,
-      barH - px(2),
-      this.player.spirit.profile.visualColor,
-    )
-      .setOrigin(0, 0.5)
-      .setDepth(3001);
-    this.spiritText = this.add.text(barX + barW + px(6), barY, '', {
+    const { key, pad } = barFrameTexture(this, HUD.spiritW, HUD.spiritH);
+    this.spiritBarBg = this.add.image(barX - pad, barY - HUD.spiritH / 2 - pad, key).setOrigin(0, 0).setDepth(3000);
+    this.spiritBar = this.add.image(
+      barX, barY - HUD.spiritH / 2,
+      barFillTexture(this, HUD.spiritW, HUD.spiritH, this.player.spirit.profile.visualColor),
+    ).setOrigin(0, 0).setDepth(3001);
+    this.spiritBar.setCrop(0, 0, 0, HUD.spiritH);
+    this.spiritText = this.add.text(barX + HUD.spiritW + px(8), barY, '', {
       fontSize: fs(10),
       color: '#f0c080',
       fontFamily: FONT,
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0, 0.5).setDepth(3002);
-    this.resonanceText = this.add.text(barX, barY + px(12), '', {
-      fontSize: fs(10),
+    this.resonanceText = this.add.text(barX + HUD.spiritW / 2, barY - px(14), '', {
+      fontSize: fs(11),
       color: '#ffd27a',
       fontFamily: FONT,
       fontStyle: 'bold',
-    }).setOrigin(0, 0.5).setDepth(3002);
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5, 0.5).setDepth(3002);
 
-    this.targetText = this.add.text(px(16), px(58), t('ui.hud.targetNone'), {
+    // Target frame (top centre) — hidden until something is targeted
+    const tfW = px(280), tfH = px(44);
+    this.targetFrame = this.add.container(W / 2, px(10)).setDepth(3000).setVisible(false);
+    this.targetFrame.add(addFrame(this, -tfW / 2, 0, tfW, tfH, { variant: 'plate', accent: 0xc0503c }));
+    this.targetText = this.add.text(0, px(13), t('ui.hud.targetNone'), {
       fontSize: fs(12),
       color: '#777788',
       fontFamily: FONT,
+      fontStyle: 'bold',
       stroke: '#000000',
-      strokeThickness: Math.round(2 * DPR),
-    }).setDepth(3000);
-    this.dodgeText = this.add.text(px(16), px(77), t('ui.hud.dodgeReady'), {
+      strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5, 0.5);
+    this.targetFrame.add(this.targetText);
+    const thW = tfW - px(36), thH = px(8);
+    const thFrame = barFrameTexture(this, thW, thH);
+    this.targetFrame.add(this.add.image(-thW / 2 - thFrame.pad, px(29) - thH / 2 - thFrame.pad, thFrame.key).setOrigin(0, 0));
+    this.targetHpFill = this.add.image(-thW / 2, px(29) - thH / 2, barFillTexture(this, thW, thH, 0xc0281e)).setOrigin(0, 0);
+    this.targetHpW = thW;
+    this.targetHpFill.setCrop(0, 0, thW, thH);
+    this.targetFrame.add(this.targetHpFill);
+
+    // Dodge indicator (top-left plate)
+    const dpW = px(158), dpH = px(26);
+    this.add.image(0, 0, frameTextureKey(this, dpW, dpH)).setOrigin(0, 0)
+      .setPosition(px(12) - px(8), px(12) - px(8)).setDepth(2999);
+    this.dodgeText = this.add.text(px(24), px(12) + dpH / 2, t('ui.hud.dodgeReady'), {
       fontSize: fs(11),
       color: '#9bd7ff',
       fontFamily: FONT,
+      fontStyle: 'bold',
       stroke: '#000000',
       strokeThickness: Math.round(2 * DPR),
-    }).setDepth(3000);
+    }).setOrigin(0, 0.5).setDepth(3000);
+    this.dodgeDot = this.add.circle(px(17), px(12) + dpH / 2, px(3), 0x9bd7ff).setDepth(3000);
   }
 
   private createSkillBar(): void {
-    const slotSize = px(42), gap = px(5);
+    const slotSize = HUD.slot, gap = HUD.gap;
     const skills = this.getSkillLoadout();
-    const totalSkillW = 6 * (slotSize + gap) - gap;
-
-    const utilBtnW = px(50), utilGap = px(6), utilCount = 3;
-    const totalUtilW = utilCount * utilBtnW + (utilCount - 1) * utilGap;
-    const skillUtilGap = gap + px(4);
-    const fullBarW = totalSkillW + skillUtilGap + totalUtilW;
-    const startX = (W - fullBarW) / 2;
-    const y = H - px(50);
-    const bgPad = px(8);
-
-    // Skill bar background — centered around all elements
-    this.add.rectangle(W / 2, y, fullBarW + bgPad * 2, slotSize + px(10), 0x0a0a14, 0.7)
-      .setStrokeStyle(Math.round(1 * DPR), 0x333344).setDepth(2999);
+    const startX = HUD.startX;
+    const y = HUD.rowY;
 
     this.skillSlots = [];
     this.skillCooldownOverlays = [];
     this.skillCooldownTexts = [];
+    this.skillReadyFlash = [];
+    this.skillCdLastFrac = [];
+    this.skillCdActive = [];
 
+    const badge = keyBadgeTexture(this, px(14), px(13));
     for (let i = 0; i < 6; i++) {
       const x = startX + i * (slotSize + gap);
       const skill = skills[i];
       const container = this.add.container(x + slotSize / 2, y).setDepth(3000);
-      const bg = this.add.rectangle(0, 0, slotSize, slotSize, 0x1a1a2e).setStrokeStyle(1.5 * DPR, 0x555566);
+      const normalKey = skillSlotTexture(this, slotSize, skill ? 'normal' : 'empty').key;
+      const bg = this.add.image(0, 0, normalKey);
       container.add(bg);
       if (!skill) {
-        container.add(this.add.text(0, 0, '—', {
-          fontSize: fs(16), color: '#353548', fontFamily: FONT,
+        container.add(this.add.text(slotSize / 2 - px(9), slotSize / 2 - px(8), `${i + 1}`, {
+          fontSize: fs(9), color: '#4a4450', fontFamily: FONT, fontStyle: 'bold',
         }).setOrigin(0.5));
         this.skillSlots.push(container);
         continue;
       }
       const iconKey = `skill_icon_${skill.id}`;
       if (this.textures.exists(iconKey)) {
-        container.add(this.add.image(0, px(-2), iconKey)
-          .setDisplaySize(slotSize - px(6), slotSize - px(6)));
+        container.add(this.add.image(0, 0, iconKey)
+          .setDisplaySize(slotSize - px(8), slotSize - px(8)));
       } else {
-        container.add(this.add.text(0, px(-6), getSkillName(skill.id, skill.name).substring(0, 2), {
-          fontSize: fs(16), color: '#e0d8cc', fontFamily: FONT, fontStyle: 'bold',
+        container.add(this.add.text(0, 0, getSkillName(skill.id, skill.name).substring(0, 2), {
+          fontSize: fs(15), color: '#e0d8cc', fontFamily: FONT, fontStyle: 'bold',
+          stroke: '#000000', strokeThickness: Math.round(2 * DPR),
         }).setOrigin(0.5));
       }
-      container.add(this.add.text(0, px(14), `${i + 1}`, {
-        fontSize: fs(12), color: '#666680', fontFamily: FONT,
-      }).setOrigin(0.5));
-      const cdOverlay = this.add.rectangle(0, 0, slotSize, slotSize, 0x000000, 0.6).setVisible(false);
+      const cdOverlay = this.add.graphics();
       container.add(cdOverlay);
       this.skillCooldownOverlays.push(cdOverlay);
+      this.skillCdLastFrac.push(-1);
+      this.skillCdActive.push(false);
+      const flash = this.add.rectangle(0, 0, slotSize - px(6), slotSize - px(6), 0xfff0c0, 0).setBlendMode(Phaser.BlendModes.ADD);
+      container.add(flash);
+      this.skillReadyFlash.push(flash);
+      container.add(this.add.image(slotSize / 2 - px(9), slotSize / 2 - px(8), badge));
+      container.add(this.add.text(slotSize / 2 - px(9), slotSize / 2 - px(8), `${i + 1}`, {
+        fontSize: fs(9), color: '#f0dcae', fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(0.5));
       const cdText = this.add.text(0, 0, '', {
-        fontSize: fs(14), color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
-        stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+        fontSize: fs(15), color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(3 * DPR),
       }).setOrigin(0.5).setVisible(false);
       container.add(cdText);
       this.skillCooldownTexts.push(cdText);
+      const hoverKey = skillSlotTexture(this, slotSize, 'hover').key;
       bg.setInteractive({ useHandCursor: true });
+      bg.on('pointerover', () => bg.setTexture(hoverKey));
+      bg.on('pointerout', () => bg.setTexture(normalKey));
       bg.on('pointerdown', () => EventBus.emit(GameEvents.UI_SKILL_CLICK, { index: i, skillId: skill.id }));
       this.skillSlots.push(container);
     }
 
     // Utility buttons — evenly spaced after skill slots
-    const utilStartX = startX + totalSkillW + skillUtilGap;
+    const utilStartX = HUD.utilX;
+    const utilW = HUD.utilW, utilGap = HUD.utilGap;
 
     // Auto combat button
-    const acX = utilStartX + utilBtnW / 2;
-    const acBg = this.add.rectangle(acX, y, utilBtnW, slotSize, 0x1a1a2e)
-      .setStrokeStyle(1.5 * DPR, 0x555566).setInteractive({ useHandCursor: true }).setDepth(3000);
-    this.autoCombatText = this.add.text(acX, y, t('ui.hud.autoCombat.off'), {
-      fontSize: fs(12), color: '#666680', fontFamily: FONT, align: 'center',
-    }).setOrigin(0.5).setDepth(3001);
-    acBg.on('pointerdown', () => {
+    const acBtn = this.makeButton(utilStartX + utilW / 2, y, utilW, slotSize, t('ui.hud.autoCombat.off'), () => {
       this.player.autoCombat = !this.player.autoCombat;
       EventBus.emit(GameEvents.LOG_MESSAGE, { text: this.player.autoCombat ? t('ui.hud.autoCombatLog.on') : t('ui.hud.autoCombatLog.off'), type: 'system' });
-    });
+    }, { fontSize: 10, color: '#b0a8b4' });
+    acBtn.setDepth(3000);
+    this.autoCombatText = acBtn.label;
 
     // Auto-loot button
-    const alX = acX + utilBtnW + utilGap;
-    const alBg = this.add.rectangle(alX, y, utilBtnW, slotSize, 0x1a1a2e)
-      .setStrokeStyle(1.5 * DPR, 0x555566).setInteractive({ useHandCursor: true }).setDepth(3000);
-    this.autoLootText = this.add.text(alX, y, t('ui.hud.autoLoot.off'), {
-      fontSize: fs(12), color: '#666680', fontFamily: FONT, align: 'center',
-    }).setOrigin(0.5).setDepth(3001);
-    alBg.on('pointerdown', () => {
+    const alBtn = this.makeButton(utilStartX + utilW * 1.5 + utilGap, y, utilW, slotSize, t('ui.hud.autoLoot.off'), () => {
       const modes: Array<'off' | 'all' | 'magic' | 'rare' | 'legendary'> = ['off', 'all', 'magic', 'rare', 'legendary'];
       const idx = modes.indexOf(this.player.autoLootMode);
       this.player.autoLootMode = modes[(idx + 1) % modes.length];
-    });
+    }, { fontSize: 10, color: '#b0a8b4' });
+    alBtn.setDepth(3000);
+    this.autoLootText = alBtn.label;
 
     // Inventory button
-    const invX = alX + utilBtnW + utilGap;
-    const invBg = this.add.rectangle(invX, y, utilBtnW, slotSize, 0x1a1a2e)
-      .setStrokeStyle(1.5 * DPR, 0x8e44ad).setInteractive({ useHandCursor: true }).setDepth(3000);
-    this.add.text(invX, y, t('ui.hud.inventoryBtn'), {
-      fontSize: fs(12), color: '#b08cce', fontFamily: FONT, align: 'center',
-    }).setOrigin(0.5).setDepth(3001);
-    invBg.on('pointerdown', () => this.toggleInventory());
+    const invBtn = this.makeButton(utilStartX + utilW * 2.5 + utilGap * 2, y, utilW, slotSize, t('ui.hud.inventoryBtn'), () => this.toggleInventory(), {
+      fontSize: 10, variant: 'primary', bold: true,
+    });
+    invBtn.setDepth(3000);
   }
 
   private createLogPanel(): void {
     this.logTexts = [];
-    const panelW = px(300), panelH = px(140), x = px(10), y = H - px(210);
-    this.add.rectangle(x, y, panelW, panelH, 0x000000, 0.55)
-      .setOrigin(0, 0).setStrokeStyle(Math.round(1 * DPR), 0x222233).setDepth(2999);
-    this.add.text(x + px(8), y + px(4), t('ui.hud.combatLog'), {
-      fontSize: fs(12), color: '#c0934a', fontFamily: FONT,
-    }).setDepth(3000);
+    const { x, y, w, h } = HUD.log;
+    this.add.image(0, 0, frameTextureKey(this, w, h, 0.9)).setOrigin(0, 0)
+      .setPosition(x - px(8), y - px(8)).setDepth(2999);
+    const header = addSectionHeader(this, x + px(10), y + px(12), w - px(20), t('ui.hud.combatLog'));
+    for (const o of header) (o as unknown as Phaser.GameObjects.Components.Depth).setDepth(3000);
     for (let i = 0; i < LOG_MAX_LINES; i++) {
       this.logTexts.push(
-        this.add.text(x + px(8), y + px(18) + i * px(14), '', {
-          fontSize: fs(12), color: '#aaa', fontFamily: FONT, wordWrap: { width: panelW - px(16), useAdvancedWrap: true },
+        this.add.text(x + px(10), y + px(24) + i * px(14), '', {
+          fontSize: fs(12), color: '#aaa', fontFamily: FONT, lineSpacing: px(1),
+          wordWrap: { width: w - px(20), useAdvancedWrap: true },
+          stroke: '#000000', strokeThickness: Math.round(2 * DPR),
         }).setDepth(3000)
       );
     }
   }
 
   private createInfoDisplay(): void {
-    this.goldText = this.add.text(W - px(16), px(16), '', {
-      fontSize: fs(14), color: '#f1c40f', fontFamily: FONT,
-    }).setOrigin(1, 0).setDepth(3000);
-    this.zoneLabel = this.add.text(W - px(16), px(34), '', {
-      fontSize: fs(13), color: '#8a8090', fontFamily: FONT,
-    }).setOrigin(1, 0).setDepth(3000);
+    const { x, y, w, h } = HUD.info;
+    this.add.image(0, 0, frameTextureKey(this, w, h)).setOrigin(0, 0)
+      .setPosition(x - px(8), y - px(8)).setDepth(2999);
+    this.zoneLabel = this.add.text(x + w / 2, y + px(14), '', {
+      fontSize: fs(13), color: UI_COLORS.parchment, fontFamily: TITLE_FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5, 0.5).setDepth(3000);
+    this.add.image(x + w / 2 - px(34), y + px(33), coinTexture(this, px(13))).setDepth(3000);
+    this.goldText = this.add.text(x + w / 2 - px(24), y + px(33), '', {
+      fontSize: fs(13), color: '#ffd35a', fontFamily: FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0, 0.5).setDepth(3000);
   }
 
   private createQuestTracker(): void {
     this.questTrackerTexts = [];
     this.lastQuestTrackerSignature = '';
-    // Position on right side, below minimap (minimap: x=W-px(110), y=px(70), size=px(100))
-    const trackerX = W - px(220);
-    const trackerY = px(10) + px(60) + px(100) + px(14); // below minimap + gap
+    // Position on right side, below the minimap frame
+    const trackerX = HUD.tracker.x;
+    const trackerY = HUD.tracker.y;
     this.questTracker = this.add.container(trackerX, trackerY).setDepth(3000);
 
-    // Semi-transparent background for readability
-    this.questTrackerBg = this.add.rectangle(0, 0, px(210), px(20), 0x0a0a14, 0.7)
+    // Framed background (re-baked only when the tracker's height changes)
+    this.questTrackerBg = this.add.image(0, 0, frameTextureKey(this, px(218), px(24), 0.9))
       .setOrigin(0, 0).setDepth(2999);
     this.questTrackerBg.setVisible(false);
 
     // Header text
     const header = this.add.text(0, 0, t('ui.questTracker.header'), {
-      fontFamily: FONT, fontSize: fs(12), color: '#c0934a', fontStyle: 'bold',
+      fontFamily: TITLE_FONT, fontSize: fs(12), color: UI_COLORS.heading, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0, 0);
     this.questTracker.add(header);
 
@@ -519,6 +593,50 @@ export class UIScene extends Phaser.Scene {
       fontFamily: FONT, fontSize: fs(10), color: '#888888',
     }).setOrigin(0, 0).setVisible(false);
     this.questTracker.add(this.questTrackerScrollText);
+  }
+
+  /** Loot pickup notices (icon + quality-coloured name), stacked bottom-right. */
+  private handleItemPicked(data: { item?: ItemInstance }): void {
+    const item = data?.item;
+    if (!item) return;
+    const nW = px(236), nH = px(34);
+    const notice = this.add.container(HUD.loot.x, HUD.loot.y).setDepth(3050).setAlpha(0);
+    notice.add(addFrame(this, 0, 0, nW, nH, { variant: 'tooltip', accent: qualityNum(item.quality) }));
+    const slot = this.createItemSlot(px(18), nH / 2, px(26), item, { interactive: false, showCount: false });
+    notice.add(slot.objects);
+    const qty = item.quantity > 1 ? ` x${item.quantity}` : '';
+    const label = this.add.text(px(38), nH / 2, `${getItemDisplayName(item)}${qty}`, {
+      fontSize: fs(12), color: qualityHex(item.quality), fontFamily: FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+    }).setOrigin(0, 0.5);
+    if (label.width > nW - px(46)) label.setScale((nW - px(46)) / label.width, 1);
+    notice.add(label);
+    this.lootNotices.unshift(notice);
+    while (this.lootNotices.length > 4) {
+      const old = this.lootNotices.pop();
+      old?.destroy();
+    }
+    this.layoutLootNotices();
+    notice.x += px(24);
+    this.tweens.add({ targets: notice, alpha: 1, x: HUD.loot.x, duration: 220, ease: 'Cubic.easeOut' });
+    this.time.delayedCall(3200, () => {
+      if (!notice.active) return;
+      this.tweens.add({
+        targets: notice, alpha: 0, duration: 400,
+        onComplete: () => {
+          this.lootNotices = this.lootNotices.filter(n => n !== notice);
+          notice.destroy();
+        },
+      });
+    });
+  }
+
+  private layoutLootNotices(): void {
+    this.lootNotices.forEach((n, i) => {
+      const targetY = HUD.loot.y - i * px(40);
+      if (i === 0) n.y = targetY;
+      else this.tweens.add({ targets: n, y: targetY, duration: 150 });
+    });
   }
 
   private setupEventListeners(): void {
@@ -530,6 +648,7 @@ export class UIScene extends Phaser.Scene {
     this.subscriptions.on(EventBus, GameEvents.LORE_COLLECTED, this.handleLoreCollected, this);
     this.subscriptions.on(EventBus, GameEvents.ACHIEVEMENT_UNLOCKED, this.handleAchievementUnlocked, this);
     this.subscriptions.on(EventBus, GameEvents.TARGET_CHANGED, this.handleTargetChanged, this);
+    this.subscriptions.on(EventBus, GameEvents.ITEM_PICKED, this.handleItemPicked, this);
     this.subscriptions.on(EventBus, GameEvents.SKILL_LEVEL_CHANGED, this.handleSkillLevelChanged, this);
     this.subscriptions.on(EventBus, 'ui:refresh', this.handleUiRefresh, this);
     this.subscriptions.on(EventBus, GameEvents.LOCALE_CHANGED, this.handleLocaleChanged, this);
@@ -554,7 +673,10 @@ export class UIScene extends Phaser.Scene {
         ? t('ui.hud.target', { targetName: this.currentTargetName ?? data.targetId })
         : t('ui.hud.targetNone'),
     );
-    this.targetText.setColor(data.targetId ? '#ff8c72' : '#777788');
+    this.targetText.setColor(data.targetId ? '#ffb09a' : '#777788');
+    this.targetFrame?.setVisible(!!data.targetId);
+    this.targetHpShown = -1;
+    this.nextTargetRefreshAt = 0;
   }
 
   private handleSkillLevelChanged(data: { level?: number }): void {
@@ -683,15 +805,22 @@ export class UIScene extends Phaser.Scene {
   }
 
   private updateLogDisplay(): void {
-    const colors: Record<string, string> = { system: '#c0934a', combat: '#c0392b', loot: '#27ae60', info: '#2e86c1' };
+    const colors: Record<string, string> = { system: '#e8c77a', combat: '#ff8a72', loot: '#7ed36a', info: '#7fb6ff' };
+    // Newest message sits at the bottom; older ones stack upward and wrapped lines
+    // push earlier entries up instead of overlapping them.
+    const top = HUD.log.y + px(22);
+    let bottom = HUD.log.y + HUD.log.h - px(6);
+    const msgs = this.logMessages;
     for (let i = 0; i < LOG_MAX_LINES; i++) {
       const txt = this.logTexts[i];
       if (!txt || !txt.active) continue;
-      if (i < this.logMessages.length) {
-        txt.setText(this.logMessages[i].text).setColor(colors[this.logMessages[i].type] ?? '#aaa');
-      } else {
-        txt.setText('');
-      }
+      const msg = msgs[msgs.length - 1 - i];
+      if (!msg) { if (txt.text !== '') txt.setText(''); txt.setVisible(false); continue; }
+      txt.setText(msg.text).setColor(colors[msg.type] ?? '#b8b0a4');
+      const y = bottom - txt.height;
+      if (y < top) { txt.setVisible(false); bottom = top; continue; }
+      txt.setY(y).setVisible(true).setAlpha(i === 0 ? 1 : Math.max(0.55, 1 - i * 0.07));
+      bottom = y - px(1);
     }
   }
 
@@ -700,74 +829,72 @@ export class UIScene extends Phaser.Scene {
     if (this.inventoryPanel) { this.inventoryPanel.destroy(); this.inventoryPanel = null; this.hideItemTooltip(); this.hideContextPopup(); return; }
     this.closeAllPanels();
     audioManager.playSFX('click');
-    const pw = px(520), ph = px(500), panelX = (W - pw) / 2, panelY = px(10);
+    const pw = px(740), ph = px(450), panelX = (W - pw) / 2, panelY = px(12);
     const inv = this.zone.inventorySystem.inventory;
     const itemsPerPage = 50;
     const totalPages = Math.max(1, Math.ceil(inv.length / itemsPerPage));
     if (this.inventoryPage >= totalPages) this.inventoryPage = totalPages - 1;
 
-    this.inventoryPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
-    this.animatePanelOpen(this.inventoryPanel);
-    this.inventoryPanel.add(this.createPanelBg(pw, ph));
+    const panel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
+    this.inventoryPanel = panel;
+    this.animatePanelOpen(panel);
+    panel.add(this.createPanelBg(pw, ph));
+    panel.add(this.createPanelTitle(pw, t('ui.inventory.title', { count: String(inv.length), max: '100' })));
+    panel.add(this.createPanelCloseBtn(pw, () => this.toggleInventory()));
 
-    // Title with item count and page
-    this.inventoryPanel.add(this.add.text(px(14), px(12), t('ui.inventory.title', { count: String(inv.length), max: '100' }), {
-      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
-    }));
+    // ── Left: equipment paper-doll ──
+    const leftX = px(18), leftW = px(236);
+    const dollCx = leftX + leftW / 2;
+    panel.add(addVDivider(this, leftX + leftW + px(9), px(46), ph - px(62)));
+    panel.add(addSectionHeader(this, leftX, px(52), leftW, t('ui.inventory.equipment')));
 
-    // Sort button
-    const sortBtn = this.add.text(pw - px(120), px(10), t('ui.inventory.sort'), {
-      fontSize: fs(14), color: '#5dade2', fontFamily: FONT,
-    }).setInteractive({ useHandCursor: true });
-    sortBtn.on('pointerdown', () => {
-      this.zone.inventorySystem.sortInventory();
-      this.refreshInventory();
-    });
-    this.inventoryPanel.add(sortBtn);
+    const eqSlotSize = px(44);
+    const colGap = px(70), rowPitch = px(64);
+    const rowTop = px(92);
+    const layout: { slot: EquipSlot; key: string; col: number; row: number; ghost: string }[] = [
+      { slot: 'helmet', key: 'ui.inventory.slot.helmet', col: 0, row: 0, ghost: 'a_helm' },
+      { slot: 'weapon', key: 'ui.inventory.slot.weapon', col: -1, row: 1, ghost: 'w_sword' },
+      { slot: 'armor', key: 'ui.inventory.slot.armor', col: 0, row: 1, ghost: 'a_armor' },
+      { slot: 'offhand', key: 'ui.inventory.slot.offhand', col: 1, row: 1, ghost: 'w_shield' },
+      { slot: 'gloves', key: 'ui.inventory.slot.gloves', col: -1, row: 2, ghost: 'a_gloves' },
+      { slot: 'belt', key: 'ui.inventory.slot.belt', col: 0, row: 2, ghost: 'a_belt' },
+      { slot: 'boots', key: 'ui.inventory.slot.boots', col: 1, row: 2, ghost: 'a_boots' },
+      { slot: 'ring1', key: 'ui.inventory.slot.ring1', col: -1, row: 3, ghost: 'j_ring' },
+      { slot: 'necklace', key: 'ui.inventory.slot.necklace', col: 0, row: 3, ghost: 'j_amulet' },
+      { slot: 'ring2', key: 'ui.inventory.slot.ring2', col: 1, row: 3, ghost: 'j_ring' },
+    ];
+    // faint silhouette plinth behind the doll
+    const plinth = this.add.graphics();
+    plinth.fillStyle(0xd4a54a, 0.05);
+    plinth.fillEllipse(dollCx, rowTop + rowPitch * 1.5, leftW * 0.9, rowPitch * 4.2);
+    plinth.lineStyle(1, 0xd4a54a, 0.12);
+    plinth.strokeEllipse(dollCx, rowTop + rowPitch * 1.5, leftW * 0.9, rowPitch * 4.2);
+    panel.add(plinth);
 
-    // Destroy normal items button
-    const destroyBtn = this.add.text(pw - px(68), px(10), t('ui.inventory.destroy'), {
-      fontSize: fs(14), color: '#e74c3c', fontFamily: FONT,
-    }).setInteractive({ useHandCursor: true });
-    destroyBtn.on('pointerdown', () => {
-      this.zone.inventorySystem.destroyNormalItems();
-      this.inventoryPage = 0;
-      this.refreshInventory();
-    });
-    this.inventoryPanel.add(destroyBtn);
-
-    // Close button
-    this.inventoryPanel.add(this.createPanelCloseBtn(pw, () => this.toggleInventory()));
-
-    // Equipment slots — 5x2 grid
-    const equipSlots = ['helmet', 'armor', 'gloves', 'boots', 'weapon', 'offhand', 'necklace', 'ring1', 'ring2', 'belt'];
-    const slotNameKeys = ['ui.inventory.slot.helmet', 'ui.inventory.slot.armor', 'ui.inventory.slot.gloves', 'ui.inventory.slot.boots', 'ui.inventory.slot.weapon', 'ui.inventory.slot.offhand', 'ui.inventory.slot.necklace', 'ui.inventory.slot.ring1', 'ui.inventory.slot.ring2', 'ui.inventory.slot.belt'];
-    const eqSlotSize = px(36);
-    const eqGap = px(6);
-    const eqStartX = px(14);
-    const eqStartY = px(36);
-    equipSlots.forEach((slot, i) => {
-      const sx = eqStartX + (i % 5) * (eqSlotSize + eqGap);
-      const sy = eqStartY + Math.floor(i / 5) * (eqSlotSize + px(16));
-      const eq = this.zone.inventorySystem.equipment[slot as keyof typeof this.zone.inventorySystem.equipment];
-      const slotBg = this.add.rectangle(sx + eqSlotSize / 2, sy + eqSlotSize / 2, eqSlotSize, eqSlotSize, eq ? this.getQualityColorNum(eq.quality) : 0x222233)
-        .setStrokeStyle(Math.round(1 * DPR), 0x444455).setInteractive({ useHandCursor: true });
-      this.inventoryPanel!.add(slotBg);
-      this.inventoryPanel!.add(this.add.text(sx + eqSlotSize / 2, sy + eqSlotSize + px(2), t(slotNameKeys[i]), {
-        fontSize: fs(11), color: '#777788', fontFamily: FONT,
+    for (const def of layout) {
+      const cx = dollCx + def.col * colGap;
+      const cy = rowTop + def.row * rowPitch;
+      const eq = this.zone.inventorySystem.equipment[def.slot as keyof typeof this.zone.inventorySystem.equipment] as ItemInstance | null | undefined;
+      const { slot: slotBg, objects } = this.createItemSlot(cx, cy, eqSlotSize, eq ?? null, { interactive: !!eq });
+      panel.add(objects);
+      if (!eq) {
+        panel.add(this.add.image(cx, cy, ensureItemIcon(this, def.ghost))
+          .setDisplaySize(eqSlotSize - px(12), eqSlotSize - px(12)).setTint(0x6a6070).setAlpha(0.28));
+      }
+      panel.add(this.add.text(cx, cy + eqSlotSize / 2 + px(3), t(def.key), {
+        fontSize: fs(10), color: eq ? UI_COLORS.textSoft : UI_COLORS.dim, fontFamily: FONT,
       }).setOrigin(0.5, 0));
       if (eq) {
-        this.inventoryPanel!.add(this.add.text(sx + eqSlotSize / 2, sy + eqSlotSize / 2, eq.name.charAt(0), {
-          fontSize: fs(14), color: '#fff', fontFamily: FONT, fontStyle: 'bold',
-        }).setOrigin(0.5));
         // Socket indicator: small diamond on items with sockets
-        const maxSock = this.zone.inventorySystem.getMaxSockets(slot as any);
+        const maxSock = this.zone.inventorySystem.getMaxSockets(def.slot as any);
         if (maxSock > 0) {
           const sockLabel = `◆${eq.sockets.length}/${maxSock}`;
-          this.inventoryPanel!.add(this.add.text(sx + eqSlotSize - px(2), sy + px(2), sockLabel, {
-            fontSize: fs(9), color: '#8be9fd', fontFamily: FONT,
+          panel.add(this.add.text(cx + eqSlotSize / 2 - px(2), cy - eqSlotSize / 2 + px(1), sockLabel, {
+            fontSize: fs(9), color: '#8be9fd', fontFamily: FONT, fontStyle: 'bold',
+            stroke: '#000000', strokeThickness: Math.round(2 * DPR),
           }).setOrigin(1, 0));
         }
+        const slot = def.slot;
         slotBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
           this.showItemTooltip(eq, pointer.x, pointer.y);
         });
@@ -784,32 +911,40 @@ export class UIScene extends Phaser.Scene {
           }
         });
       }
-    });
+    }
 
-    // Divider
-    const divY = eqStartY + 2 * (eqSlotSize + px(16)) + px(2);
-    this.inventoryPanel.add(this.add.rectangle(pw / 2, divY, pw - px(20), Math.round(1 * DPR), 0x333344));
+    // Gold + hint under the doll
+    const goldY = rowTop + 3 * rowPitch + px(52);
+    panel.add(addDivider(this, dollCx, goldY - px(12), leftW - px(20)));
+    panel.add(this.add.image(dollCx - px(40), goldY + px(8), coinTexture(this, px(14))));
+    panel.add(this.add.text(dollCx - px(30), goldY + px(8), `${this.player.gold}`, {
+      fontSize: fs(14), color: '#ffd35a', fontFamily: FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0, 0.5));
+    panel.add(this.add.text(dollCx, goldY + px(30), t('ui.inventory.equipHint'), {
+      fontSize: fs(10), color: UI_COLORS.dim, fontFamily: FONT, align: 'center',
+      wordWrap: { width: leftW - px(8), useAdvancedWrap: true },
+    }).setOrigin(0.5, 0));
 
-    // Inventory grid — 10 cols x 5 rows per page
-    const gridStartY = divY + px(6);
+    // ── Right: backpack grid ──
+    const gridX = leftX + leftW + px(20);
+    const gridW = pw - gridX - px(18);
     const cols = 10;
-    const slotSize = px(36);
     const gap = px(4);
+    const slotSize = Math.floor((gridW - gap * (cols - 1)) / cols);
+    panel.add(addSectionHeader(this, gridX, px(52), gridW, t('ui.inventory.bag')));
+    const gridStartY = px(66);
     const pageItems = inv.slice(this.inventoryPage * itemsPerPage, (this.inventoryPage + 1) * itemsPerPage);
-    pageItems.forEach((item, i) => {
-      const ix = px(14) + (i % cols) * (slotSize + gap);
-      const iy = gridStartY + Math.floor(i / cols) * (slotSize + gap);
-      const itemBg = this.add.rectangle(ix + slotSize / 2, iy + slotSize / 2, slotSize, slotSize, this.getQualityColorNum(item.quality))
-        .setStrokeStyle(Math.round(1 * DPR), 0x555566).setInteractive({ useHandCursor: true });
-      this.inventoryPanel!.add(itemBg);
-      this.inventoryPanel!.add(this.add.text(ix + slotSize / 2, iy + slotSize / 2, item.name.charAt(0), {
-        fontSize: fs(14), color: '#fff', fontFamily: FONT, fontStyle: 'bold',
-      }).setOrigin(0.5));
-      if (item.quantity > 1) {
-        this.inventoryPanel!.add(this.add.text(ix + slotSize - px(2), iy + slotSize - px(2), `${item.quantity}`, {
-          fontSize: fs(12), color: '#ffd700', fontFamily: FONT,
-        }).setOrigin(1, 1));
+    for (let i = 0; i < itemsPerPage; i++) {
+      const cx = gridX + (i % cols) * (slotSize + gap) + slotSize / 2;
+      const cy = gridStartY + Math.floor(i / cols) * (slotSize + gap) + slotSize / 2;
+      const item = pageItems[i];
+      if (!item) {
+        panel.add(addSlot(this, cx, cy, slotSize, null).setAlpha(0.7));
+        continue;
       }
+      const { slot: itemBg, objects } = this.createItemSlot(cx, cy, slotSize, item);
+      panel.add(objects);
       itemBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
         this.showItemTooltip(item, pointer.x, pointer.y);
       });
@@ -818,41 +953,42 @@ export class UIScene extends Phaser.Scene {
         this.hideItemTooltip();
         this.showContextPopup(item, pointer.x, pointer.y);
       });
-    });
-
-    // Pagination
-    const pageY = gridStartY + 5 * (slotSize + gap) + px(4);
-    if (totalPages > 1) {
-      if (this.inventoryPage > 0) {
-        const prevBtn = this.add.text(pw / 2 - px(80), pageY, t('ui.inventory.prevPage'), {
-          fontSize: fs(13), color: '#5dade2', fontFamily: FONT,
-        }).setInteractive({ useHandCursor: true });
-        prevBtn.on('pointerdown', () => { this.inventoryPage--; this.refreshInventory(); });
-        this.inventoryPanel.add(prevBtn);
-      }
-      this.inventoryPanel.add(this.add.text(pw / 2, pageY, t('ui.inventory.pageLabel', { current: String(this.inventoryPage + 1), total: String(totalPages) }), {
-        fontSize: fs(13), color: '#888', fontFamily: FONT,
-      }).setOrigin(0.5, 0));
-      if (this.inventoryPage < totalPages - 1) {
-        const nextBtn = this.add.text(pw / 2 + px(40), pageY, t('ui.inventory.nextPage'), {
-          fontSize: fs(13), color: '#5dade2', fontFamily: FONT,
-        }).setInteractive({ useHandCursor: true });
-        nextBtn.on('pointerdown', () => { this.inventoryPage++; this.refreshInventory(); });
-        this.inventoryPanel.add(nextBtn);
-      }
     }
 
-    // Equipment stats at bottom
+    // Toolbar: pagination (left) + sort / destroy (right)
+    const barY = gridStartY + 5 * (slotSize + gap) + px(16);
+    if (totalPages > 1) {
+      const pgCx = gridX + px(110);
+      panel.add(this.makeButton(pgCx - px(70), barY, px(56), px(24), t('ui.inventory.prevPage'), () => { this.inventoryPage--; this.refreshInventory(); }, { disabled: this.inventoryPage <= 0 }));
+      panel.add(this.add.text(pgCx, barY, t('ui.inventory.pageLabel', { current: String(this.inventoryPage + 1), total: String(totalPages) }), {
+        fontSize: fs(12), color: UI_COLORS.textSoft, fontFamily: FONT,
+      }).setOrigin(0.5));
+      panel.add(this.makeButton(pgCx + px(70), barY, px(56), px(24), t('ui.inventory.nextPage'), () => { this.inventoryPage++; this.refreshInventory(); }, { disabled: this.inventoryPage >= totalPages - 1 }));
+    }
+    panel.add(this.makeButton(gridX + gridW - px(142), barY, px(76), px(26), btnLabel(t('ui.inventory.sort')), () => {
+      this.zone.inventorySystem.sortInventory();
+      this.refreshInventory();
+    }, { variant: 'secondary' }));
+    panel.add(this.makeButton(gridX + gridW - px(46), barY, px(92), px(26), btnLabel(t('ui.inventory.destroy')), () => {
+      this.zone.inventorySystem.destroyNormalItems();
+      this.inventoryPage = 0;
+      this.refreshInventory();
+    }, { variant: 'danger' }));
+
+    // Equipment stats
     const eqStats = this.zone.inventorySystem.getEquipmentStats();
     const statText = Object.entries(eqStats)
       .filter(([, v]) => v !== 0)
       .map(([k, v]) => {
         const label = getStatLabel(k);
         const suffix = isStatPercent(k) ? '%' : '';
-        return `${label}+${v}${suffix}`;
-      }).join('  ');
-    this.inventoryPanel.add(this.add.text(px(14), ph - px(22), statText ? t('ui.inventory.equipBonus', { stats: statText }) : t('ui.inventory.equipBonusNone'), {
-      fontSize: fs(12), color: '#777788', fontFamily: FONT, wordWrap: { width: pw - px(28), useAdvancedWrap: true },
+        return `${label} +${v}${suffix}`;
+      }).join('   ');
+    const statsY = barY + px(26);
+    panel.add(addSectionHeader(this, gridX, statsY, gridW, t('ui.inventory.bonusHeader')));
+    panel.add(this.add.text(gridX + px(2), statsY + px(12), statText || t('ui.inventory.bonusNone'), {
+      fontSize: fs(11), color: statText ? '#9fd4ff' : UI_COLORS.dim, fontFamily: FONT, lineSpacing: px(3),
+      wordWrap: { width: gridW - px(4), useAdvancedWrap: true }, maxLines: 5,
     }));
   }
 
@@ -870,139 +1006,138 @@ export class UIScene extends Phaser.Scene {
     if (!keepPage) this.shopInventoryPage = 0;
 
     // Backdrop for outside-click dismiss
-    this.dialogueBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.3)
-      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
+    this.dialogueBackdrop = this.createBackdrop(0.6);
     this.dialogueBackdrop.on('pointerdown', () => {
       this.hideItemTooltip();
       if (this.shopPanel) { const closedNpcId = this.shopNpcId; this.shopPanel.destroy(); this.shopPanel = null; this.shopNpcId = null; EventBus.emit(GameEvents.SHOP_CLOSE, { npcId: closedNpcId }); }
       if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
     });
 
-    const pw = px(700), ph = px(460), panelX = (W - pw) / 2, panelY = px(40);
-    const dividerX = px(320);
+    const pw = px(780), ph = px(480), panelX = (W - pw) / 2, panelY = px(40);
+    const dividerX = px(356);
     this.shopPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
-    this.animatePanelOpen(this.shopPanel);
-    this.shopPanel.add(this.createPanelBg(pw, ph));
+    const shop = this.shopPanel;
+    this.animatePanelOpen(shop);
+    shop.add(this.createPanelBg(pw, ph));
     const title = data.type === 'blacksmith' ? t('ui.shop.blacksmith') : t('ui.shop.shop');
-    this.shopPanel.add(this.createPanelTitle(pw, title));
-    this.shopPanel.add(this.createPanelCloseBtn(pw, () => {
+    shop.add(this.createPanelTitle(pw, title));
+    shop.add(this.createPanelCloseBtn(pw, () => {
       this.hideItemTooltip();
       if (this.shopPanel) { const closedNpcId = this.shopNpcId; this.shopPanel.destroy(); this.shopPanel = null; this.shopNpcId = null; EventBus.emit(GameEvents.SHOP_CLOSE, { npcId: closedNpcId }); }
       if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
     }));
 
     // Divider
-    this.shopPanel.add(this.add.rectangle(dividerX, px(36), Math.round(1 * DPR), ph - px(56), 0x333344).setOrigin(0, 0));
+    shop.add(addVDivider(this, dividerX, px(46), ph - px(62)));
 
     // --- LEFT: Merchant items ---
-    this.shopPanel.add(this.add.text(dividerX / 2, px(38), t('ui.shop.itemList'), {
-      fontSize: fs(14), color: '#c0934a', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
+    const leftX = px(18), leftW = dividerX - px(34);
+    shop.add(addSectionHeader(this, leftX, px(54), leftW, t('ui.shop.itemList')));
+    const rowH = px(40), rowStart = px(68);
+    const iconSz = px(32);
+    const listBottom = ph - px(54);
 
     data.shopItems.forEach((itemId, i) => {
       const base = getItemBase(itemId);
       if (!base) return;
-      const iy = px(58) + i * px(28);
-      if (iy > ph - px(50)) return;
+      const iy = rowStart + i * rowH;
+      if (iy + rowH > listBottom) return;
       const buyPrice = base.sellPrice * 3;
       const canAfford = this.player.gold >= buyPrice;
-      this.shopPanel!.add(this.add.text(px(14), iy, getItemBaseName(itemId), {
-        fontSize: fs(13), color: canAfford ? '#e0d8cc' : '#555', fontFamily: FONT,
-      }));
-      this.shopPanel!.add(this.add.text(dividerX - px(60), iy, `${buyPrice}G`, {
-        fontSize: fs(13), color: canAfford ? '#f1c40f' : '#555', fontFamily: FONT,
-      }).setOrigin(1, 0));
-      if (canAfford) {
-        const buyBtn = this.add.text(dividerX - px(14), iy, t('ui.shop.buy'), {
-          fontSize: fs(13), color: '#27ae60', fontFamily: FONT,
-        }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
-        buyBtn.on('pointerdown', () => {
-          if (this.player.gold >= buyPrice) {
-            this.player.gold -= buyPrice;
-            audioManager.playSFX('click');
-            const item = this.zone.lootSystem.createItem(itemId, this.player.level, 'normal');
-            if (item) { item.identified = true; this.zone.inventorySystem.addItem(item); }
-            this.reopenShop(data);
-          }
-        });
-        this.shopPanel!.add(buyBtn);
-      }
+      const card = this.add.graphics();
+      drawCard(card, leftX, iy, leftW, rowH - px(4), { border: canAfford ? 0x4a4250 : 0x2e2a32 });
+      shop.add(card);
+      const cy = iy + (rowH - px(4)) / 2;
+      shop.add(addSlot(this, leftX + px(6) + iconSz / 2, cy, iconSz, 'normal'));
+      shop.add(this.add.image(leftX + px(6) + iconSz / 2, cy, ensureItemIcon(this, base.icon ?? 'c_hp'))
+        .setDisplaySize(iconSz - px(4), iconSz - px(4)).setAlpha(canAfford ? 1 : 0.5));
+      shop.add(this.add.text(leftX + iconSz + px(14), cy, getItemBaseName(itemId), {
+        fontSize: fs(13), color: canAfford ? UI_COLORS.text : UI_COLORS.dim, fontFamily: FONT,
+      }).setOrigin(0, 0.5));
+      shop.add(this.add.image(leftX + leftW - px(116), cy, coinTexture(this, px(12))).setAlpha(canAfford ? 1 : 0.5));
+      shop.add(this.add.text(leftX + leftW - px(108), cy, `${buyPrice}`, {
+        fontSize: fs(12), color: canAfford ? '#ffd35a' : UI_COLORS.dim, fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(0, 0.5));
+      shop.add(this.makeButton(leftX + leftW - px(34), cy, px(52), px(24), btnLabel(t('ui.shop.buy')), () => {
+        if (this.player.gold >= buyPrice) {
+          this.player.gold -= buyPrice;
+          audioManager.playSFX('click');
+          const item = this.zone.lootSystem.createItem(itemId, this.player.level, 'normal');
+          if (item) { item.identified = true; this.zone.inventorySystem.addItem(item); }
+          this.reopenShop(data);
+        }
+      }, { variant: 'success', disabled: !canAfford }));
     });
 
     // --- Buyback section ---
     const buybackItems = this.zone.inventorySystem.buybackItems;
     if (buybackItems.length > 0) {
-      const buybackStartY = px(58) + data.shopItems.length * px(28) + px(12);
-      this.shopPanel.add(this.add.rectangle(dividerX / 2, buybackStartY - px(4), dividerX - px(28), Math.round(1 * DPR), 0x333344));
-      this.shopPanel.add(this.add.text(dividerX / 2, buybackStartY, t('ui.shop.buyback'), {
-        fontSize: fs(13), color: '#c0934a', fontFamily: FONT,
-      }).setOrigin(0.5, 0));
+      const buybackStartY = rowStart + data.shopItems.length * rowH + px(12);
+      shop.add(addSectionHeader(this, leftX, buybackStartY, leftW, t('ui.shop.buyback')));
       buybackItems.forEach((entry, i) => {
-        const by = buybackStartY + px(20) + i * px(24);
-        if (by > ph - px(50)) return;
+        const by = buybackStartY + px(12) + i * px(32);
+        if (by + px(30) > listBottom) return;
         const canAfford = this.player.gold >= entry.buybackPrice;
         const qualColor = this.getQualityTextColor(entry.item.quality);
-        this.shopPanel!.add(this.add.text(px(14), by, getItemDisplayName(entry.item), {
-          fontSize: fs(12), color: canAfford ? qualColor : '#555', fontFamily: FONT,
-        }));
-        this.shopPanel!.add(this.add.text(dividerX - px(60), by, `${entry.buybackPrice}G`, {
-          fontSize: fs(12), color: canAfford ? '#e8a040' : '#555', fontFamily: FONT,
-        }).setOrigin(1, 0));
-        if (canAfford) {
-          const bbBtn = this.add.text(dividerX - px(14), by, t('ui.shop.buybackBtn'), {
-            fontSize: fs(12), color: '#e8a040', fontFamily: FONT,
-          }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
-          bbBtn.on('pointerdown', () => {
-            if (this.player.gold >= entry.buybackPrice) {
-              const result = this.zone.inventorySystem.buybackItem(i);
-              if (result) {
-                this.player.gold -= result.cost;
-                audioManager.playSFX('click');
-                EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.shop.buybackLog', { name: getItemDisplayName(result.item) }), type: 'loot' });
-              }
-              this.reopenShop(data);
+        const cy = by + px(14);
+        const slot = this.createItemSlot(leftX + px(14), cy, px(26), entry.item, { showCount: false });
+        shop.add(slot.objects);
+        slot.slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(entry.item, pointer.x, pointer.y));
+        slot.slot.on('pointerout', () => this.hideItemTooltip());
+        const nameT = this.add.text(leftX + px(34), cy, getItemDisplayName(entry.item), {
+          fontSize: fs(12), color: canAfford ? qualColor : UI_COLORS.dim, fontFamily: FONT,
+        }).setOrigin(0, 0.5);
+        const maxNameW = leftW - px(34) - px(170);
+        if (nameT.width > maxNameW) nameT.setScale(maxNameW / nameT.width, 1);
+        shop.add(nameT);
+        shop.add(this.add.image(leftX + leftW - px(128), cy, coinTexture(this, px(12))).setAlpha(canAfford ? 1 : 0.5));
+        shop.add(this.add.text(leftX + leftW - px(120), cy, `${entry.buybackPrice}`, {
+          fontSize: fs(12), color: canAfford ? '#e8a040' : UI_COLORS.dim, fontFamily: FONT, fontStyle: 'bold',
+        }).setOrigin(0, 0.5));
+        shop.add(this.makeButton(leftX + leftW - px(34), cy, px(60), px(24), btnLabel(t('ui.shop.buybackBtn')), () => {
+          if (this.player.gold >= entry.buybackPrice) {
+            const result = this.zone.inventorySystem.buybackItem(i);
+            if (result) {
+              this.player.gold -= result.cost;
+              audioManager.playSFX('click');
+              EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.shop.buybackLog', { name: getItemDisplayName(result.item) }), type: 'loot' });
             }
-          });
-          this.shopPanel!.add(bbBtn);
-        }
+            this.reopenShop(data);
+          }
+        }, { variant: 'primary', disabled: !canAfford, fontSize: 11 }));
       });
     }
 
-    this.shopPanel.add(this.add.text(px(14), ph - px(26), t('ui.shop.gold', { gold: String(this.player.gold) }), {
-      fontSize: fs(13), color: '#f1c40f', fontFamily: FONT,
-    }));
+    // Gold (bottom-left)
+    shop.add(addDivider(this, leftX + leftW / 2, ph - px(40), leftW));
+    shop.add(this.add.image(leftX + px(8), ph - px(22), coinTexture(this, px(14))));
+    shop.add(this.add.text(leftX + px(20), ph - px(22), t('ui.shop.gold', { gold: String(this.player.gold) }), {
+      fontSize: fs(13), color: '#ffd35a', fontFamily: FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+    }).setOrigin(0, 0.5));
 
     // --- RIGHT: Player inventory for selling ---
-    const rightX = dividerX + px(10);
-    const rightW = pw - dividerX - px(20);
-    this.shopPanel.add(this.add.text(dividerX + rightW / 2 + px(10), px(38), t('ui.shop.yourBag'), {
-      fontSize: fs(14), color: '#c0934a', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
+    const rightX = dividerX + px(16);
+    const rightW = pw - rightX - px(18);
+    shop.add(addSectionHeader(this, rightX, px(54), rightW, t('ui.shop.yourBag')));
 
     const inv = this.zone.inventorySystem.inventory;
-    const shopSlotSize = px(32);
     const shopCols = 8;
-    const shopGap = px(4);
+    const shopGap = px(5);
+    const shopSlotSize = Math.floor((rightW - shopGap * (shopCols - 1)) / shopCols);
     const shopItemsPerPage = 40;
     const shopTotalPages = Math.max(1, Math.ceil(inv.length / shopItemsPerPage));
     if (this.shopInventoryPage >= shopTotalPages) this.shopInventoryPage = shopTotalPages - 1;
     const shopPageItems = inv.slice(this.shopInventoryPage * shopItemsPerPage, (this.shopInventoryPage + 1) * shopItemsPerPage);
-    const shopGridY = px(58);
+    const shopGridY = px(68);
 
-    shopPageItems.forEach((item, i) => {
-      const ix = rightX + (i % shopCols) * (shopSlotSize + shopGap);
-      const iy = shopGridY + Math.floor(i / shopCols) * (shopSlotSize + shopGap);
-      const itemBg = this.add.rectangle(ix + shopSlotSize / 2, iy + shopSlotSize / 2, shopSlotSize, shopSlotSize, this.getQualityColorNum(item.quality))
-        .setStrokeStyle(Math.round(1 * DPR), 0x555566).setInteractive({ useHandCursor: true });
-      this.shopPanel!.add(itemBg);
-      this.shopPanel!.add(this.add.text(ix + shopSlotSize / 2, iy + shopSlotSize / 2, item.name.charAt(0), {
-        fontSize: fs(13), color: '#fff', fontFamily: FONT, fontStyle: 'bold',
-      }).setOrigin(0.5));
-      if (item.quantity > 1) {
-        this.shopPanel!.add(this.add.text(ix + shopSlotSize - px(1), iy + shopSlotSize - px(1), `${item.quantity}`, {
-          fontSize: fs(11), color: '#ffd700', fontFamily: FONT,
-        }).setOrigin(1, 1));
-      }
+    for (let i = 0; i < shopItemsPerPage; i++) {
+      const cx = rightX + (i % shopCols) * (shopSlotSize + shopGap) + shopSlotSize / 2;
+      const cy = shopGridY + Math.floor(i / shopCols) * (shopSlotSize + shopGap) + shopSlotSize / 2;
+      const item = shopPageItems[i];
+      if (!item) { shop.add(addSlot(this, cx, cy, shopSlotSize, null).setAlpha(0.7)); continue; }
+      const { slot: itemBg, objects } = this.createItemSlot(cx, cy, shopSlotSize, item);
+      shop.add(objects);
       itemBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
         this.showItemTooltip(item, pointer.x, pointer.y);
       });
@@ -1028,108 +1163,116 @@ export class UIScene extends Phaser.Scene {
           this.reopenShop(data);
         }
       });
-    });
-
-    // Shop inventory pagination
-    if (shopTotalPages > 1) {
-      const pageY = ph - px(50);
-      if (this.shopInventoryPage > 0) {
-        const prevBtn = this.add.text(rightX + rightW / 2 - px(60), pageY, t('ui.shop.prevPage'), {
-          fontSize: fs(12), color: '#5dade2', fontFamily: FONT,
-        }).setInteractive({ useHandCursor: true });
-        prevBtn.on('pointerdown', () => {
-          this.shopInventoryPage--;
-          this.reopenShop(data);
-        });
-        this.shopPanel.add(prevBtn);
-      }
-      this.shopPanel.add(this.add.text(rightX + rightW / 2, pageY, `${this.shopInventoryPage + 1}/${shopTotalPages}`, {
-        fontSize: fs(12), color: '#888', fontFamily: FONT,
-      }).setOrigin(0.5, 0));
-      if (this.shopInventoryPage < shopTotalPages - 1) {
-        const nextBtn = this.add.text(rightX + rightW / 2 + px(30), pageY, t('ui.shop.nextPage'), {
-          fontSize: fs(12), color: '#5dade2', fontFamily: FONT,
-        }).setInteractive({ useHandCursor: true });
-        nextBtn.on('pointerdown', () => {
-          this.shopInventoryPage++;
-          this.reopenShop(data);
-        });
-        this.shopPanel.add(nextBtn);
-      }
     }
 
-    // Gold on right side too
-    this.shopPanel.add(this.add.text(rightX, ph - px(26), t('ui.shop.gold', { gold: String(this.player.gold) }), {
-      fontSize: fs(13), color: '#f1c40f', fontFamily: FONT,
-    }));
+    // Shop inventory pagination
+    const pageY = shopGridY + 5 * (shopSlotSize + shopGap) + px(14);
+    if (shopTotalPages > 1) {
+      const pgCx = rightX + rightW / 2;
+      shop.add(this.makeButton(pgCx - px(70), pageY, px(64), px(24), t('ui.shop.prevPage'), () => {
+        this.shopInventoryPage--;
+        this.reopenShop(data);
+      }, { disabled: this.shopInventoryPage <= 0 }));
+      shop.add(this.add.text(pgCx, pageY, `${this.shopInventoryPage + 1}/${shopTotalPages}`, {
+        fontSize: fs(12), color: UI_COLORS.textSoft, fontFamily: FONT,
+      }).setOrigin(0.5));
+      shop.add(this.makeButton(pgCx + px(70), pageY, px(64), px(24), t('ui.shop.nextPage'), () => {
+        this.shopInventoryPage++;
+        this.reopenShop(data);
+      }, { disabled: this.shopInventoryPage >= shopTotalPages - 1 }));
+    }
 
     // Hint for right-click selling
-    this.shopPanel.add(this.add.text(rightX, ph - px(12), t('ui.shop.sellHint'), {
-      fontSize: fs(10), color: '#555566', fontFamily: FONT,
-    }));
+    shop.add(addDivider(this, rightX + rightW / 2, ph - px(40), rightW));
+    shop.add(this.add.text(rightX + rightW / 2, ph - px(22), t('ui.shop.sellHint'), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
+    }).setOrigin(0.5, 0.5));
   }
 
   private showSellConfirm(item: ItemInstance, shopData: { npcId: string; shopItems: string[]; type: string }): void {
     this.hideContextPopup();
     const base = getItemBase(item.baseId);
     const sellPrice = base ? base.sellPrice * item.quantity : 1;
-    const popW = px(180), popH = px(60);
-    const popX = (W - popW) / 2, popY = (H - popH) / 2;
-    this.contextPopup = this.add.container(popX, popY).setDepth(PANEL_STYLE.depth.confirmDialog);
-    this.contextPopup.add(this.add.rectangle(0, 0, popW, popH, 0x0a0a18, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(1 * DPR), PANEL_STYLE.border.color));
-    this.contextPopup.add(this.add.text(popW / 2, px(8), t('ui.shop.sellConfirm', { name: getItemDisplayName(item), price: String(sellPrice) }), {
-      fontSize: fs(12), color: '#e0d8cc', fontFamily: FONT, wordWrap: { width: popW - px(16), useAdvancedWrap: true },
-    }).setOrigin(0.5, 0));
-    const yesBtn = this.add.text(popW / 2 - px(30), px(38), t('ui.shop.confirm'), {
-      fontSize: fs(13), color: '#27ae60', fontFamily: FONT,
-    }).setInteractive({ useHandCursor: true });
-    yesBtn.on('pointerdown', () => {
+    const popW = px(280);
+    this.contextPopup = this.add.container(0, 0).setDepth(PANEL_STYLE.depth.confirmDialog);
+    const msg = this.add.text(popW / 2, px(20), t('ui.shop.sellConfirm', { name: getItemDisplayName(item), price: String(sellPrice) }), {
+      fontSize: fs(13), color: UI_COLORS.text, fontFamily: FONT, align: 'center',
+      wordWrap: { width: popW - px(36), useAdvancedWrap: true },
+    }).setOrigin(0.5, 0);
+    const popH = msg.y + msg.height + px(56);
+    this.contextPopup.setPosition((W - popW) / 2, (H - popH) / 2);
+    this.contextPopup.add(addFrame(this, 0, 0, popW, popH, { variant: 'tooltip', accent: qualityNum(item.quality) }));
+    this.contextPopup.add(msg);
+    this.contextPopup.add(this.makeButton(popW / 2 - px(62), popH - px(26), px(100), px(28), btnLabel(t('ui.shop.confirm')), () => {
       const gold = this.zone.inventorySystem.sellItem(item.uid);
       this.player.gold += gold;
       audioManager.playSFX('click');
       this.hideContextPopup();
       this.reopenShop(shopData);
-    });
-    this.contextPopup.add(yesBtn);
-    const noBtn = this.add.text(popW / 2 + px(30), px(38), t('ui.shop.cancel'), {
-      fontSize: fs(13), color: '#888', fontFamily: FONT,
-    }).setInteractive({ useHandCursor: true });
-    noBtn.on('pointerdown', () => this.hideContextPopup());
-    this.contextPopup.add(noBtn);
+    }, { variant: 'primary', fontSize: 13 }));
+    this.contextPopup.add(this.makeButton(popW / 2 + px(62), popH - px(26), px(100), px(28), btnLabel(t('ui.shop.cancel')), () => this.hideContextPopup(), { fontSize: 13 }));
   }
 
   // --- World Map ---
   private toggleMap(): void {
     if (this.mapPanel) { this.mapPanel.destroy(); this.mapPanel = null; return; }
     this.closeAllPanels();
-    const pw = px(480), ph = px(220), panelX = (W - pw) / 2, panelY = px(80);
+    const nodeW = px(98), nodeH = px(70), nodeGap = px(22);
+    const count = MapOrder.length;
+    const pw = Math.max(px(480), count * nodeW + (count - 1) * nodeGap + px(56)), ph = px(236);
+    const panelX = (W - pw) / 2, panelY = px(80);
     this.mapPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
-    this.animatePanelOpen(this.mapPanel);
-    this.mapPanel.add(this.createPanelBg(pw, ph));
-    this.mapPanel.add(this.createPanelTitle(pw, t('ui.worldMap.title')));
-    this.mapPanel.add(this.createPanelCloseBtn(pw, () => this.toggleMap()));
+    const panel = this.mapPanel;
+    this.animatePanelOpen(panel);
+    panel.add(this.createPanelBg(pw, ph));
+    panel.add(this.createPanelTitle(pw, t('ui.worldMap.title')));
+    panel.add(this.createPanelCloseBtn(pw, () => this.toggleMap()));
 
+    const startX = (pw - (count * nodeW + (count - 1) * nodeGap)) / 2;
+    const y = px(62);
+    const road = this.add.graphics();
+    panel.add(road);
     MapOrder.forEach((mapId, i) => {
       const map = AllMaps[mapId];
-      const x = px(36) + i * px(88), y = px(70);
+      const x = startX + i * (nodeW + nodeGap);
       const isCurrent = (this.zone as any).currentMapId === mapId;
-      const color = isCurrent ? 0x27ae60 : 0x1a1a2e;
-      this.mapPanel!.add(this.add.rectangle(x, y, px(72), px(44), color)
-        .setStrokeStyle(isCurrent ? Math.round(2 * DPR) : Math.round(1 * DPR), isCurrent ? 0x27ae60 : 0x444455));
-      this.mapPanel!.add(this.add.text(x, y, getZoneName(mapId, map.name).substring(0, 4), {
-        fontSize: fs(13), color: '#e0d8cc', fontFamily: FONT,
+      if (i < count - 1) {
+        // gold-studded road to the next zone
+        const rx0 = x + nodeW + px(2), rx1 = x + nodeW + nodeGap - px(2), ry = y + nodeH / 2;
+        road.lineStyle(px(3), 0x000000, 0.6);
+        road.lineBetween(rx0, ry + 1, rx1, ry + 1);
+        road.lineStyle(px(2), 0xd4a54a, 0.75);
+        road.lineBetween(rx0, ry, rx1, ry);
+        road.fillStyle(0xffd98a, 1);
+        road.fillTriangle(rx1, ry, rx1 - px(6), ry - px(4), rx1 - px(6), ry + px(4));
+      }
+      const card = this.add.graphics();
+      drawCard(card, x, y, nodeW, nodeH, isCurrent
+        ? { fill: 0x2a2114, border: 0xffd98a, borderWidth: 2, glow: 0xffc860 }
+        : { border: 0x4a4250 });
+      panel.add(card);
+      const nameT = this.add.text(x + nodeW / 2, y + px(22), getZoneName(mapId, map.name), {
+        fontSize: fs(12), color: isCurrent ? UI_COLORS.goldBright : UI_COLORS.text, fontFamily: FONT, fontStyle: 'bold', align: 'center',
+        wordWrap: { width: nodeW - px(10), useAdvancedWrap: true },
+      }).setOrigin(0.5);
+      if (nameT.height > px(30)) nameT.setFontSize(fs(11));
+      panel.add(nameT);
+      panel.add(this.add.text(x + nodeW / 2, y + nodeH - px(14), `Lv.${map.levelRange[0]}-${map.levelRange[1]}`, {
+        fontSize: fs(11), color: isCurrent ? '#e8c77a' : UI_COLORS.muted, fontFamily: FONT,
       }).setOrigin(0.5));
-      this.mapPanel!.add(this.add.text(x, y + px(28), `Lv.${map.levelRange[0]}-${map.levelRange[1]}`, {
-        fontSize: fs(12), color: '#888', fontFamily: FONT,
-      }).setOrigin(0.5));
-      if (i < MapOrder.length - 1) {
-        this.mapPanel!.add(this.add.text(x + px(42), y, '\u2192', {
-          fontSize: fs(16), color: '#444455', fontFamily: FONT,
-        }).setOrigin(0.5));
+      if (isCurrent) {
+        const pin = this.add.graphics();
+        pin.fillStyle(0x000000, 0.6);
+        pin.fillTriangle(x + nodeW / 2, y - px(2), x + nodeW / 2 - px(7), y - px(14), x + nodeW / 2 + px(7), y - px(14));
+        pin.fillStyle(0xffd98a, 1);
+        pin.fillTriangle(x + nodeW / 2, y - px(4), x + nodeW / 2 - px(6), y - px(15), x + nodeW / 2 + px(6), y - px(15));
+        panel.add(pin);
+        this.tweens.add({ targets: pin, y: px(-3), duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
       }
     });
-    this.mapPanel.add(this.add.text(pw / 2, ph - px(20), t('ui.worldMap.closeHint'), {
-      fontSize: fs(12), color: '#555', fontFamily: FONT,
+    panel.add(addDivider(this, pw / 2, ph - px(40), pw - px(80)));
+    panel.add(this.add.text(pw / 2, ph - px(22), t('ui.worldMap.closeHint'), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
 
@@ -1198,21 +1341,14 @@ export class UIScene extends Phaser.Scene {
 
     // Background with unified style
     this.skillPanel.add(this.createPanelBg(pw, ph));
-
-    // Header bar with gradient
-    const headerH = px(50);
-    const headerBg = this.add.graphics();
-    headerBg.fillStyle(0x14142e, 1);
-    headerBg.fillRect(px(4), px(4), pw - px(8), headerH);
-    headerBg.fillGradientStyle(0x8e44ad, 0x8e44ad, 0x14142e, 0x14142e, 0.15, 0.15, 0, 0);
-    headerBg.fillRect(px(4), px(4), pw - px(8), headerH);
-    this.skillPanel.add(headerBg);
+    const headerH = px(PANEL_STYLE.header.height);
 
     this.skillPanel.add(this.createPanelTitle(pw, t('ui.skillTree.title')));
-    const spColor = this.player.freeSkillPoints > 0 ? '#f1c40f' : '#555566';
-    this.skillPanel.add(this.add.text(pw / 2, px(33), t('ui.skillTree.skillPoints', { className: getClassName(this.player.classData.id ?? 'warrior'), points: String(this.player.freeSkillPoints) }), {
-      fontSize: fs(13), color: spColor, fontFamily: FONT,
-    }).setOrigin(0.5, 0));
+    const spColor = this.player.freeSkillPoints > 0 ? UI_COLORS.goldBright : UI_COLORS.muted;
+    this.skillPanel.add(this.add.text(pw / 2, headerH + px(12), t('ui.skillTree.skillPoints', { className: getClassName(this.player.classData.id ?? 'warrior'), points: String(this.player.freeSkillPoints) }), {
+      fontSize: fs(13), color: spColor, fontFamily: FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+    }).setOrigin(0.5, 0.5));
 
     // Close button
     this.skillPanel.add(this.createPanelCloseBtn(pw, () => this.toggleSkillTree()));
@@ -1232,16 +1368,16 @@ export class UIScene extends Phaser.Scene {
     if (this.skillTreeActiveTab >= treeCount) this.skillTreeActiveTab = 0;
 
     // === Tabs ===
-    const tabH = px(28);
-    const tabY = headerH + px(6);
-    const tabMargin = px(10);
+    const tabH = px(30);
+    const tabY = headerH + px(26);
+    const tabMargin = px(16);
     const tabGap = px(4);
     const tabTotalW = pw - tabMargin * 2;
     const tabW = Math.floor((tabTotalW - tabGap * (treeCount - 1)) / treeCount);
 
     // Content area dimensions
     const contentTop = tabY + tabH + px(8);
-    const contentH = ph - contentTop - px(24);
+    const contentH = ph - contentTop - px(30);
     const contentInnerW = pw - px(24);
 
     // Card dimensions — uniform for all trees
@@ -1281,16 +1417,18 @@ export class UIScene extends Phaser.Scene {
         const sbTrackH = contentH - px(8);
         const sbTrackY = contentTop + px(4);
         const sbTrack = this.add.graphics();
-        sbTrack.fillStyle(0x1a1a2e, 0.6);
+        sbTrack.fillStyle(0x060508, 1);
         sbTrack.fillRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
+        sbTrack.lineStyle(1, 0x4a4250, 1);
+        sbTrack.strokeRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
         scrollContainer.add(sbTrack);
 
         const thumbRatio = Math.min(1, contentH / totalContentH);
         const thumbH = Math.max(px(20), sbTrackH * thumbRatio);
         const thumbY = sbTrackY + (maxScrollY > 0 ? (scrollY / maxScrollY) * (sbTrackH - thumbH) : 0);
         const sbThumb = this.add.graphics();
-        sbThumb.fillStyle(treeColor, 0.5);
-        sbThumb.fillRoundedRect(sbX, thumbY, px(6), thumbH, px(3));
+        sbThumb.fillStyle(0xd4a54a, 0.85);
+        sbThumb.fillRoundedRect(sbX + px(1), thumbY, px(4), thumbH, px(2));
         scrollContainer.add(sbThumb);
       }
 
@@ -1352,53 +1490,24 @@ export class UIScene extends Phaser.Scene {
 
         // === Card background with 4 distinct states ===
         const cardGfx = this.add.graphics();
-        let cardBgColor: number;
-        let borderColor: number;
-        let borderAlpha: number;
-        let borderWidth: number;
-
+        let cardStyle: CardStyle;
         if (isMaxed) {
-          cardBgColor = 0x1e1a10;
-          borderColor = 0xf1c40f;
-          borderAlpha = 1;
-          borderWidth = 2.5;
+          cardStyle = { fill: 0x2a2114, border: 0xffd98a, borderWidth: 2, glow: 0xffc860, strip: 0xffd98a };
         } else if (isLearned) {
-          cardBgColor = 0x161630;
-          borderColor = treeColor;
-          borderAlpha = 0.9;
-          borderWidth = 1.5;
+          cardStyle = { fill: 0x1f1b24, border: treeColor, borderWidth: 1.5, strip: treeColor };
         } else if (canLevel) {
-          cardBgColor = 0x101828;
-          borderColor = 0x44dd44;
-          borderAlpha = 0.8;
-          borderWidth = 2;
+          cardStyle = { fill: 0x18201a, border: 0x6fd35a, borderWidth: 1.5, glow: 0x6fd35a };
         } else {
-          cardBgColor = 0x0c0c18;
-          borderColor = 0x2a2a3e;
-          borderAlpha = 0.4;
-          borderWidth = 1;
+          cardStyle = { fill: 0x121015, border: 0x2e2a32 };
         }
-
-        cardGfx.fillStyle(cardBgColor, 0.95);
-        cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(5));
-        cardGfx.lineStyle(Math.round(borderWidth * DPR), borderColor, borderAlpha);
-        cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(5));
-        if (isMaxed) {
-          cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.12);
-          cardGfx.strokeRoundedRect(cardX - px(2), cardY - px(2), cardW + px(4), cardH + px(4), px(6));
-          cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.06);
-          cardGfx.strokeRoundedRect(cardX - px(4), cardY - px(4), cardW + px(8), cardH + px(8), px(7));
-        }
-        if (canLevel && !isLearned) {
-          cardGfx.lineStyle(Math.round(1 * DPR), 0x44dd44, 0.06);
-          cardGfx.strokeRoundedRect(cardX + px(1), cardY + px(1), cardW - px(2), cardH - px(2), px(4));
-        }
+        const hoverStyle: CardStyle = { ...cardStyle, fill: isLearned || isMaxed ? 0x2a2430 : (canLevel ? 0x1f2a22 : 0x19161c), border: isLearned || canLevel || isMaxed ? cardStyle.border : 0x5a5060, borderWidth: 2 };
+        drawCard(cardGfx, cardX, cardY, cardW, cardH, cardStyle);
         scrollContainer.add(cardGfx);
 
         // State badge (top-right)
         const badgeGfx = this.add.graphics();
-        const badgeX = cardX + cardW - px(8);
-        const badgeY = cardY + px(8);
+        const badgeX = cardX + cardW - px(12);
+        const badgeY = cardY + px(12);
         if (isMaxed) {
           badgeGfx.fillStyle(0xf1c40f, 0.9);
           badgeGfx.fillCircle(badgeX, badgeY, px(3));
@@ -1417,18 +1526,11 @@ export class UIScene extends Phaser.Scene {
         }
         scrollContainer.add(badgeGfx);
 
-        // === Icon area with gradient shading ===
-        const iconX = cardX + px(8);
+        // === Icon area (recessed well framed in the damage colour) ===
+        const iconX = cardX + px(12);
         const iconY = cardY + (cardH - iconSize) / 2;
         const iconGfx = this.add.graphics();
-        iconGfx.fillStyle(0x080810, 0.95);
-        iconGfx.fillRoundedRect(iconX, iconY, iconSize, iconSize, px(4));
-        iconGfx.lineStyle(Math.round(1.5 * DPR), dmgColor, isLearned ? 0.7 : 0.25);
-        iconGfx.strokeRoundedRect(iconX, iconY, iconSize, iconSize, px(4));
-        if (isLearned) {
-          iconGfx.fillStyle(dmgColor, 0.08);
-          iconGfx.fillRoundedRect(iconX + px(1), iconY + px(1), iconSize / 2, iconSize / 2, px(3));
-        }
+        drawWell(iconGfx, iconX - px(2), iconY - px(2), iconSize + px(4), iconSize + px(4), px(4), isLearned ? dmgColor : 0x3a343f);
         scrollContainer.add(iconGfx);
 
         // Skill icon texture
@@ -1437,8 +1539,9 @@ export class UIScene extends Phaser.Scene {
         const iconCy = iconY + iconSize / 2;
         if (this.textures.exists(iconKey)) {
           const iconImg = this.add.image(iconCx, iconCy, iconKey)
-            .setDisplaySize(iconSize - px(6), iconSize - px(6))
-            .setAlpha(isLearned ? 1 : 0.3);
+            .setDisplaySize(iconSize - px(2), iconSize - px(2))
+            .setAlpha(isLearned ? 1 : (canLevel ? 0.75 : 0.35));
+          if (!isLearned && !canLevel) iconImg.setTint(0x8a8290);
           scrollContainer.add(iconImg);
         } else {
           iconGfx.fillStyle(dmgColor, isLearned ? 0.5 : 0.12);
@@ -1451,53 +1554,49 @@ export class UIScene extends Phaser.Scene {
         }
 
         // === Text area ===
-        const textX = iconX + iconSize + px(10);
+        const textX = iconX + iconSize + px(14);
 
         // Skill name
-        const nameColor = isMaxed ? '#f1c40f' : (isLearned ? '#e8e0d0' : (canLevel ? '#aabbcc' : '#555566'));
-        scrollContainer.add(this.add.text(textX, cardY + px(8), getSkillName(skill.id, skill.name), {
+        const nameColor = isMaxed ? UI_COLORS.goldBright : (isLearned ? '#f0e8d8' : (canLevel ? '#c8e8c0' : '#6e665c'));
+        const nameText = this.add.text(textX, cardY + px(8), getSkillName(skill.id, skill.name), {
           fontSize: fs(14), color: nameColor, fontFamily: FONT, fontStyle: 'bold',
-        }));
+          stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+        });
+        scrollContainer.add(nameText);
 
-        // English name
-        scrollContainer.add(this.add.text(textX, cardY + px(24), skill.nameEn, {
-          fontSize: fs(9), color: '#444458', fontFamily: FONT,
-        }));
+        // English name (inline after the localized name; skipped when identical)
+        if (skill.nameEn && skill.nameEn !== nameText.text) {
+          scrollContainer.add(this.add.text(textX + nameText.width + px(8), cardY + px(12), skill.nameEn, {
+            fontSize: fs(10), color: '#6e665c', fontFamily: FONT, fontStyle: 'italic',
+          }));
+        }
 
-        // Level pips
-        const pipY = cardY + px(40);
-        const pipR = px(3);
-        const pipGap = px(8);
+        // Level pips (diamonds)
+        const pipY = cardY + px(36);
+        const pipGap = px(10);
         const maxPips = Math.min(skill.maxLevel, 20);
-        const pipStartX = textX;
+        const pipStartX = textX + px(4);
+        const pipOn = pipTexture(this, px(8), isMaxed ? 0xffd98a : treeColor);
+        const pipOff = pipTexture(this, px(8), null);
+        let pipsShown = 0;
         for (let p = 0; p < maxPips; p++) {
           const pipX = pipStartX + p * pipGap;
-          if (pipX + pipR > cardX + cardW - px(30)) break;
-          const pipGfx = this.add.graphics();
-          if (p < level) {
-            pipGfx.fillStyle(isMaxed ? 0xf1c40f : treeColor, 0.9);
-            pipGfx.fillCircle(pipX, pipY, pipR);
-          } else {
-            pipGfx.fillStyle(0x2a2a3e, 0.6);
-            pipGfx.fillCircle(pipX, pipY, pipR);
-            pipGfx.lineStyle(Math.round(0.5 * DPR), 0x3a3a4e, 0.5);
-            pipGfx.strokeCircle(pipX, pipY, pipR);
-          }
-          scrollContainer.add(pipGfx);
+          if (pipX + px(6) > cardX + cardW - px(80)) break;
+          scrollContainer.add(this.add.image(pipX, pipY, p < level ? pipOn : pipOff));
+          pipsShown++;
         }
         // Level text
-        const maxVisiblePips = Math.min(maxPips, Math.floor((cardW - iconSize - px(60)) / pipGap));
-        const lvColor = isMaxed ? '#f1c40f' : (isLearned ? '#aaaacc' : '#444458');
-        scrollContainer.add(this.add.text(pipStartX + maxVisiblePips * pipGap + px(4), pipY - px(4), `${level}/${skill.maxLevel}`, {
-          fontSize: fs(10), color: lvColor, fontFamily: FONT,
-        }));
+        const lvColor = isMaxed ? UI_COLORS.goldBright : (isLearned ? '#d8d0e8' : '#6e665c');
+        scrollContainer.add(this.add.text(pipStartX + pipsShown * pipGap + px(2), pipY, `${level}/${skill.maxLevel}`, {
+          fontSize: fs(11), color: lvColor, fontFamily: FONT, fontStyle: 'bold',
+        }).setOrigin(0, 0.5));
 
         // Stats row
         const displayLevel = Math.max(1, level);
         const scaledDmg = getSkillDamageMultiplier(skill, displayLevel);
         const scaledMana = getSkillManaCost(skill, displayLevel);
         const scaledCD = getSkillCooldown(skill, displayLevel);
-        const statsY = cardY + px(54);
+        const statsY = cardY + px(48);
         let statsStr = !isLearned && !canLevel
           ? this.getSkillLockText(investmentState)
           : '';
@@ -1508,8 +1607,8 @@ export class UIScene extends Phaser.Scene {
           if (dmgName) statsStr += `  ${dmgName}`;
         }
         scrollContainer.add(this.add.text(textX, statsY, statsStr, {
-          fontSize: fs(10),
-          color: !isLearned && !canLevel ? '#a06161' : '#666680',
+          fontSize: fs(11),
+          color: !isLearned && !canLevel ? '#c07a6a' : '#a89c8a',
           fontFamily: FONT,
         }));
 
@@ -1521,11 +1620,13 @@ export class UIScene extends Phaser.Scene {
           }
           if (hasActiveSyn) {
             const synBadge = this.add.graphics();
-            synBadge.fillStyle(0x7766cc, 0.6);
-            synBadge.fillRoundedRect(cardX + cardW - px(40), cardY + cardH - px(18), px(35), px(14), px(3));
+            synBadge.fillStyle(0x2a2340, 1);
+            synBadge.fillRoundedRect(cardX + cardW - px(52), cardY + cardH - px(22), px(44), px(16), px(4));
+            synBadge.lineStyle(1, 0x9a88ee, 0.9);
+            synBadge.strokeRoundedRect(cardX + cardW - px(52), cardY + cardH - px(22), px(44), px(16), px(4));
             scrollContainer.add(synBadge);
-            scrollContainer.add(this.add.text(cardX + cardW - px(22), cardY + cardH - px(11), t('ui.skillTree.synergy'), {
-              fontSize: fs(8), color: '#aa99ee', fontFamily: FONT,
+            scrollContainer.add(this.add.text(cardX + cardW - px(30), cardY + cardH - px(14), t('ui.skillTree.synergy'), {
+              fontSize: fs(10), color: '#c8bcff', fontFamily: FONT, fontStyle: 'bold',
             }).setOrigin(0.5));
           }
         }
@@ -1535,65 +1636,20 @@ export class UIScene extends Phaser.Scene {
           .setInteractive({ useHandCursor: false });
         cardHit.on('pointerover', () => {
           cardGfx.clear();
-          cardGfx.fillStyle(isLearned ? 0x1c1c3e : (canLevel ? 0x141e30 : 0x101020), 0.98);
-          cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(5));
-          cardGfx.lineStyle(Math.round(2 * DPR), borderColor, 1);
-          cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(5));
+          drawCard(cardGfx, cardX, cardY, cardW, cardH, hoverStyle);
           this.showSkillTooltip(skill, panelX + cardX, panelY + cardY, cardW, DMG_NAMES, TREE_NAMES);
         });
         cardHit.on('pointerout', () => {
           cardGfx.clear();
-          cardGfx.fillStyle(cardBgColor, 0.95);
-          cardGfx.fillRoundedRect(cardX, cardY, cardW, cardH, px(5));
-          cardGfx.lineStyle(Math.round(borderWidth * DPR), borderColor, borderAlpha);
-          cardGfx.strokeRoundedRect(cardX, cardY, cardW, cardH, px(5));
-          if (isMaxed) {
-            cardGfx.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.12);
-            cardGfx.strokeRoundedRect(cardX - px(2), cardY - px(2), cardW + px(4), cardH + px(4), px(6));
-          }
-          if (canLevel && !isLearned) {
-            cardGfx.lineStyle(Math.round(1 * DPR), 0x44dd44, 0.06);
-            cardGfx.strokeRoundedRect(cardX + px(1), cardY + px(1), cardW - px(2), cardH - px(2), px(4));
-          }
+          drawCard(cardGfx, cardX, cardY, cardW, cardH, cardStyle);
           this.skillTooltip?.destroy(); this.skillTooltip = null;
         });
         scrollContainer.add(cardHit);
 
         // + Button
         if (canLevel) {
-          const btnSize = px(22);
-          const btnX = cardX + cardW - btnSize - px(6);
-          const btnY = cardY + px(6);
-          const btnBg = this.add.graphics();
-          btnBg.fillStyle(0x1a3a1a, 0.9);
-          btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
-          btnBg.lineStyle(Math.round(1 * DPR), 0x27ae60, 0.8);
-          btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
-          scrollContainer.add(btnBg);
-          const btnText = this.add.text(btnX + btnSize / 2, btnY + btnSize / 2, '+', {
-            fontSize: fs(15), color: '#27ae60', fontFamily: FONT, fontStyle: 'bold',
-          }).setOrigin(0.5);
-          scrollContainer.add(btnText);
-
-          const hitArea = this.add.rectangle(btnX + btnSize / 2, btnY + btnSize / 2, btnSize, btnSize, 0x000000, 0)
-            .setInteractive({ useHandCursor: true });
-          hitArea.on('pointerover', () => {
-            btnBg.clear();
-            btnBg.fillStyle(0x225522, 1);
-            btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
-            btnBg.lineStyle(Math.round(2 * DPR), 0x44dd44, 1);
-            btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
-            btnText.setColor('#44dd44');
-          });
-          hitArea.on('pointerout', () => {
-            btnBg.clear();
-            btnBg.fillStyle(0x1a3a1a, 0.9);
-            btnBg.fillRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
-            btnBg.lineStyle(Math.round(1 * DPR), 0x27ae60, 0.8);
-            btnBg.strokeRoundedRect(btnX, btnY, btnSize, btnSize, px(4));
-            btnText.setColor('#27ae60');
-          });
-          hitArea.on('pointerdown', () => {
+          const btnSize = px(26);
+          const plusBtn = this.makeButton(cardX + cardW - btnSize / 2 - px(10), cardY + btnSize / 2 + px(8), btnSize, btnSize, '+', () => {
             const result = investSkillPoint(
               skill,
               this.player.classData.skills,
@@ -1610,8 +1666,8 @@ export class UIScene extends Phaser.Scene {
               });
               this.toggleSkillTree(); this.toggleSkillTree();
             }
-          });
-          scrollContainer.add(hitArea);
+          }, { variant: 'success', fontSize: 17, bold: true });
+          scrollContainer.add(plusBtn);
         }
       });
     };
@@ -1629,34 +1685,21 @@ export class UIScene extends Phaser.Scene {
         const isActive = ti === this.skillTreeActiveTab;
         const tx = tabMargin + ti * (tabW + tabGap);
 
-        const tabGfx = this.add.graphics();
-        if (isActive) {
-          tabGfx.fillStyle(0x1a1a34, 1);
-          tabGfx.fillRoundedRect(tx, tabY, tabW, tabH, { tl: px(5), tr: px(5), bl: 0, br: 0 });
-          tabGfx.lineStyle(Math.round(2 * DPR), treeColor, 0.8);
-          tabGfx.strokeRoundedRect(tx, tabY, tabW, tabH, { tl: px(5), tr: px(5), bl: 0, br: 0 });
-          tabGfx.fillStyle(treeColor, 0.8);
-          tabGfx.fillRect(tx + px(4), tabY + tabH - px(3), tabW - px(8), px(3));
-        } else {
-          tabGfx.fillStyle(0x0e0e1e, 0.7);
-          tabGfx.fillRoundedRect(tx, tabY, tabW, tabH, { tl: px(5), tr: px(5), bl: 0, br: 0 });
-          tabGfx.lineStyle(Math.round(1 * DPR), 0x2a2a3e, 0.5);
-          tabGfx.strokeRoundedRect(tx, tabY, tabW, tabH, { tl: px(5), tr: px(5), bl: 0, br: 0 });
-        }
-        tabContainer.add(tabGfx);
+        tabContainer.add(this.add.image(tx, tabY, tabTexture(this, tabW, tabH, isActive, treeColor)).setOrigin(0, 0));
 
         const treeSkills = treeSkillsMap.get(treeName) ?? [];
         const learnedCount = treeSkills.filter(s => this.player.getSkillLevel(s.id) > 0).length;
 
         const tabLabel = this.add.text(tx + tabW / 2, tabY + tabH / 2 - px(1), displayName, {
-          fontSize: fs(12), color: isActive ? treeColorHex : '#555566', fontFamily: FONT, fontStyle: isActive ? 'bold' : 'normal',
+          fontSize: fs(13), color: isActive ? UI_COLORS.parchment : '#8a8290', fontFamily: FONT, fontStyle: 'bold',
+          stroke: '#000000', strokeThickness: Math.round(2 * DPR),
         }).setOrigin(0.5);
         tabContainer.add(tabLabel);
 
         if (learnedCount > 0) {
-          const badge = this.add.text(tx + tabW - px(8), tabY + px(4), `${learnedCount}`, {
-            fontSize: fs(8), color: isActive ? treeColorHex : '#444', fontFamily: FONT,
-          }).setOrigin(0.5, 0);
+          const badge = this.add.text(tx + tabW - px(12), tabY + tabH / 2 - px(1), `${learnedCount}`, {
+            fontSize: fs(10), color: isActive ? treeColorHex : '#6e665c', fontFamily: FONT, fontStyle: 'bold',
+          }).setOrigin(0.5, 0.5);
           tabContainer.add(badge);
         }
 
@@ -1693,8 +1736,8 @@ export class UIScene extends Phaser.Scene {
     renderTab(this.skillTreeActiveTab);
 
     // Footer
-    this.skillPanel.add(this.add.text(pw / 2, ph - px(14), t('ui.skillTree.footer'), {
-      fontSize: fs(10), color: '#3a3a4a', fontFamily: FONT,
+    this.skillPanel.add(this.add.text(pw / 2, ph - px(16), t('ui.skillTree.footer'), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
 
@@ -1760,12 +1803,14 @@ export class UIScene extends Phaser.Scene {
     const wrapW = tipW - tipPad * 2;
     const tipText = lines.join('\n');
 
-    const tipHeader = this.add.text(0, 0, `${getSkillName(skill.id, skill.name)} (${skill.nameEn})`, {
-      fontSize: fs(PANEL_STYLE.tooltip.titleSize), color: '#f0e8d0', fontFamily: PANEL_STYLE.tooltip.font, fontStyle: 'bold',
+    const localizedSkillName = getSkillName(skill.id, skill.name);
+    const tipHeader = this.add.text(0, 0, skill.nameEn && skill.nameEn !== localizedSkillName ? `${localizedSkillName} (${skill.nameEn})` : localizedSkillName, {
+      fontSize: fs(PANEL_STYLE.tooltip.titleSize + 1), color: UI_COLORS.parchment, fontFamily: PANEL_STYLE.tooltip.font, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
       wordWrap: { width: wrapW, useAdvancedWrap: true },
     });
     const headerHeight = tipHeader.height;
-    const headerBottom = tipPad + headerHeight + px(6);
+    const headerBottom = tipPad + headerHeight + px(10);
 
     const textObj = this.add.text(tipPad, headerBottom, tipText, {
       fontSize: fs(PANEL_STYLE.tooltip.bodySize), color: '#ddd8cc', fontFamily: PANEL_STYLE.tooltip.font, lineSpacing: px(PANEL_STYLE.tooltip.lineSpacing),
@@ -1781,12 +1826,10 @@ export class UIScene extends Phaser.Scene {
     if (tipY < px(4)) tipY = px(4);
 
     this.skillTooltip = this.add.container(tipX, tipY).setDepth(PANEL_STYLE.depth.tooltip);
-    const tipBg = this.add.rectangle(0, 0, tipW, finalH, PANEL_STYLE.tooltip.bg.color, PANEL_STYLE.tooltip.bg.alpha)
-      .setOrigin(0, 0)
-      .setStrokeStyle(PANEL_STYLE.tooltip.border.width * DPR, PANEL_STYLE.tooltip.border.color);
-    this.skillTooltip.add(tipBg);
+    this.skillTooltip.add(addFrame(this, 0, 0, tipW, finalH, { variant: 'tooltip' }));
     tipHeader.setPosition(tipW / 2, tipPad).setOrigin(0.5, 0);
     this.skillTooltip.add(tipHeader);
+    this.skillTooltip.add(addDivider(this, tipW / 2, headerBottom - px(3), tipW - tipPad * 2));
     this.skillTooltip.add(textObj);
   }
 
@@ -1794,15 +1837,18 @@ export class UIScene extends Phaser.Scene {
   private toggleCharacter(): void {
     if (this.charPanel) { this.charPanel.destroy(); this.charPanel = null; return; }
     this.closeAllPanels();
-    const pw = px(320), ph = px(440), panelX = (W - pw) / 2, panelY = px(20);
+    const pw = px(380), ph = px(512), panelX = (W - pw) / 2, panelY = px(14);
     this.charPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
-    this.animatePanelOpen(this.charPanel);
-    this.charPanel.add(this.createPanelBg(pw, ph));
-    this.charPanel.add(this.createPanelTitle(pw, t('ui.character.title', { className: getClassName(this.player.classData.id ?? 'warrior') })));
-    this.charPanel.add(this.add.text(pw / 2, px(28), t('ui.character.subtitle', { level: String(this.player.level), points: String(this.player.freeStatPoints) }), {
-      fontSize: fs(13), color: '#f1c40f', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
-    this.charPanel.add(this.createPanelCloseBtn(pw, () => this.toggleCharacter()));
+    const panel = this.charPanel;
+    this.animatePanelOpen(panel);
+    panel.add(this.createPanelBg(pw, ph));
+    panel.add(this.createPanelTitle(pw, t('ui.character.title', { className: getClassName(this.player.classData.id ?? 'warrior') })));
+    panel.add(this.createPanelCloseBtn(pw, () => this.toggleCharacter()));
+    // Subtitle sits below the header band (it used to overlap the title)
+    panel.add(this.add.text(pw / 2, px(52), t('ui.character.subtitle', { level: String(this.player.level), points: String(this.player.freeStatPoints) }), {
+      fontSize: fs(13), color: this.player.freeStatPoints > 0 ? UI_COLORS.goldBright : UI_COLORS.textSoft, fontFamily: FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+    }).setOrigin(0.5, 0.5));
 
     const statKeys: [string, keyof typeof this.player.stats, string][] = [
       [t('ui.character.stat.str'), 'str', t('ui.character.stat.str.desc')],
@@ -1813,58 +1859,67 @@ export class UIScene extends Phaser.Scene {
       [t('ui.character.stat.lck'), 'lck', t('ui.character.stat.lck.desc')],
     ];
     const eqStatsRaw = this.zone.inventorySystem.getEquipmentStats();
-    const statRowH = px(36);
+    const statRowH = px(42);
+    const rowX = px(18), rowW = pw - px(36);
+    const firstRowY = px(70);
     statKeys.forEach(([label, key, desc], i) => {
-      const sy = px(50) + i * statRowH;
+      const sy = firstRowY + i * statRowH;
       const base = this.player.stats[key];
       const bonus = eqStatsRaw[key] ?? 0;
-      this.charPanel!.add(this.add.text(px(14), sy, label, {
-        fontSize: fs(13), color: '#e0d8cc', fontFamily: FONT,
+      const card = this.add.graphics();
+      drawCard(card, rowX, sy, rowW, statRowH - px(5), { border: 0x3f3845 });
+      panel.add(card);
+      panel.add(this.add.text(rowX + px(12), sy + px(5), label, {
+        fontSize: fs(13), color: UI_COLORS.text, fontFamily: FONT, fontStyle: 'bold',
+      }));
+      panel.add(this.add.text(rowX + px(12), sy + px(21), desc, {
+        fontSize: fs(10), color: UI_COLORS.muted, fontFamily: FONT,
       }));
       const valStr = bonus > 0 ? `${base} (+${bonus})` : `${base}`;
-      this.charPanel!.add(this.add.text(px(140), sy, valStr, {
-        fontSize: fs(13), color: bonus > 0 ? '#8be9fd' : '#fff', fontFamily: FONT, fontStyle: 'bold',
-      }));
-      this.charPanel!.add(this.add.text(px(14), sy + px(15), desc, {
-        fontSize: fs(10), color: '#666', fontFamily: FONT,
-      }));
+      panel.add(this.add.text(rowX + rowW - px(50), sy + (statRowH - px(5)) / 2, valStr, {
+        fontSize: fs(15), color: bonus > 0 ? '#8be9fd' : '#ffffff', fontFamily: FONT, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+      }).setOrigin(1, 0.5));
       if (this.player.freeStatPoints > 0) {
-        const plusBtn = this.add.text(pw - px(40), sy, '[+]', {
-          fontSize: fs(13), color: '#27ae60', fontFamily: FONT,
-        }).setInteractive({ useHandCursor: true });
-        plusBtn.on('pointerdown', () => {
+        panel.add(this.makeButton(rowX + rowW - px(22), sy + (statRowH - px(5)) / 2, px(26), px(26), '+', () => {
           if (this.player.freeStatPoints > 0) {
             this.player.freeStatPoints--;
             this.player.stats[key]++;
             this.player.recalcDerived();
             this.toggleCharacter(); this.toggleCharacter();
           }
-        });
-        this.charPanel!.add(plusBtn);
+        }, { variant: 'success', fontSize: 17, bold: true }));
       }
     });
 
-    const dividerY = px(50) + statKeys.length * statRowH + px(2);
-    const divider = this.add.rectangle(pw / 2, dividerY, pw - px(28), Math.round(1 * DPR), 0x333344);
-    this.charPanel.add(divider);
+    const dividerY = firstRowY + statKeys.length * statRowH + px(10);
+    panel.add(addSectionHeader(this, rowX, dividerY, rowW, t('ui.character.derivedHeader')));
 
-    const dy = dividerY + px(8);
+    const dy = dividerY + px(14);
     const eqStats = this.zone.inventorySystem.getEquipmentStats();
     const effectiveDex = this.player.stats.dex + (eqStats['dex'] ?? 0);
     const effectiveLck = this.player.stats.lck + (eqStats['lck'] ?? 0);
     const critPct = (effectiveDex * 0.2 + effectiveLck * 0.5 + (eqStats['critRate'] ?? 0)).toFixed(1);
-    const derived = [
-      `HP: ${Math.ceil(this.player.hp)}/${this.player.maxHp}`,
-      `MP: ${Math.ceil(this.player.mana)}/${this.player.maxMana}`,
-      `${t('ui.character.computed.attack')}: ${Math.floor(this.player.baseDamage)}${eqStats['damage'] ? ` (+${eqStats['damage']})` : ''}${eqStats['damagePercent'] ? ` +${eqStats['damagePercent']}%` : ''}`,
-      `${t('ui.character.computed.defense')}: ${Math.floor(this.player.defense)}${eqStats['defense'] ? ` (+${eqStats['defense']})` : ''}`,
-      `${t('ui.character.computed.critRate')}: ${critPct}%  ${t('ui.character.computed.critDamage')}: ${150 + (eqStats['critDamage'] ?? 0)}%`,
-      `${t('ui.character.computed.gold')}: ${this.player.gold}G`,
+    const derived: [string, string, string][] = [
+      ['HP', `${Math.ceil(this.player.hp)}/${this.player.maxHp}`, '#ff8a72'],
+      ['MP', `${Math.ceil(this.player.mana)}/${this.player.maxMana}`, '#7fb6ff'],
+      [t('ui.character.computed.attack'), `${Math.floor(this.player.baseDamage)}${eqStats['damage'] ? ` (+${eqStats['damage']})` : ''}${eqStats['damagePercent'] ? ` +${eqStats['damagePercent']}%` : ''}`, UI_COLORS.text],
+      [t('ui.character.computed.defense'), `${Math.floor(this.player.defense)}${eqStats['defense'] ? ` (+${eqStats['defense']})` : ''}`, UI_COLORS.text],
+      [t('ui.character.computed.critRate'), `${critPct}%`, UI_COLORS.text],
+      [t('ui.character.computed.critDamage'), `${150 + (eqStats['critDamage'] ?? 0)}%`, UI_COLORS.text],
+      [t('ui.character.computed.gold'), `${this.player.gold}G`, '#ffd35a'],
     ];
-    derived.forEach((line, i) => {
-      this.charPanel!.add(this.add.text(px(14), dy + i * px(18), line, {
-        fontSize: fs(12), color: '#aaa', fontFamily: FONT,
-      }));
+    const well = this.add.graphics();
+    drawWell(well, rowX, dy, rowW, derived.length * px(19) + px(10), px(4));
+    panel.add(well);
+    derived.forEach(([label, value, color], i) => {
+      const ly = dy + px(14) + i * px(19);
+      panel.add(this.add.text(rowX + px(12), ly, label, {
+        fontSize: fs(12), color: UI_COLORS.muted, fontFamily: FONT,
+      }).setOrigin(0, 0.5));
+      panel.add(this.add.text(rowX + rowW - px(12), ly, value, {
+        fontSize: fs(12), color, fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(1, 0.5));
     });
   }
 
@@ -2018,30 +2073,26 @@ export class UIScene extends Phaser.Scene {
   private toggleHomestead(): void {
     if (this.homesteadPanel) { this.homesteadPanel.destroy(); this.homesteadPanel = null; return; }
     this.closeAllPanels();
-    const pw = px(480), ph = px(520), panelX = (W - pw) / 2, panelY = px(10);
+    const pw = px(520), ph = px(560), panelX = (W - pw) / 2, panelY = px(8);
     this.homesteadPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
-    this.animatePanelOpen(this.homesteadPanel);
-    this.homesteadPanel.add(this.createPanelBg(pw, ph));
-    this.homesteadPanel.add(this.createPanelTitle(pw, t('ui.homestead.title')));
-    this.homesteadPanel.add(this.createPanelCloseBtn(pw, () => this.toggleHomestead()));
+    const panel = this.homesteadPanel;
+    this.animatePanelOpen(panel);
+    panel.add(this.createPanelBg(pw, ph));
+    panel.add(this.createPanelTitle(pw, t('ui.homestead.title')));
+    panel.add(this.createPanelCloseBtn(pw, () => this.toggleHomestead()));
 
     const hs = this.zone.homesteadSystem;
     const buildings = hs.getAllBuildings();
+    const rowX = px(16), rowW = pw - px(32);
 
     // === Buildings Section ===
-    const sectionHeaderY = px(38);
-    const divider1 = this.add.graphics();
-    divider1.fillStyle(0xc0934a, 0.3);
-    divider1.fillRect(px(14), sectionHeaderY, pw - px(28), px(1));
-    this.homesteadPanel.add(divider1);
-    this.homesteadPanel.add(this.add.text(px(14), sectionHeaderY + px(4), t('ui.homestead.buildingsHeader'), {
-      fontSize: fs(12), color: '#c0934a', fontFamily: FONT, fontStyle: 'bold',
-    }));
+    const sectionHeaderY = px(52);
+    panel.add(addSectionHeader(this, rowX, sectionHeaderY, rowW, t('ui.homestead.buildingsHeader')));
 
-    const buildingStartY = sectionHeaderY + px(22);
-    const buildingH = px(56);
-    const buildingGap = px(6);
-    const iconAreaSize = px(42);
+    const buildingStartY = sectionHeaderY + px(12);
+    const buildingH = px(52);
+    const buildingGap = px(5);
+    const iconAreaSize = px(40);
 
     buildings.forEach((b, i) => {
       const sy = buildingStartY + i * (buildingH + buildingGap);
@@ -2052,144 +2103,88 @@ export class UIScene extends Phaser.Scene {
 
       // Building card background
       const cardGfx = this.add.graphics();
-      cardGfx.fillStyle(maxed ? 0x1a1810 : 0x0e0e20, 0.7);
-      cardGfx.fillRoundedRect(px(10), sy, pw - px(20), buildingH, px(4));
-      cardGfx.lineStyle(Math.round(1 * DPR), maxed ? 0xc0934a : 0x2a2a3e, maxed ? 0.5 : 0.3);
-      cardGfx.strokeRoundedRect(px(10), sy, pw - px(20), buildingH, px(4));
-      this.homesteadPanel!.add(cardGfx);
+      drawCard(cardGfx, rowX, sy, rowW, buildingH, maxed
+        ? { fill: 0x241d12, border: 0xd4a54a, strip: 0xd4a54a }
+        : { border: 0x3f3845 });
+      panel.add(cardGfx);
 
       // Building icon area
-      const iconX = px(16);
+      const iconX = rowX + px(10);
       const iconY = sy + (buildingH - iconAreaSize) / 2;
       const iconGfx = this.add.graphics();
-      iconGfx.fillStyle(0x0a0a18, 0.9);
-      iconGfx.fillRoundedRect(iconX, iconY, iconAreaSize, iconAreaSize, px(4));
-      iconGfx.lineStyle(Math.round(1 * DPR), maxed ? 0xc0934a : 0x333344, 0.5);
-      iconGfx.strokeRoundedRect(iconX, iconY, iconAreaSize, iconAreaSize, px(4));
-      this.homesteadPanel!.add(iconGfx);
+      drawWell(iconGfx, iconX, iconY, iconAreaSize, iconAreaSize, px(4), maxed ? 0xd4a54a : 0x4a4250);
+      panel.add(iconGfx);
 
       // Draw building icon (procedural illustration)
       const iconDrawer = UIScene.BUILDING_ICONS[b.id];
       if (iconDrawer) {
         const buildingIconGfx = this.add.graphics();
         iconDrawer(buildingIconGfx, iconX + iconAreaSize / 2, iconY + iconAreaSize / 2, iconAreaSize, lv, b.maxLevel);
-        this.homesteadPanel!.add(buildingIconGfx);
+        panel.add(buildingIconGfx);
       }
 
       // Text area
-      const textX = iconX + iconAreaSize + px(10);
-      this.homesteadPanel!.add(this.add.text(textX, sy + px(6), getBuildingName(b.id, b.name), {
-        fontSize: fs(13), color: maxed ? '#c0934a' : '#e0d8cc', fontFamily: FONT, fontStyle: 'bold',
+      const textX = iconX + iconAreaSize + px(12);
+      const textMaxW = rowW - (textX - rowX) - px(104);
+      panel.add(this.add.text(textX, sy + px(6), getBuildingName(b.id, b.name), {
+        fontSize: fs(13), color: maxed ? UI_COLORS.goldBright : UI_COLORS.text, fontFamily: FONT, fontStyle: 'bold',
       }));
-      this.homesteadPanel!.add(this.add.text(textX, sy + px(22), getBuildingDesc(b.id, b.description), {
-        fontSize: fs(10), color: '#666680', fontFamily: FONT,
-      }));
+      const descT = this.add.text(textX, sy + px(23), getBuildingDesc(b.id, b.description), {
+        fontSize: fs(10), color: UI_COLORS.muted, fontFamily: FONT,
+      });
+      if (descT.width > textMaxW) descT.setScale(textMaxW / descT.width, 1);
+      panel.add(descT);
 
       // Level progress pips
-      const pipY = sy + px(38);
-      const pipR = px(3);
-      const pipGapH = px(10);
+      const pipY = sy + px(41);
+      const pipGapH = px(11);
+      const on = pipTexture(this, px(8), maxed ? 0xffd98a : 0x6fd35a);
+      const off = pipTexture(this, px(8), null);
       for (let p = 0; p < b.maxLevel; p++) {
-        const pipX = textX + p * pipGapH;
-        const pipGfxB = this.add.graphics();
-        if (p < lv) {
-          pipGfxB.fillStyle(maxed ? 0xc0934a : 0x27ae60, 0.9);
-          pipGfxB.fillCircle(pipX, pipY, pipR);
-        } else {
-          pipGfxB.fillStyle(0x2a2a3e, 0.5);
-          pipGfxB.fillCircle(pipX, pipY, pipR);
-          pipGfxB.lineStyle(Math.round(0.5 * DPR), 0x3a3a4e, 0.4);
-          pipGfxB.strokeCircle(pipX, pipY, pipR);
-        }
-        this.homesteadPanel!.add(pipGfxB);
+        panel.add(this.add.image(textX + px(4) + p * pipGapH, pipY, p < lv ? on : off));
       }
       // Level text
-      this.homesteadPanel!.add(this.add.text(textX + b.maxLevel * pipGapH + px(4), pipY - px(4), `Lv.${lv}/${b.maxLevel}`, {
-        fontSize: fs(9), color: maxed ? '#c0934a' : '#666680', fontFamily: FONT,
-      }));
+      panel.add(this.add.text(textX + b.maxLevel * pipGapH + px(4), pipY, `Lv.${lv}/${b.maxLevel}`, {
+        fontSize: fs(10), color: maxed ? UI_COLORS.goldBright : UI_COLORS.muted, fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(0, 0.5));
 
-      // Upgrade button (global style: bright green if affordable, grey if not, gold badge if maxed)
+      // Upgrade button (global style) / max badge
+      const btnCx = rowX + rowW - px(52);
+      const btnCy = sy + buildingH / 2;
       if (maxed) {
         const badgeGfx = this.add.graphics();
-        const badgeX = pw - px(48);
-        const badgeY = sy + buildingH / 2;
-        badgeGfx.fillStyle(0xc0934a, 0.15);
-        badgeGfx.fillRoundedRect(badgeX - px(20), badgeY - px(10), px(40), px(20), px(4));
-        badgeGfx.lineStyle(Math.round(1 * DPR), 0xc0934a, 0.4);
-        badgeGfx.strokeRoundedRect(badgeX - px(20), badgeY - px(10), px(40), px(20), px(4));
-        this.homesteadPanel!.add(badgeGfx);
-        this.homesteadPanel!.add(this.add.text(badgeX, badgeY, t('ui.homestead.maxLevel'), {
-          fontSize: fs(10), color: '#c0934a', fontFamily: FONT, fontStyle: 'bold',
+        badgeGfx.fillStyle(0x3a2a10, 1);
+        badgeGfx.fillRoundedRect(btnCx - px(34), btnCy - px(11), px(68), px(22), px(11));
+        badgeGfx.lineStyle(1.5, 0xffd98a, 1);
+        badgeGfx.strokeRoundedRect(btnCx - px(34), btnCy - px(11), px(68), px(22), px(11));
+        panel.add(badgeGfx);
+        panel.add(this.add.text(btnCx, btnCy, t('ui.homestead.maxLevel'), {
+          fontSize: fs(11), color: UI_COLORS.goldBright, fontFamily: FONT, fontStyle: 'bold',
         }).setOrigin(0.5));
       } else {
-        const btnW = px(70);
-        const btnH = px(24);
-        const btnX = pw - px(24) - btnW;
-        const btnY = sy + (buildingH - btnH) / 2;
-        const btnGfx = this.add.graphics();
-        const btnColor = canUpgrade ? 0x1a3a1a : 0x1a1a2e;
-        const btnBorder = canUpgrade ? 0x27ae60 : 0x333344;
-        btnGfx.fillStyle(btnColor, 0.9);
-        btnGfx.fillRoundedRect(btnX, btnY, btnW, btnH, px(4));
-        btnGfx.lineStyle(Math.round(1 * DPR), btnBorder, canUpgrade ? 0.8 : 0.4);
-        btnGfx.strokeRoundedRect(btnX, btnY, btnW, btnH, px(4));
-        this.homesteadPanel!.add(btnGfx);
-
-        const btnText = this.add.text(btnX + btnW / 2, btnY + btnH / 2, t('ui.homestead.upgrade', { cost: String(cost) }), {
-          fontSize: fs(11), color: canUpgrade ? '#27ae60' : '#555566', fontFamily: FONT,
-        }).setOrigin(0.5);
-        this.homesteadPanel!.add(btnText);
-
-        if (canUpgrade) {
-          const hitArea = this.add.rectangle(btnX + btnW / 2, btnY + btnH / 2, btnW, btnH, 0x000000, 0)
-            .setInteractive({ useHandCursor: true });
-          hitArea.on('pointerover', () => {
-            btnGfx.clear();
-            btnGfx.fillStyle(0x225522, 1);
-            btnGfx.fillRoundedRect(btnX, btnY, btnW, btnH, px(4));
-            btnGfx.lineStyle(Math.round(2 * DPR), 0x44dd44, 1);
-            btnGfx.strokeRoundedRect(btnX, btnY, btnW, btnH, px(4));
-            btnText.setColor('#44dd44');
-          });
-          hitArea.on('pointerout', () => {
-            btnGfx.clear();
-            btnGfx.fillStyle(btnColor, 0.9);
-            btnGfx.fillRoundedRect(btnX, btnY, btnW, btnH, px(4));
-            btnGfx.lineStyle(Math.round(1 * DPR), btnBorder, 0.8);
-            btnGfx.strokeRoundedRect(btnX, btnY, btnW, btnH, px(4));
-            btnText.setColor('#27ae60');
-          });
-          hitArea.on('pointerdown', () => {
-            const actualCost = hs.upgrade(b.id);
-            this.player.gold -= actualCost;
-            this.toggleHomestead(); this.toggleHomestead();
-          });
-          this.homesteadPanel!.add(hitArea);
-        }
+        panel.add(this.makeButton(btnCx, btnCy, px(84), px(28), t('ui.homestead.upgrade', { cost: String(cost) }), () => {
+          const actualCost = hs.upgrade(b.id);
+          this.player.gold -= actualCost;
+          this.toggleHomestead(); this.toggleHomestead();
+        }, { variant: 'success', disabled: !canUpgrade, fontSize: 11 }));
       }
     });
 
     // === Pets Section ===
-    const petSectionY = buildingStartY + buildings.length * (buildingH + buildingGap) + px(8);
-    const divider2 = this.add.graphics();
-    divider2.fillStyle(0xc0934a, 0.3);
-    divider2.fillRect(px(14), petSectionY, pw - px(28), px(1));
-    this.homesteadPanel.add(divider2);
-
-    const petCapacity = 1 + hs.getBuildingLevel('pet_house');
-    this.homesteadPanel.add(this.add.text(px(14), petSectionY + px(4), t('ui.homestead.petsHeader', { count: String(hs.pets.length) }), {
-      fontSize: fs(12), color: '#c0934a', fontFamily: FONT, fontStyle: 'bold',
-    }));
+    const petSectionY = buildingStartY + buildings.length * (buildingH + buildingGap) + px(14);
+    panel.add(addSectionHeader(this, rowX, petSectionY, rowW, t('ui.homestead.petsHeader', { count: String(hs.pets.length) })));
 
     const pets = hs.pets;
-    const petStartY = petSectionY + px(22);
-    const petCardH = px(48);
-    const petGap = px(6);
+    const petStartY = petSectionY + px(12);
+    const petCardH = px(46);
+    const petGap = px(5);
     const petIconSize = px(34);
+    const footerY = ph - px(18);
 
     if (pets.length === 0) {
-      this.homesteadPanel.add(this.add.text(pw / 2, petStartY + px(10), t('ui.homestead.noPets'), {
-        fontSize: fs(11), color: '#444458', fontFamily: FONT, align: 'center',
+      panel.add(this.add.text(pw / 2, petStartY + px(14), t('ui.homestead.noPets'), {
+        fontSize: fs(11), color: UI_COLORS.dim, fontFamily: FONT, align: 'center',
+        wordWrap: { width: rowW - px(20), useAdvancedWrap: true },
       }).setOrigin(0.5, 0));
     }
 
@@ -2198,42 +2193,33 @@ export class UIScene extends Phaser.Scene {
       if (!pd) return;
       const isActive = hs.activePet === p.petId;
       const py = petStartY + i * (petCardH + petGap);
+      if (py + petCardH > footerY - px(10)) return; // keep inside the panel
       const rarityColor = UIScene.PET_RARITY_COLORS[pd.rarity] ?? 0x888888;
 
       // Pet card bg
       const petCard = this.add.graphics();
-      petCard.fillStyle(isActive ? 0x0e1e0e : 0x0e0e20, 0.7);
-      petCard.fillRoundedRect(px(10), py, pw - px(20), petCardH, px(4));
-      petCard.lineStyle(Math.round(1.5 * DPR), isActive ? 0x27ae60 : rarityColor, isActive ? 0.7 : 0.3);
-      petCard.strokeRoundedRect(px(10), py, pw - px(20), petCardH, px(4));
-      // Active highlight glow
-      if (isActive) {
-        petCard.lineStyle(Math.round(1 * DPR), 0x27ae60, 0.1);
-        petCard.strokeRoundedRect(px(8), py - px(2), pw - px(16), petCardH + px(4), px(5));
-      }
-      this.homesteadPanel!.add(petCard);
+      drawCard(petCard, rowX, py, rowW, petCardH, isActive
+        ? { fill: 0x172414, border: 0x6fd35a, glow: 0x6fd35a, strip: 0x6fd35a }
+        : { border: rarityColor, borderAlpha: 0.7 });
+      panel.add(petCard);
 
       // Pet icon area with rarity-colored border
-      const petIconX = px(16);
+      const petIconX = rowX + px(10);
       const petIconY = py + (petCardH - petIconSize) / 2;
       const petIconGfx = this.add.graphics();
-      petIconGfx.fillStyle(0x0a0a18, 0.9);
-      petIconGfx.fillRoundedRect(petIconX, petIconY, petIconSize, petIconSize, px(4));
-      petIconGfx.lineStyle(Math.round(1.5 * DPR), rarityColor, 0.7);
-      petIconGfx.strokeRoundedRect(petIconX, petIconY, petIconSize, petIconSize, px(4));
+      drawWell(petIconGfx, petIconX, petIconY, petIconSize, petIconSize, px(4), rarityColor);
       // Simple procedural pet icon based on petId
       const pcx = petIconX + petIconSize / 2;
       const pcy = petIconY + petIconSize / 2;
-      petIconGfx.fillStyle(rarityColor, 0.5);
-      // Body
-      petIconGfx.fillCircle(pcx, pcy + petIconSize * 0.05, petIconSize * 0.25);
-      // Head
-      petIconGfx.fillCircle(pcx, pcy - petIconSize * 0.15, petIconSize * 0.18);
-      // Eyes
-      petIconGfx.fillStyle(0xffffff, 0.8);
-      petIconGfx.fillCircle(pcx - petIconSize * 0.06, pcy - petIconSize * 0.18, petIconSize * 0.04);
-      petIconGfx.fillCircle(pcx + petIconSize * 0.06, pcy - petIconSize * 0.18, petIconSize * 0.04);
-      this.homesteadPanel!.add(petIconGfx);
+      petIconGfx.fillStyle(rarityColor, 0.8);
+      petIconGfx.fillCircle(pcx, pcy + petIconSize * 0.08, petIconSize * 0.24);
+      petIconGfx.fillCircle(pcx, pcy - petIconSize * 0.14, petIconSize * 0.18);
+      petIconGfx.fillTriangle(pcx - petIconSize * 0.2, pcy - petIconSize * 0.2, pcx - petIconSize * 0.1, pcy - petIconSize * 0.38, pcx - petIconSize * 0.04, pcy - petIconSize * 0.24);
+      petIconGfx.fillTriangle(pcx + petIconSize * 0.2, pcy - petIconSize * 0.2, pcx + petIconSize * 0.1, pcy - petIconSize * 0.38, pcx + petIconSize * 0.04, pcy - petIconSize * 0.24);
+      petIconGfx.fillStyle(0xffffff, 0.9);
+      petIconGfx.fillCircle(pcx - petIconSize * 0.06, pcy - petIconSize * 0.16, petIconSize * 0.04);
+      petIconGfx.fillCircle(pcx + petIconSize * 0.06, pcy - petIconSize * 0.16, petIconSize * 0.04);
+      panel.add(petIconGfx);
 
       // Pet name + evolution suffix
       const evolvedStages = hs.getEvolutionStages();
@@ -2243,64 +2229,59 @@ export class UIScene extends Phaser.Scene {
       }
       const rarityHex = '#' + rarityColor.toString(16).padStart(6, '0');
 
-      const petTextX = petIconX + petIconSize + px(8);
-      this.homesteadPanel!.add(this.add.text(petTextX, py + px(5), displayName, {
-        fontSize: fs(12), color: isActive ? '#44dd88' : rarityHex, fontFamily: FONT, fontStyle: 'bold',
+      const petTextX = petIconX + petIconSize + px(10);
+      panel.add(this.add.text(petTextX, py + px(5), displayName, {
+        fontSize: fs(12), color: isActive ? '#8ff07a' : rarityHex, fontFamily: FONT, fontStyle: 'bold',
       }));
 
       // Bonus stat label
       const statLabel = getPetStatLabel(pd.bonusStat);
       const currentBonus = pd.bonusValue + pd.bonusPerLevel * p.level;
-      this.homesteadPanel!.add(this.add.text(petTextX, py + px(19), `${statLabel} +${currentBonus.toFixed(1)}`, {
-        fontSize: fs(9), color: '#888899', fontFamily: FONT,
-      }));
+      panel.add(this.add.text(rowX + rowW - px(40), py + px(6), `${statLabel} +${currentBonus.toFixed(1)}`, {
+        fontSize: fs(11), color: UI_COLORS.textSoft, fontFamily: FONT,
+      }).setOrigin(1, 0));
 
       // Exp bar
       const expBarX = petTextX;
-      const expBarY = py + px(33);
-      const expBarW = px(100);
-      const expBarH = px(5);
+      const expBarY = py + px(28);
+      const expBarW = px(140);
+      const expBarH = px(7);
       const expThreshold = p.level * 20;
       const expRatio = expThreshold > 0 ? Math.min(1, p.exp / expThreshold) : 1;
       const expBarGfx = this.add.graphics();
-      expBarGfx.fillStyle(0x1a1a2e, 1);
-      expBarGfx.fillRoundedRect(expBarX, expBarY, expBarW, expBarH, px(2));
-      if (expRatio > 0) {
-        expBarGfx.fillStyle(isActive ? 0x27ae60 : rarityColor, 0.7);
-        expBarGfx.fillRoundedRect(expBarX, expBarY, Math.round(expBarW * expRatio), expBarH, px(2));
-      }
-      expBarGfx.lineStyle(Math.round(0.5 * DPR), 0x333344, 0.5);
-      expBarGfx.strokeRoundedRect(expBarX, expBarY, expBarW, expBarH, px(2));
-      this.homesteadPanel!.add(expBarGfx);
+      drawWell(expBarGfx, expBarX, expBarY, expBarW, expBarH, px(3));
+      drawBarFill(expBarGfx, expBarX + 1, expBarY + 1, Math.round((expBarW - 2) * expRatio), expBarH - 2, isActive ? 0x6fd35a : rarityColor);
+      panel.add(expBarGfx);
 
       // Level text
       const isMaxLevel = p.level >= pd.maxLevel;
-      this.homesteadPanel!.add(this.add.text(expBarX + expBarW + px(4), expBarY - px(2), isMaxLevel ? `Lv.${p.level} MAX` : `Lv.${p.level} (${p.exp}/${expThreshold})`, {
-        fontSize: fs(8), color: isMaxLevel ? '#c0934a' : '#555566', fontFamily: FONT,
-      }));
+      panel.add(this.add.text(expBarX + expBarW + px(8), expBarY + expBarH / 2, isMaxLevel ? `Lv.${p.level} MAX` : `Lv.${p.level} (${p.exp}/${expThreshold})`, {
+        fontSize: fs(10), color: isMaxLevel ? UI_COLORS.goldBright : UI_COLORS.muted, fontFamily: FONT,
+      }).setOrigin(0, 0.5));
 
       // Active indicator badge
       if (isActive) {
-        this.homesteadPanel!.add(this.add.text(pw - px(30), py + petCardH / 2, '✦', {
-          fontSize: fs(14), color: '#27ae60', fontFamily: FONT,
+        panel.add(this.add.text(rowX + rowW - px(18), py + petCardH / 2, '✦', {
+          fontSize: fs(16), color: '#8ff07a', fontFamily: FONT,
         }).setOrigin(0.5));
       }
     });
 
     // Footer
-    this.homesteadPanel.add(this.add.text(pw / 2, ph - px(14), t('ui.homestead.footer'), {
-      fontSize: fs(10), color: '#3a3a4a', fontFamily: FONT,
+    panel.add(this.add.text(pw / 2, footerY, t('ui.homestead.footer'), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
 
   // --- Minimap ---
   private createMinimap(): void {
-    const size = px(100), padding = px(10);
-    const x = W - size - padding, y = padding + px(60);
-    this.add.rectangle(x + size / 2, y + size / 2, size + px(4), size + px(4), 0x000000, 0.5)
-      .setStrokeStyle(Math.round(1 * DPR), 0x333344).setDepth(2999);
+    const size = MINIMAP_SIZE;
+    const { x, y } = HUD.minimap;
+    this.add.rectangle(x + size / 2, y + size / 2, size, size, 0x07060a, 1).setDepth(2999);
     this.minimap = this.add.graphics().setDepth(3000);
     this.minimap.setPosition(x, y);
+    const frame = minimapFrameTexture(this, size);
+    this.add.image(x - frame.pad, y - frame.pad, frame.key).setOrigin(0, 0).setDepth(3001);
   }
 
   private updateMinimap(): void {
@@ -2309,7 +2290,7 @@ export class UIScene extends Phaser.Scene {
     // Use AllMaps for regular zones; fall back to scene's mapData for dungeons/sub-dungeons
     const mapData = AllMaps[(this.zone as any).currentMapId] ?? (this.zone as any).mapData;
     if (!mapData) return;
-    const size = px(100);
+    const size = MINIMAP_SIZE;
     const sx = size / mapData.cols, sy = size / mapData.rows;
     const tileColors: Record<number, number> = {
       0: 0x4a8c3f, 1: 0x8b7355, 2: 0x6a6a6a, 3: 0x1a5276, 4: 0x4a4a4a, 5: 0x9e7c52,
@@ -2321,9 +2302,11 @@ export class UIScene extends Phaser.Scene {
         this.minimap.fillRect(c * sx, r * sy, Math.ceil(sx), Math.ceil(sy));
       }
     }
-    // Player dot
-    this.minimap.fillStyle(0x5dade2);
-    this.minimap.fillCircle(this.player.tileCol * sx, this.player.tileRow * sy, 3 * DPR);
+    // Player dot (drawn with a dark ring so it reads on any terrain)
+    this.minimap.fillStyle(0x000000, 0.8);
+    this.minimap.fillCircle(this.player.tileCol * sx, this.player.tileRow * sy, 4 * DPR);
+    this.minimap.fillStyle(0x7fd4ff);
+    this.minimap.fillCircle(this.player.tileCol * sx, this.player.tileRow * sy, 2.8 * DPR);
     // Exits
     // Exits
     for (const exit of mapData.exits) {
@@ -2439,45 +2422,42 @@ export class UIScene extends Phaser.Scene {
     audioManager.playSFX('click');
 
     // Full-screen transparent backdrop to catch outside clicks
-    this.dialogueBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.3)
-      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
+    this.dialogueBackdrop = this.createBackdrop(0.6);
     this.dialogueBackdrop.on('pointerdown', () => this.closeDialogue());
 
-    const pw = px(360), ph = px(60) + data.actions.length * px(32) + px(30);
+    const pw = px(400);
+    const bodyText = this.add.text(pw / 2, px(PANEL_STYLE.header.height) + px(14), data.dialogue, {
+      fontSize: fs(14), color: UI_COLORS.text, fontFamily: FONT, align: 'center', lineSpacing: px(3),
+      wordWrap: { width: pw - px(44), useAdvancedWrap: true },
+    }).setOrigin(0.5, 0);
+    const btnH = px(32), btnGap = px(8);
+    const btnStartY = bodyText.y + bodyText.height + px(16);
+    const ph = btnStartY + data.actions.length * (btnH + btnGap) + px(34);
     const panelX = (W - pw) / 2, panelY = H / 2 - ph / 2;
     this.dialoguePanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
-    this.animatePanelOpen(this.dialoguePanel);
-    this.dialoguePanel.add(this.createPanelBg(pw, ph));
+    const panel = this.dialoguePanel;
+    this.animatePanelOpen(panel);
+    panel.add(this.createPanelBg(pw, ph));
 
     // NPC name
-    this.dialoguePanel.add(this.add.text(pw / 2, px(10), data.npcName, {
-      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    panel.add(this.createPanelTitle(pw, data.npcName));
+    panel.add(this.createPanelCloseBtn(pw, () => this.closeDialogue()));
 
     // Dialogue text
-    this.dialoguePanel.add(this.add.text(pw / 2, px(32), data.dialogue, {
-      fontSize: fs(14), color: '#e0d8cc', fontFamily: FONT, wordWrap: { width: pw - px(30), useAdvancedWrap: true },
-    }).setOrigin(0.5, 0));
+    panel.add(bodyText);
 
     // Action buttons
-    const btnStartY = px(60);
     data.actions.forEach((action, i) => {
-      const by = btnStartY + i * px(32);
-      const btnBg = this.add.rectangle(pw / 2, by + px(12), pw - px(40), px(26), 0x1a2a1a)
-        .setStrokeStyle(Math.round(1 * DPR), 0x27ae60).setInteractive({ useHandCursor: true });
-      btnBg.on('pointerdown', () => {
+      const by = btnStartY + i * (btnH + btnGap) + btnH / 2;
+      panel.add(this.makeButton(pw / 2, by, pw - px(64), btnH, action.label, () => {
         action.callback();
         this.closeDialogue();
-      });
-      this.dialoguePanel!.add(btnBg);
-      this.dialoguePanel!.add(this.add.text(pw / 2, by + px(12), action.label, {
-        fontSize: fs(14), color: '#27ae60', fontFamily: FONT,
-      }).setOrigin(0.5));
+      }, { variant: i === 0 ? 'primary' : 'secondary', fontSize: 14 }));
     });
 
     // Close hint
-    this.dialoguePanel.add(this.add.text(pw / 2, ph - px(16), t('ui.dialogue.closeHint'), {
-      fontSize: fs(12), color: '#555', fontFamily: FONT,
+    panel.add(this.add.text(pw / 2, ph - px(18), t('ui.dialogue.closeHint'), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
 
@@ -2509,162 +2489,113 @@ export class UIScene extends Phaser.Scene {
       if (this.questCardPanel) { this.questCardPanel.destroy(); this.questCardPanel = null; }
 
       const cardData = buildQuestCardData(entries[currentIndex], hasDialogueTree);
-      const pw = px(380), headerH = px(48);
-
-      // Measure content height dynamically
-      const objCount = cardData.objectives.length;
-      const descH = px(36);
-      const objH = objCount * px(20) + px(8);
-      const rewardH = px(28);
-      const navH = total > 1 ? px(34) : 0;
-      const btnH = px(38);
-      const loreH = hasDialogueTree ? px(30) : 0;
-      const padBottom = px(14);
-      const ph = headerH + descH + objH + rewardH + navH + btnH + loreH + padBottom;
-
-      const panelX = (W - pw) / 2;
-      const panelY = (H - ph) / 2;
+      const pw = px(420), headerH = px(40);
 
       // Backdrop (only create once)
       if (!this.questCardBackdrop) {
-        this.questCardBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.35)
-          .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
+        this.questCardBackdrop = this.createBackdrop(0.7);
         this.questCardBackdrop.on('pointerdown', () => this.closeQuestCard());
       }
 
-      this.questCardPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
-      this.animatePanelOpen(this.questCardPanel);
+      this.questCardPanel = this.add.container(0, 0).setDepth(PANEL_STYLE.depth.panel);
+      const card = this.questCardPanel;
+      const isMain = cardData.category === 'main';
 
-      // Panel background
-      this.questCardPanel.add(this.createPanelBg(pw, ph));
+      // ── Header: quest name in the band ──
+      const nameT = this.add.text(pw / 2, headerH / 2 + px(1), cardData.name, {
+        fontSize: fs(16), color: isMain ? UI_COLORS.goldBright : UI_COLORS.parchment, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
+        stroke: '#120b04', strokeThickness: Math.round(3 * DPR),
+      }).setOrigin(0.5);
+      if (nameT.width > pw - px(90)) nameT.setScale((pw - px(90)) / nameT.width);
+      card.add(nameT);
+      card.add(this.createPanelCloseBtn(pw, () => this.closeQuestCard()));
 
-      // ── Header ──
-      // Category badge
-      const catBadge = cardData.category === 'main' ? t('ui.questCard.mainBadge') : t('ui.questCard.sideBadge');
-      const catColor = cardData.category === 'main' ? '#f1c40f' : '#8e8e8e';
-      this.questCardPanel.add(this.add.text(px(14), px(8), catBadge, {
-        fontSize: fs(11), color: catColor, fontFamily: FONT, fontStyle: 'bold',
-      }));
+      // Badges row: category (left) · NPC (centre) · type (right)
+      const badgeY = headerH + px(16);
+      const catBadge = btnLabel(isMain ? t('ui.questCard.mainBadge') : t('ui.questCard.sideBadge'));
+      const catT = this.add.text(px(26), badgeY, catBadge, {
+        fontSize: fs(11), color: isMain ? '#ffe7a0' : '#d0d0d0', fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(0, 0.5);
+      const pill = this.add.graphics();
+      pill.fillStyle(isMain ? 0x5a3f12 : 0x2e2b33, 1);
+      pill.fillRoundedRect(px(18), badgeY - px(10), catT.width + px(16), px(20), px(10));
+      pill.lineStyle(1, isMain ? 0xffd98a : 0x7a7280, 1);
+      pill.strokeRoundedRect(px(18), badgeY - px(10), catT.width + px(16), px(20), px(10));
+      card.add(pill);
+      card.add(catT);
+      card.add(this.add.text(pw - px(20), badgeY, cardData.typeBadge, {
+        fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
+      }).setOrigin(1, 0.5));
+      card.add(this.add.text(pw / 2, badgeY, `─ ${npcName} ─`, {
+        fontSize: fs(11), color: UI_COLORS.textSoft, fontFamily: FONT,
+      }).setOrigin(0.5, 0.5));
 
-      // Type badge
-      this.questCardPanel.add(this.add.text(pw - px(14), px(8), cardData.typeBadge, {
-        fontSize: fs(11), color: '#888', fontFamily: FONT,
-      }).setOrigin(1, 0));
-
-      // Quest name
-      this.questCardPanel.add(this.add.text(pw / 2, px(24), cardData.name, {
-        fontSize: fs(16), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
-      }).setOrigin(0.5, 0));
-
-      // NPC name subtitle
-      this.questCardPanel.add(this.add.text(pw / 2, px(42), `─ ${npcName} ─`, {
-        fontSize: fs(10), color: '#555566', fontFamily: FONT,
-      }).setOrigin(0.5, 0));
-
-      // ── Description ──
-      let curY = headerH;
-      this.questCardPanel.add(this.add.text(px(14), curY, cardData.description, {
-        fontSize: fs(11), color: '#b0a896', fontFamily: FONT,
-        wordWrap: { width: pw - px(28), useAdvancedWrap: true },
-      }));
-      curY += descH;
+      // ── Description (measured, so long text never overlaps the objectives) ──
+      let curY = badgeY + px(16);
+      const descT = this.add.text(px(20), curY, cardData.description, {
+        fontSize: fs(12), color: '#c8bca8', fontFamily: FONT, lineSpacing: px(2),
+        wordWrap: { width: pw - px(40), useAdvancedWrap: true },
+      });
+      card.add(descT);
+      curY += descT.height + px(14);
 
       // ── Objectives ──
-      const objSectionLabel = this.add.text(px(14), curY, t('ui.questCard.objectives'), {
-        fontSize: fs(11), color: '#888', fontFamily: FONT, fontStyle: 'bold',
-      });
-      this.questCardPanel.add(objSectionLabel);
-      curY += px(16);
-
+      card.add(addSectionHeader(this, px(20), curY, pw - px(40), btnLabel(t('ui.questCard.objectives')).replace(/[:：]\s*$/, '')));
+      curY += px(14);
+      const objWell = this.add.graphics();
+      card.add(objWell);
+      const objTop = curY;
+      curY += px(6);
       for (const obj of cardData.objectives) {
         const checkMark = obj.done ? '✓' : '○';
-        const objColor = obj.done ? '#27ae60' : '#e0d8cc';
-        this.questCardPanel.add(this.add.text(px(18), curY, `${checkMark} ${obj.label}`, {
-          fontSize: fs(11), color: objColor, fontFamily: FONT,
+        const objColor = obj.done ? '#8ff07a' : UI_COLORS.text;
+        card.add(this.add.text(px(30), curY, `${checkMark} ${obj.label}`, {
+          fontSize: fs(12), color: objColor, fontFamily: FONT,
         }));
-        this.questCardPanel.add(this.add.text(pw - px(14), curY, obj.progress, {
-          fontSize: fs(11), color: obj.done ? '#27ae60' : '#c0934a', fontFamily: FONT,
+        card.add(this.add.text(pw - px(30), curY, obj.progress, {
+          fontSize: fs(12), color: obj.done ? '#8ff07a' : '#e8c77a', fontFamily: FONT, fontStyle: 'bold',
         }).setOrigin(1, 0));
-        curY += px(18);
+        curY += px(20);
       }
-      curY += px(8);
+      curY += px(4);
+      drawWell(objWell, px(20), objTop, pw - px(40), curY - objTop, px(4));
+      curY += px(12);
 
       // ── Rewards ──
       const rewardText = formatRewardSummary(entries[currentIndex].quest.rewards);
-      this.questCardPanel.add(this.add.text(px(14), curY, t('ui.questCard.rewards'), {
-        fontSize: fs(11), color: '#888', fontFamily: FONT, fontStyle: 'bold',
-      }));
-      this.questCardPanel.add(this.add.text(px(52), curY, rewardText, {
-        fontSize: fs(11), color: '#f1c40f', fontFamily: FONT,
-      }));
-      curY += rewardH;
+      const rwLabel = this.add.text(px(20), curY, t('ui.questCard.rewards'), {
+        fontSize: fs(12), color: UI_COLORS.heading, fontFamily: FONT, fontStyle: 'bold',
+      });
+      card.add(rwLabel);
+      const rwText = this.add.text(px(20) + rwLabel.width + px(8), curY, rewardText, {
+        fontSize: fs(12), color: '#ffd35a', fontFamily: FONT,
+        wordWrap: { width: pw - px(48) - rwLabel.width, useAdvancedWrap: true },
+      });
+      card.add(rwText);
+      curY += Math.max(rwLabel.height, rwText.height) + px(12);
 
       // ── Navigation (multiple quests) ──
       if (total > 1) {
-        // Minimum touch target size for mobile (44px physical = px(22))
-        const navTouchSize = px(22);
-
-        // Left arrow with touch-friendly hit area
-        const leftArrow = this.add.text(px(40), curY + px(14), '◀', {
-          fontSize: fs(16), color: currentIndex > 0 ? '#c0934a' : '#333',
-          fontFamily: FONT,
-        }).setOrigin(0.5);
-        const leftHit = this.add.rectangle(px(40), curY + px(14), navTouchSize, navTouchSize, 0x000000, 0)
-          .setInteractive({ useHandCursor: currentIndex > 0 });
-        if (currentIndex > 0) {
-          leftHit.on('pointerdown', () => { currentIndex--; renderCard(); });
-          leftHit.on('pointerover', () => leftArrow.setColor('#f1c40f'));
-          leftHit.on('pointerout', () => leftArrow.setColor('#c0934a'));
-        }
-        this.questCardPanel.add(leftArrow);
-        this.questCardPanel.add(leftHit);
-
-        // Counter
-        this.questCardPanel.add(this.add.text(pw / 2, curY + px(14), `${currentIndex + 1}/${total}`, {
-          fontSize: fs(12), color: '#888', fontFamily: FONT,
+        const navY = curY + px(12);
+        card.add(this.makeButton(px(60), navY, px(44), px(26), '◀', () => { currentIndex--; renderCard(); }, { disabled: currentIndex <= 0, fontSize: 12 }));
+        card.add(this.add.text(pw / 2, navY, `${currentIndex + 1}/${total}`, {
+          fontSize: fs(12), color: UI_COLORS.textSoft, fontFamily: FONT, fontStyle: 'bold',
         }).setOrigin(0.5));
-
-        // Right arrow with touch-friendly hit area
-        const rightArrow = this.add.text(pw - px(40), curY + px(14), '▶', {
-          fontSize: fs(16), color: currentIndex < total - 1 ? '#c0934a' : '#333',
-          fontFamily: FONT,
-        }).setOrigin(0.5);
-        const rightHit = this.add.rectangle(pw - px(40), curY + px(14), navTouchSize, navTouchSize, 0x000000, 0)
-          .setInteractive({ useHandCursor: currentIndex < total - 1 });
-        if (currentIndex < total - 1) {
-          rightHit.on('pointerdown', () => { currentIndex++; renderCard(); });
-          rightHit.on('pointerover', () => rightArrow.setColor('#f1c40f'));
-          rightHit.on('pointerout', () => rightArrow.setColor('#c0934a'));
-        }
-        this.questCardPanel.add(rightArrow);
-        this.questCardPanel.add(rightHit);
-
-        curY += navH;
+        card.add(this.makeButton(pw - px(60), navY, px(44), px(26), '▶', () => { currentIndex++; renderCard(); }, { disabled: currentIndex >= total - 1, fontSize: 12 }));
+        curY += px(34);
       }
 
       // ── Action Button ──
       const isAccept = cardData.cardAction === 'accept';
-      const btnLabel = isAccept ? t('ui.questCard.accept') : t('ui.questCard.turnIn');
-      const btnColor = isAccept ? 0x1a2a1a : 0x2a1a1a;
-      const btnStroke = isAccept ? 0x27ae60 : 0xc0934a;
-      const btnTextColor = isAccept ? '#27ae60' : '#c0934a';
-      const btnW = px(160), bH = px(32);
-
-      const actionBg = this.add.rectangle(pw / 2, curY + bH / 2, btnW, bH, btnColor)
-        .setStrokeStyle(Math.round(2 * DPR), btnStroke)
-        .setInteractive({ useHandCursor: true });
-      const actionText = this.add.text(pw / 2, curY + bH / 2, btnLabel, {
-        fontSize: fs(15), color: btnTextColor, fontFamily: FONT, fontStyle: 'bold',
-      }).setOrigin(0.5);
-
-      actionBg.on('pointerover', () => {
-        actionBg.setFillStyle(isAccept ? 0x224422 : 0x332222);
-        actionText.setColor(isAccept ? '#44dd44' : '#f1c40f');
+      const btnLabelText = isAccept ? t('ui.questCard.accept') : t('ui.questCard.turnIn');
+      const bW = px(180), bH = px(36);
+      const actionBtn = this.makeButton(pw / 2, curY + bH / 2, bW, bH, btnLabelText, () => undefined, {
+        variant: isAccept ? 'success' : 'primary', fontSize: 15, bold: true,
       });
-      actionBg.on('pointerout', () => {
-        actionBg.setFillStyle(btnColor);
-        actionText.setColor(btnTextColor);
-      });
+      const actionBg = actionBtn.bg;
+      card.add(actionBtn);
+      curY += bH + px(10);
+
       actionBg.on('pointerdown', () => {
         const entry = entries[currentIndex];
         const questSystem = rawData.questSystem;
@@ -2707,30 +2638,19 @@ export class UIScene extends Phaser.Scene {
         this.closeQuestCard();
       });
 
-      this.questCardPanel.add(actionBg);
-      this.questCardPanel.add(actionText);
-      curY += btnH;
-
       // ── View Lore Button (optional) ──
       if (hasDialogueTree) {
-        const loreBtnW = px(120), loreBtnH = px(24);
-        const loreBg = this.add.rectangle(pw / 2, curY + loreBtnH / 2, loreBtnW, loreBtnH, 0x1a1a2e, 0.8)
-          .setStrokeStyle(Math.round(1 * DPR), 0x555566)
-          .setInteractive({ useHandCursor: true });
-        const loreText = this.add.text(pw / 2, curY + loreBtnH / 2, t('ui.questCard.viewStory'), {
-          fontSize: fs(11), color: '#8888aa', fontFamily: FONT,
-        }).setOrigin(0.5);
-
-        loreBg.on('pointerover', () => { loreBg.setFillStyle(0x222233); loreText.setColor('#aaaacc'); });
-        loreBg.on('pointerout', () => { loreBg.setFillStyle(0x1a1a2e); loreText.setColor('#8888aa'); });
-        loreBg.on('pointerdown', () => {
+        card.add(this.makeButton(pw / 2, curY + px(13), px(140), px(26), t('ui.questCard.viewStory'), () => {
           this.closeQuestCard();
           this.openDialogueTree(rawData);
-        });
-
-        this.questCardPanel.add(loreBg);
-        this.questCardPanel.add(loreText);
+        }, { variant: 'ghost', fontSize: 11 }));
+        curY += px(32);
       }
+
+      const ph = curY + px(12);
+      card.addAt(this.createPanelBg(pw, ph, headerH), 0);
+      card.setPosition((W - pw) / 2, Math.max(px(10), (H - ph) / 2));
+      this.animatePanelOpen(card);
     };
 
     renderCard();
@@ -2738,28 +2658,27 @@ export class UIScene extends Phaser.Scene {
 
   /** Show a brief quest toast at the top of the screen. */
   private showQuestToast(message: string, action: 'accept' | 'turn_in'): void {
-    const toastW = px(280), toastH = px(40);
+    const toastW = px(320), toastH = px(42);
     const toastX = (W - toastW) / 2, toastY = px(60);
     const toast = this.add.container(toastX, toastY).setDepth(PANEL_STYLE.depth.toast).setAlpha(0);
 
-    const borderColor = action === 'accept' ? 0x27ae60 : 0xc0934a;
-    const textColor = action === 'accept' ? '#27ae60' : '#c0934a';
+    const borderColor = action === 'accept' ? 0x6fd35a : 0xffd98a;
+    const textColor = action === 'accept' ? '#a8f090' : '#ffe7a0';
     const icon = action === 'accept' ? '✦' : '✓';
 
-    const bg = this.add.graphics();
-    bg.fillStyle(0x1a1a0a, 0.95);
-    bg.fillRoundedRect(0, 0, toastW, toastH, px(6));
-    bg.lineStyle(Math.round(2 * DPR), borderColor, 0.9);
-    bg.strokeRoundedRect(0, 0, toastW, toastH, px(6));
-    toast.add(bg);
+    toast.add(addFrame(this, 0, 0, toastW, toastH, { variant: 'tooltip', accent: borderColor }));
 
-    toast.add(this.add.text(px(14), toastH / 2, icon, {
-      fontSize: fs(16), color: textColor, fontFamily: FONT,
+    toast.add(this.add.text(px(18), toastH / 2, icon, {
+      fontSize: fs(17), color: textColor, fontFamily: FONT,
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0, 0.5));
 
-    toast.add(this.add.text(px(32), toastH / 2, message, {
+    const msgT = this.add.text(px(40), toastH / 2, message, {
       fontSize: fs(13), color: textColor, fontFamily: FONT, fontStyle: 'bold',
-    }).setOrigin(0, 0.5));
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+    }).setOrigin(0, 0.5);
+    if (msgT.width > toastW - px(54)) msgT.setScale((toastW - px(54)) / msgT.width, 1);
+    toast.add(msgT);
 
     // Animate in
     this.tweens.add({
@@ -2835,12 +2754,11 @@ export class UIScene extends Phaser.Scene {
     }
 
     // Full-screen transparent backdrop
-    this.dialogueBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.35)
-      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
+    this.dialogueBackdrop = this.createBackdrop(0.7);
 
-    const pw = px(460), maxPh = px(500);
-    const headerH = px(50);
-    const footerH = px(24);
+    const pw = px(480), maxPh = px(520);
+    const headerH = px(60);
+    const footerH = px(26);
 
     // Determine display text
     const displayText = prefixText ? `${prefixText}\n\n${node.text}` : node.text;
@@ -2875,8 +2793,8 @@ export class UIScene extends Phaser.Scene {
     textMeasure.destroy();
 
     // Calculate button area height
-    const btnH = px(30);
-    const btnGap = px(6);
+    const btnH = px(32);
+    const btnGap = px(7);
     const choicesToShow = visibleChoices.length > 0 ? visibleChoices : [];
     // When all choices were filtered out on a non-root branching node, offer a "go back" button
     const allChoicesFiltered = node.choices && node.choices.length > 0 && choicesToShow.length === 0 && !node.isEnd;
@@ -2899,19 +2817,14 @@ export class UIScene extends Phaser.Scene {
     // Background
     this.dialoguePanel.add(this.createPanelBg(pw, ph));
 
-    // Header accent line
-    const headerLine = this.add.rectangle(pw / 2, headerH, pw - px(20), Math.round(1 * DPR), 0x333344);
-    this.dialoguePanel.add(headerLine);
-
     // NPC name
-    this.dialoguePanel.add(this.add.text(pw / 2, px(12), npcName, {
-      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    this.dialoguePanel.add(this.createPanelTitle(pw, npcName));
+    this.dialoguePanel.add(this.createPanelCloseBtn(pw, () => this.closeDialogue()));
 
     // NPC type subtitle
-    this.dialoguePanel.add(this.add.text(pw / 2, px(32), t('ui.dialogue.subtitle'), {
-      fontSize: fs(11), color: '#555566', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
+    this.dialoguePanel.add(this.add.text(pw / 2, px(47), t('ui.dialogue.subtitle'), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT, fontStyle: 'italic',
+    }).setOrigin(0.5, 0.5));
 
     // Scrollable text area with mask
     const textAreaY = headerH + px(4);
@@ -2928,7 +2841,7 @@ export class UIScene extends Phaser.Scene {
     this.dialoguePanel.add(textContainer);
 
     const npcText = this.add.text(0, -this.dialogueScrollY, displayText, {
-      fontSize: fs(13), color: '#e0d8cc', fontFamily: FONT,
+      fontSize: fs(13), color: UI_COLORS.text, fontFamily: FONT,
       wordWrap: { width: pw - px(36), useAdvancedWrap: true },
       lineSpacing: px(3),
     });
@@ -2936,8 +2849,8 @@ export class UIScene extends Phaser.Scene {
 
     // Scroll indicators
     if (needsScroll) {
-      const scrollHint = this.add.text(pw - px(20), textAreaY + textAreaH - px(14), '▼', {
-        fontSize: fs(12), color: '#c0934a', fontFamily: FONT,
+      const scrollHint = this.add.text(pw - px(24), textAreaY + textAreaH - px(14), '▼', {
+        fontSize: fs(12), color: '#e8c77a', fontFamily: FONT,
       }).setOrigin(0.5);
       this.dialoguePanel.add(scrollHint);
       this.tweens.add({
@@ -2962,6 +2875,9 @@ export class UIScene extends Phaser.Scene {
         return originalDestroy(...args);
       };
     } else {
+      // No scrolling needed: drop the mask before destroying its geometry
+      // (destroying a live mask's geometry used to hide the NPC text entirely).
+      textContainer.clearMask(true);
       maskGraphics.destroy();
     }
 
@@ -2979,33 +2895,20 @@ export class UIScene extends Phaser.Scene {
         const prog = questSystem.progress.get(choice.questTrigger);
         if (prog && (prog.status === 'active' || prog.status === 'turned_in')) questAlreadyActive = true;
       }
-      const btnColor = questAlreadyActive ? 0x1a1a2a : 0x1a2a1a;
-      const btnStroke = questAlreadyActive ? 0x556688 : 0x27ae60;
-      const textColor = questAlreadyActive ? '#556688' : '#27ae60';
-      const hoverBg = questAlreadyActive ? 0x222233 : 0x224422;
-      const hoverText = questAlreadyActive ? '#7799bb' : '#44dd44';
       const labelText = questAlreadyActive ? `${choice.text}${t('ui.dialogue.inProgress')}` : choice.text;
 
-      const btnBg = this.add.rectangle(pw / 2, by + btnH / 2, pw - px(40), btnH, btnColor)
-        .setStrokeStyle(Math.round(1 * DPR), btnStroke).setInteractive({ useHandCursor: true });
+      const choiceBtn = this.makeButton(pw / 2, by + btnH / 2, pw - px(48), btnH, labelText, () => undefined, {
+        variant: questAlreadyActive ? 'ghost' : 'success', fontSize: 13,
+      });
+      const btnBg = choiceBtn.bg;
+      const btnText = choiceBtn.label;
 
-      const btnText = this.add.text(pw / 2, by + btnH / 2, labelText, {
-        fontSize: fs(13), color: textColor, fontFamily: FONT,
-      }).setOrigin(0.5);
-
-      // Truncate long choice text
-      if (btnText.width > pw - px(56)) {
-        btnText.setStyle({ wordWrap: { width: pw - px(56), useAdvancedWrap: true } });
+      // Wrap / shrink long choice text so it stays inside the button
+      if (btnText.width > pw - px(72)) {
+        btnText.setStyle({ wordWrap: { width: pw - px(72), useAdvancedWrap: true } });
+        if (btnText.height > btnH - px(4)) btnText.setScale((btnH - px(4)) / btnText.height);
       }
 
-      btnBg.on('pointerover', () => {
-        btnBg.setFillStyle(hoverBg);
-        btnText.setColor(hoverText);
-      });
-      btnBg.on('pointerout', () => {
-        btnBg.setFillStyle(btnColor);
-        btnText.setColor(textColor);
-      });
       btnBg.on('pointerdown', () => {
         // Record choice
         state.choicesMade[node.id] = choice.nextNodeId;
@@ -3049,21 +2952,15 @@ export class UIScene extends Phaser.Scene {
         }
       });
 
-      this.dialoguePanel!.add(btnBg);
-      this.dialoguePanel!.add(btnText);
+      this.dialoguePanel!.add(choiceBtn);
       btnIdx++;
     }
 
     // Auto-continue button (for nodes with nextNodeId but no choices)
     if (node.nextNodeId && !node.isEnd && choicesToShow.length === 0 && !showBackToRoot) {
       const by = btnStartY + btnIdx * (btnH + btnGap);
-      const continueBg = this.add.rectangle(pw / 2, by + btnH / 2, pw - px(40), btnH, 0x1a1a2e)
-        .setStrokeStyle(Math.round(1 * DPR), 0x5dade2).setInteractive({ useHandCursor: true });
-      const continueText = this.add.text(pw / 2, by + btnH / 2, t('ui.dialogue.continue'), {
-        fontSize: fs(13), color: '#5dade2', fontFamily: FONT,
-      }).setOrigin(0.5);
-      continueBg.on('pointerover', () => { continueBg.setFillStyle(0x1a2a3a); continueText.setColor('#88ccff'); });
-      continueBg.on('pointerout', () => { continueBg.setFillStyle(0x1a1a2e); continueText.setColor('#5dade2'); });
+      const continueBtn = this.makeButton(pw / 2, by + btnH / 2, pw - px(48), btnH, t('ui.dialogue.continue'), () => undefined, { variant: 'secondary', fontSize: 13, color: '#9fd4ff' });
+      const continueBg = continueBtn.bg;
       continueBg.on('pointerdown', () => {
         const nextNode = tree.nodes[node.nextNodeId!];
         if (nextNode) {
@@ -3072,48 +2969,33 @@ export class UIScene extends Phaser.Scene {
           this.closeDialogue();
         }
       });
-      this.dialoguePanel!.add(continueBg);
-      this.dialoguePanel!.add(continueText);
+      this.dialoguePanel!.add(continueBtn);
       btnIdx++;
     }
 
     // Back-to-root button when all choices filtered on a non-root node
     if (showBackToRoot) {
       const by = btnStartY + btnIdx * (btnH + btnGap);
-      const backBg = this.add.rectangle(pw / 2, by + btnH / 2, pw - px(40), btnH, 0x1a1a2e)
-        .setStrokeStyle(Math.round(1 * DPR), 0xc0934a).setInteractive({ useHandCursor: true });
-      const backText = this.add.text(pw / 2, by + btnH / 2, t('ui.dialogue.back'), {
-        fontSize: fs(13), color: '#c0934a', fontFamily: FONT,
-      }).setOrigin(0.5);
-      backBg.on('pointerover', () => { backBg.setFillStyle(0x2a2a1a); backText.setColor('#ddbb66'); });
-      backBg.on('pointerout', () => { backBg.setFillStyle(0x1a1a2e); backText.setColor('#c0934a'); });
+      const backBtn = this.makeButton(pw / 2, by + btnH / 2, pw - px(48), btnH, t('ui.dialogue.back'), () => undefined, { variant: 'primary', fontSize: 13 });
+      const backBg = backBtn.bg;
       backBg.on('pointerdown', () => {
         const rootNode = tree.nodes[tree.startNodeId];
         this.renderDialogueTreeNode(tree, rootNode, npcId, npcName, completedQuests, questSystem, player, homesteadSystem, achievementSystem, state);
       });
-      this.dialoguePanel!.add(backBg);
-      this.dialoguePanel!.add(backText);
+      this.dialoguePanel!.add(backBtn);
       btnIdx++;
     }
 
     // End/leave button
     if (hasEndBtn) {
       const by = btnStartY + btnIdx * (btnH + btnGap);
-      const leaveBg = this.add.rectangle(pw / 2, by + btnH / 2, pw - px(40), btnH, 0x1a1a1a)
-        .setStrokeStyle(Math.round(1 * DPR), 0x666680).setInteractive({ useHandCursor: true });
-      const leaveText = this.add.text(pw / 2, by + btnH / 2, t('ui.dialogue.leave'), {
-        fontSize: fs(13), color: '#888', fontFamily: FONT,
-      }).setOrigin(0.5);
-      leaveBg.on('pointerover', () => { leaveBg.setFillStyle(0x222222); leaveText.setColor('#aaa'); });
-      leaveBg.on('pointerout', () => { leaveBg.setFillStyle(0x1a1a1a); leaveText.setColor('#888'); });
-      leaveBg.on('pointerdown', () => this.closeDialogue());
-      this.dialoguePanel!.add(leaveBg);
-      this.dialoguePanel!.add(leaveText);
+      const leaveBtn = this.makeButton(pw / 2, by + btnH / 2, pw - px(48), btnH, t('ui.dialogue.leave'), () => this.closeDialogue(), { variant: 'ghost', fontSize: 13 });
+      this.dialoguePanel!.add(leaveBtn);
     }
 
     // Footer hint
-    this.dialoguePanel.add(this.add.text(pw / 2, ph - px(14), needsScroll ? t('ui.dialogue.scrollHint') : '', {
-      fontSize: fs(10), color: '#444455', fontFamily: FONT,
+    this.dialoguePanel.add(this.add.text(pw / 2, ph - px(16), needsScroll ? t('ui.dialogue.scrollHint') : '', {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
 
     // Backdrop click closes dialogue
@@ -3142,8 +3024,8 @@ export class UIScene extends Phaser.Scene {
   }
 
   private createQuestLogPanel(): void {
-    const pw = px(700), ph = px(480);
-    const panelX = (W - pw) / 2, panelY = (H - ph) / 2;
+    const pw = px(720), ph = px(520);
+    const panelX = (W - pw) / 2, panelY = px(24);
     this.questLogPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.questLogPanel);
 
@@ -3157,30 +3039,28 @@ export class UIScene extends Phaser.Scene {
     this.questLogPanel.add(this.createPanelCloseBtn(pw, () => this.toggleQuestLog()));
 
     // Tab buttons
-    const tabY = px(38);
-    const activeTab = this.add.rectangle(px(80), tabY, px(130), px(24), this.questLogTab === 'active' && !this.questLogLoreTab ? 0x1a2a3a : 0x111122)
-      .setStrokeStyle(Math.round(1 * DPR), 0x2471a3).setInteractive({ useHandCursor: true });
-    activeTab.on('pointerdown', () => { this.questLogTab = 'active'; this.questLogLoreTab = false; this.questLogPage = 0; this.questLogSelectedIndex = 0; this.refreshQuestLog(); });
-    this.questLogPanel.add(activeTab);
-    this.questLogPanel.add(this.add.text(px(80), tabY, t('ui.questLog.tab.active'), {
-      fontSize: fs(14), color: this.questLogTab === 'active' && !this.questLogLoreTab ? '#5dade2' : '#666', fontFamily: FONT,
-    }).setOrigin(0.5));
-
-    const completedTab = this.add.rectangle(px(220), tabY, px(130), px(24), this.questLogTab === 'completed' && !this.questLogLoreTab ? 0x1a2a3a : 0x111122)
-      .setStrokeStyle(Math.round(1 * DPR), 0x2471a3).setInteractive({ useHandCursor: true });
-    completedTab.on('pointerdown', () => { this.questLogTab = 'completed'; this.questLogLoreTab = false; this.questLogPage = 0; this.questLogSelectedIndex = 0; this.refreshQuestLog(); });
-    this.questLogPanel.add(completedTab);
-    this.questLogPanel.add(this.add.text(px(220), tabY, t('ui.questLog.tab.completed'), {
-      fontSize: fs(14), color: this.questLogTab === 'completed' && !this.questLogLoreTab ? '#5dade2' : '#666', fontFamily: FONT,
-    }).setOrigin(0.5));
-
-    const loreTab = this.add.rectangle(px(360), tabY, px(130), px(24), this.questLogLoreTab ? 0x1a2a3a : 0x111122)
-      .setStrokeStyle(Math.round(1 * DPR), 0xDAA520).setInteractive({ useHandCursor: true });
-    loreTab.on('pointerdown', () => { this.questLogLoreTab = true; this.refreshQuestLog(); });
-    this.questLogPanel.add(loreTab);
-    this.questLogPanel.add(this.add.text(px(360), tabY, t('ui.questLog.tab.lore'), {
-      fontSize: fs(14), color: this.questLogLoreTab ? '#DAA520' : '#666', fontFamily: FONT,
-    }).setOrigin(0.5));
+    const tabY = px(46), tabW = px(140), tabH = px(28);
+    const tabs: { label: string; active: boolean; accent: number; onClick: () => void }[] = [
+      { label: t('ui.questLog.tab.active'), active: this.questLogTab === 'active' && !this.questLogLoreTab, accent: 0x5a9fe0, onClick: () => { this.questLogTab = 'active'; this.questLogLoreTab = false; this.questLogPage = 0; this.questLogSelectedIndex = 0; this.refreshQuestLog(); } },
+      { label: t('ui.questLog.tab.completed'), active: this.questLogTab === 'completed' && !this.questLogLoreTab, accent: 0x6fd35a, onClick: () => { this.questLogTab = 'completed'; this.questLogLoreTab = false; this.questLogPage = 0; this.questLogSelectedIndex = 0; this.refreshQuestLog(); } },
+      { label: t('ui.questLog.tab.lore'), active: this.questLogLoreTab, accent: 0xd4a54a, onClick: () => { this.questLogLoreTab = true; this.refreshQuestLog(); } },
+    ];
+    tabs.forEach((tab, i) => {
+      const tx = px(18) + i * (tabW + px(6));
+      const img = this.add.image(tx, tabY, tabTexture(this, tabW, tabH, tab.active, tab.accent)).setOrigin(0, 0)
+        .setInteractive({ useHandCursor: true });
+      img.on('pointerdown', tab.onClick);
+      this.questLogPanel!.add(img);
+      this.questLogPanel!.add(this.add.text(tx + tabW / 2, tabY + tabH / 2, tab.label, {
+        fontSize: fs(13), color: tab.active ? UI_COLORS.parchment : '#8a8290', fontFamily: FONT, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+      }).setOrigin(0.5));
+    });
+    // rule under the tabs
+    const rule = this.add.graphics();
+    rule.fillStyle(0x4a4250, 1);
+    rule.fillRect(px(14), tabY + tabH, pw - px(28), 1);
+    this.questLogPanel.add(rule);
 
     // Render content based on active tab
     if (this.questLogLoreTab) {
@@ -3200,8 +3080,8 @@ export class UIScene extends Phaser.Scene {
   private renderQuestLogContent(): void {
     if (!this.questLogPanel || !this.zone?.questSystem) return;
 
-    const pw = px(700), listW = px(240), detailX = px(255), detailW = px(430);
-    const listStartY = px(58), itemH = px(28), maxItems = 14;
+    const listX = px(16), listW = px(250), detailX = px(282), detailW = px(420);
+    const listStartY = px(86), itemH = px(28), maxItems = 13;
 
     // Get quest list
     let quests: { quest: import('../data/types').QuestDefinition; progress: import('../data/types').QuestProgress }[];
@@ -3228,23 +3108,28 @@ export class UIScene extends Phaser.Scene {
     const pageQuests = quests.slice(this.questLogPage * maxItems, (this.questLogPage + 1) * maxItems);
 
     // Divider line
-    this.questLogPanel.add(this.add.rectangle(listW + px(7), px(58), Math.round(1 * DPR), px(400), 0x333344).setOrigin(0, 0));
+    this.questLogPanel.add(addVDivider(this, listX + listW + px(8), listStartY, px(420)));
 
     // Quest list
     pageQuests.forEach((entry, i) => {
       const y = listStartY + i * itemH;
       const isSelected = i === this.questLogSelectedIndex;
-      const listBg = this.add.rectangle(px(5), y, listW, itemH - px(2), isSelected ? 0x1a2a3a : 0x0f0f1e)
-        .setOrigin(0, 0).setStrokeStyle(isSelected ? Math.round(1 * DPR) : 0, 0x2471a3)
+      const rowG = this.add.graphics();
+      drawCard(rowG, listX, y, listW, itemH - px(3), isSelected
+        ? { fill: 0x2a2230, border: 0xd4a54a, strip: entry.quest.category === 'main' ? 0xffd98a : 0x9aa5a6 }
+        : { fill: 0x16131a, border: 0x2e2a32, strip: entry.quest.category === 'main' ? 0x8a6a2a : 0x4a5050 });
+      this.questLogPanel!.add(rowG);
+      const listBg = this.add.rectangle(listX, y, listW, itemH - px(3), 0x000000, 0).setOrigin(0, 0)
         .setInteractive({ useHandCursor: true });
       listBg.on('pointerdown', () => { this.questLogSelectedIndex = i; this.refreshQuestLog(); });
       this.questLogPanel!.add(listBg);
 
-      const tagColor = entry.quest.category === 'main' ? '#c0934a' : '#95a5a6';
+      const tagColor = entry.quest.category === 'main' ? '#e8c77a' : '#a8b4b5';
       const tag = entry.quest.category === 'main' ? t('ui.questLog.mainTag') : t('ui.questLog.sideTag');
-      this.questLogPanel!.add(this.add.text(px(12), y + px(5), tag, {
-        fontSize: fs(12), color: tagColor, fontFamily: FONT, fontStyle: 'bold',
-      }));
+      const tagT = this.add.text(listX + px(10), y + (itemH - px(3)) / 2, tag, {
+        fontSize: fs(11), color: tagColor, fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(0, 0.5);
+      this.questLogPanel!.add(tagT);
 
       // Quest type label for new types
       const questTypeColors: Record<string, string> = {
@@ -3254,48 +3139,42 @@ export class UIScene extends Phaser.Scene {
       const hasTypeTag = ['escort', 'defend', 'investigate', 'craft'].includes(entry.quest.type);
       const typeSuffix = hasTypeTag ? ` [${typeLabel}]` : '';
 
-      const nameColor = this.questLogTab === 'completed' ? '#555' : (isSelected ? '#e0d8cc' : '#aaa');
-      this.questLogPanel!.add(this.add.text(px(36), y + px(5), `${entry.quest.name} Lv.${entry.quest.level}`, {
+      const nameColor = this.questLogTab === 'completed' ? '#7a7268' : (isSelected ? '#fff4e0' : UI_COLORS.textSoft);
+      const nameX = tagT.x + tagT.width + px(6);
+      const nameT = this.add.text(nameX, y + (itemH - px(3)) / 2, `${entry.quest.name} Lv.${entry.quest.level}`, {
         fontSize: fs(12), color: nameColor, fontFamily: FONT,
-      }));
+      }).setOrigin(0, 0.5);
+      this.questLogPanel!.add(nameT);
 
       if (hasTypeTag) {
         const typeColor = questTypeColors[entry.quest.type] ?? '#aaa';
-        const nameWidth = px(36) + this.add.text(0, 0, `${entry.quest.name} Lv.${entry.quest.level}`, {
-          fontSize: fs(12), fontFamily: FONT,
-        }).setVisible(false).width;
-        this.questLogPanel!.add(this.add.text(nameWidth + px(4), y + px(5), `[${typeLabel}]`, {
+        const typeT = this.add.text(listX + listW - px(6), y + (itemH - px(3)) / 2, `[${typeLabel}]`, {
           fontSize: fs(10), color: typeColor, fontFamily: FONT, fontStyle: 'bold',
-        }));
+        }).setOrigin(1, 0.5);
+        this.questLogPanel!.add(typeT);
+        const maxNameW = typeT.x - typeT.width - px(4) - nameX;
+        if (nameT.width > maxNameW) nameT.setScale(Math.max(0.6, maxNameW / nameT.width), 1);
+      } else if (nameT.width > listX + listW - px(8) - nameX) {
+        nameT.setScale(Math.max(0.6, (listX + listW - px(8) - nameX) / nameT.width), 1);
       }
     });
 
     // Pagination
     if (totalPages > 1) {
-      const pageY = listStartY + maxItems * itemH + px(4);
-      if (this.questLogPage > 0) {
-        const prevBtn = this.add.text(px(40), pageY, t('ui.questLog.prevPage'), {
-          fontSize: fs(12), color: '#5dade2', fontFamily: FONT,
-        }).setInteractive({ useHandCursor: true });
-        prevBtn.on('pointerdown', () => { this.questLogPage--; this.questLogSelectedIndex = 0; this.refreshQuestLog(); });
-        this.questLogPanel.add(prevBtn);
-      }
-      this.questLogPanel.add(this.add.text(px(120), pageY, `${this.questLogPage + 1}/${totalPages}`, {
-        fontSize: fs(12), color: '#666', fontFamily: FONT,
-      }));
-      if (this.questLogPage < totalPages - 1) {
-        const nextBtn = this.add.text(px(160), pageY, t('ui.questLog.nextPage'), {
-          fontSize: fs(12), color: '#5dade2', fontFamily: FONT,
-        }).setInteractive({ useHandCursor: true });
-        nextBtn.on('pointerdown', () => { this.questLogPage++; this.questLogSelectedIndex = 0; this.refreshQuestLog(); });
-        this.questLogPanel.add(nextBtn);
-      }
+      const pageY = listStartY + maxItems * itemH + px(16);
+      const pgCx = listX + listW / 2;
+      this.questLogPanel.add(this.makeButton(pgCx - px(70), pageY, px(64), px(24), t('ui.questLog.prevPage'), () => { this.questLogPage--; this.questLogSelectedIndex = 0; this.refreshQuestLog(); }, { disabled: this.questLogPage <= 0, fontSize: 11 }));
+      this.questLogPanel.add(this.add.text(pgCx, pageY, `${this.questLogPage + 1}/${totalPages}`, {
+        fontSize: fs(12), color: UI_COLORS.textSoft, fontFamily: FONT,
+      }).setOrigin(0.5));
+      this.questLogPanel.add(this.makeButton(pgCx + px(70), pageY, px(64), px(24), t('ui.questLog.nextPage'), () => { this.questLogPage++; this.questLogSelectedIndex = 0; this.refreshQuestLog(); }, { disabled: this.questLogPage >= totalPages - 1, fontSize: 11 }));
     }
 
     // No quests message
     if (pageQuests.length === 0) {
-      this.questLogPanel.add(this.add.text(px(120), px(120), this.questLogTab === 'active' ? t('ui.questLog.noActive') : t('ui.questLog.noCompleted'), {
-        fontSize: fs(14), color: '#555', fontFamily: FONT,
+      this.questLogPanel.add(this.add.text(listX + listW / 2, px(140), this.questLogTab === 'active' ? t('ui.questLog.noActive') : t('ui.questLog.noCompleted'), {
+        fontSize: fs(14), color: UI_COLORS.dim, fontFamily: FONT, align: 'center',
+        wordWrap: { width: listW - px(20), useAdvancedWrap: true },
       }).setOrigin(0.5, 0));
       return;
     }
@@ -3307,10 +3186,15 @@ export class UIScene extends Phaser.Scene {
     let dy = listStartY;
 
     // Quest name
-    this.questLogPanel.add(this.add.text(detailX + detailW / 2, dy, selected.quest.name, {
-      fontSize: fs(17), color: '#c0934a', fontFamily: TITLE_FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
-    dy += px(24);
+    const qTitle = this.add.text(detailX + detailW / 2, dy, selected.quest.name, {
+      fontSize: fs(17), color: UI_COLORS.parchment, fontFamily: TITLE_FONT, fontStyle: 'bold',
+      stroke: '#120b04', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5, 0);
+    if (qTitle.width > detailW - px(10)) qTitle.setScale((detailW - px(10)) / qTitle.width);
+    this.questLogPanel.add(qTitle);
+    dy += px(26);
+    this.questLogPanel.add(addDivider(this, detailX + detailW / 2, dy, detailW - px(40)));
+    dy += px(10);
 
     // Category + Level + Zone
     const catText = selected.quest.category === 'main' ? t('ui.questLog.mainQuest') : t('ui.questLog.sideQuest');
@@ -3323,11 +3207,12 @@ export class UIScene extends Phaser.Scene {
     }));
     dy += px(20);
 
-    // Description
-    this.questLogPanel.add(this.add.text(detailX + px(5), dy, getQuestDesc(selected.quest.id, selected.quest.description), {
-      fontSize: fs(13), color: '#bbb', fontFamily: FONT, wordWrap: { width: detailW - px(20), useAdvancedWrap: true },
-    }));
-    dy += px(40);
+    // Description (measured so long descriptions push the rest down instead of overlapping)
+    const qDesc = this.add.text(detailX + px(5), dy, getQuestDesc(selected.quest.id, selected.quest.description), {
+      fontSize: fs(13), color: '#c8bca8', fontFamily: FONT, lineSpacing: px(2), wordWrap: { width: detailW - px(20), useAdvancedWrap: true },
+    });
+    this.questLogPanel.add(qDesc);
+    dy += Math.max(px(40), qDesc.height + px(10));
 
     // Type-specific summary for investigate, defend, craft
     if (selected.quest.type === 'investigate') {
@@ -3360,10 +3245,8 @@ export class UIScene extends Phaser.Scene {
     }
 
     // Objectives header
-    this.questLogPanel.add(this.add.text(detailX + px(5), dy, t('ui.questLog.objectives'), {
-      fontSize: fs(13), color: '#e0d8cc', fontFamily: FONT, fontStyle: 'bold',
-    }));
-    dy += px(18);
+    this.questLogPanel.add(addSectionHeader(this, detailX + px(5), dy + px(7), detailW - px(10), btnLabel(t('ui.questLog.objectives')).replace(/[:：]\s*$/, '')));
+    dy += px(20);
 
     // Objectives with progress
     for (let i = 0; i < selected.quest.objectives.length; i++) {
@@ -3378,22 +3261,19 @@ export class UIScene extends Phaser.Scene {
       }));
 
       // Progress bar
-      const barX = detailX + px(15), barY = dy + px(14), barW = detailW - px(40), barH = px(4);
-      this.questLogPanel.add(this.add.rectangle(barX, barY, barW, barH, 0x1a1a2e).setOrigin(0, 0).setStrokeStyle(Math.round(1 * DPR), 0x333344));
-      const fillW = Math.min(barW * (cur / obj.required), barW);
-      if (fillW > 0) {
-        this.questLogPanel.add(this.add.rectangle(barX, barY, fillW, barH, done ? 0x27ae60 : 0x2471a3).setOrigin(0, 0));
-      }
+      const barX = detailX + px(15), barY = dy + px(16), barW = detailW - px(40), barH = px(6);
+      const objBar = this.add.graphics();
+      drawWell(objBar, barX, barY, barW, barH, px(3));
+      drawBarFill(objBar, barX + 1, barY + 1, Math.round(Math.min((barW - 2) * (cur / obj.required), barW - 2)), barH - 2, done ? 0x5cc04a : 0x3a7fd0);
+      this.questLogPanel.add(objBar);
       dy += px(24);
     }
 
     dy += px(8);
 
     // Rewards
-    this.questLogPanel.add(this.add.text(detailX + px(5), dy, t('ui.questLog.rewards'), {
-      fontSize: fs(13), color: '#e0d8cc', fontFamily: FONT, fontStyle: 'bold',
-    }));
-    dy += px(18);
+    this.questLogPanel.add(addSectionHeader(this, detailX + px(5), dy + px(7), detailW - px(10), btnLabel(t('ui.questLog.rewards')).replace(/[:：]\s*$/, '')));
+    dy += px(20);
 
     const rewardParts: string[] = [];
     rewardParts.push(t('ui.questLog.rewardExp', { exp: String(selected.quest.rewards.exp) }));
@@ -3402,7 +3282,8 @@ export class UIScene extends Phaser.Scene {
       rewardParts.push(t('ui.questLog.rewardItems', { count: String(selected.quest.rewards.items.length) }));
     }
     this.questLogPanel.add(this.add.text(detailX + px(15), dy, rewardParts.join('  |  '), {
-      fontSize: fs(12), color: '#f1c40f', fontFamily: FONT,
+      fontSize: fs(12), color: '#ffd35a', fontFamily: FONT, fontStyle: 'bold',
+      wordWrap: { width: detailW - px(30), useAdvancedWrap: true },
     }));
     dy += px(20);
 
@@ -3423,13 +3304,11 @@ export class UIScene extends Phaser.Scene {
   private showItemTooltip(item: ItemInstance, screenX: number, screenY: number): void {
     this.hideItemTooltip();
     const base = getItemBase(item.baseId);
-    const tipW = px(220);
-    const lines: { text: string; color: string; size: number }[] = [];
-    const qualityColors: Record<string, string> = {
-      normal: '#cccccc', magic: '#5dade2', rare: '#f1c40f', legendary: '#e67e22', set: '#2ecc71',
-    };
-    lines.push({ text: getItemDisplayName(item), color: qualityColors[item.quality] ?? '#ccc', size: 14 });
-    lines.push({ text: `${getQualityLabel(item.quality)} Lv.${item.level}`, color: '#888', size: 12 });
+    const tipW = px(256);
+    const pad = px(PANEL_STYLE.tooltip.padding) + px(2);
+    const qColor = QUALITY_TEXT[item.quality as keyof typeof QUALITY_TEXT] ?? QUALITY_TEXT.normal;
+    type Line = { text: string; color: string; size: number; bold?: boolean } | { divider: true };
+    const lines: Line[] = [];
     if (base) {
       let typeLine = t(`ui.tooltip.type.${base.type}`);
       if (typeLine === `ui.tooltip.type.${base.type}`) typeLine = base.type;
@@ -3437,31 +3316,32 @@ export class UIScene extends Phaser.Scene {
         const slotLabel = t(`ui.tooltip.slot.${base.slot}`);
         typeLine += ` (${slotLabel !== `ui.tooltip.slot.${base.slot}` ? slotLabel : base.slot})`;
       }
-      lines.push({ text: typeLine, color: '#777', size: 12 });
-      // Base item description
-      if (base.description) {
-        lines.push({ text: getItemBaseDesc(item.baseId), color: '#8a8a7a', size: 11 });
-      }
+      lines.push({ text: typeLine, color: '#a89c8a', size: 11 });
       if ('baseDamage' in base) {
         const wb = base as WeaponBase;
-        lines.push({ text: t('ui.tooltip.damage', { min: String(wb.baseDamage[0]), max: String(wb.baseDamage[1]) }), color: '#e0d8cc', size: 12 });
+        lines.push({ text: t('ui.tooltip.damage', { min: String(wb.baseDamage[0]), max: String(wb.baseDamage[1]) }), color: '#f4ecdc', size: 13, bold: true });
       }
       if ('baseDefense' in base) {
         const ab = base as ArmorBase;
-        lines.push({ text: t('ui.tooltip.defense', { value: String(ab.baseDefense) }), color: '#e0d8cc', size: 12 });
+        lines.push({ text: t('ui.tooltip.defense', { value: String(ab.baseDefense) }), color: '#f4ecdc', size: 13, bold: true });
+      }
+      // Base item description
+      if (base.description) {
+        lines.push({ text: getItemBaseDesc(item.baseId), color: '#8f8676', size: 11 });
       }
     }
+    const statLines: Line[] = [];
     if (!item.identified && item.quality !== 'normal') {
-      lines.push({ text: t('ui.tooltip.unidentified'), color: '#e74c3c', size: 12 });
+      statLines.push({ text: t('ui.tooltip.unidentified'), color: '#ff6b5a', size: 12 });
     } else {
       for (const affix of item.affixes) {
         const label = getStatLabel(affix.stat);
         const suffix = isStatPercent(affix.stat) ? '%' : '';
-        lines.push({ text: `+${affix.value}${suffix} ${label}`, color: '#5dade2', size: 12 });
+        statLines.push({ text: `+${affix.value}${suffix} ${label}`, color: '#7fb0ff', size: 12 });
       }
     }
     if (item.legendaryEffect) {
-      lines.push({ text: item.legendaryEffect, color: '#e67e22', size: 12 });
+      statLines.push({ text: item.legendaryEffect, color: QUALITY_TEXT.legendary, size: 12 });
     }
     // Gem socketing effect (when hovering a gem item)
     if (base?.type === 'gem') {
@@ -3469,16 +3349,16 @@ export class UIScene extends Phaser.Scene {
       if (gemInfo) {
         const label = getStatLabel(gemInfo.stat);
         const suffix = isStatPercent(gemInfo.stat) ? '%' : '';
-        lines.push({ text: t('ui.tooltip.gemEffect', { value: String(gemInfo.value), suffix, label }), color: '#8be9fd', size: 12 });
+        statLines.push({ text: t('ui.tooltip.gemEffect', { value: String(gemInfo.value), suffix, label }), color: '#8be9fd', size: 12 });
       }
     }
     // Socketed gems
     if (item.sockets && item.sockets.length > 0) {
-      lines.push({ text: t('ui.tooltip.gemHeader'), color: '#8be9fd', size: 11 });
+      statLines.push({ text: t('ui.tooltip.gemHeader'), color: '#8be9fd', size: 11 });
       for (const gem of item.sockets) {
         const label = getStatLabel(gem.stat);
         const suffix = isStatPercent(gem.stat) ? '%' : '';
-        lines.push({ text: `◆ ${gem.name}: +${gem.value}${suffix} ${label}`, color: '#8be9fd', size: 11 });
+        statLines.push({ text: `◆ ${gem.name}: +${gem.value}${suffix} ${label}`, color: '#8be9fd', size: 11 });
       }
     }
     // Socket count (if base has sockets)
@@ -3486,9 +3366,10 @@ export class UIScene extends Phaser.Scene {
       const maxSock = (base as WeaponBase | ArmorBase).sockets;
       if (maxSock > 0) {
         const filled = item.sockets?.length ?? 0;
-        lines.push({ text: t('ui.tooltip.socketCount', { filled: String(filled), max: String(maxSock) }), color: '#666', size: 11 });
+        statLines.push({ text: t('ui.tooltip.socketCount', { filled: String(filled), max: String(maxSock) }), color: '#8a8290', size: 11 });
       }
     }
+    if (statLines.length > 0) { lines.push({ divider: true }); lines.push(...statLines); }
 
     // ── Set bonus section ──
     if (item.setId) {
@@ -3497,50 +3378,71 @@ export class UIScene extends Phaser.Scene {
       if (setDef) {
         const equippedCount = this.zone.inventorySystem.getEquippedSetPieceCount(setDef.id);
         const totalPieces = setDef.pieces.length;
-        lines.push({ text: '', color: '#333', size: 4 }); // spacer
-        lines.push({ text: `${getSetName(setDef.id, setDef.name)} (${equippedCount}/${totalPieces})`, color: '#2ecc71', size: 13 });
+        lines.push({ divider: true });
+        lines.push({ text: `${getSetName(setDef.id, setDef.name)} (${equippedCount}/${totalPieces})`, color: QUALITY_TEXT.set, size: 13, bold: true });
         for (let bi = 0; bi < setDef.bonuses.length; bi++) {
           const bonus = setDef.bonuses[bi];
           const isActive = equippedCount >= bonus.count;
           const prefix = isActive ? '✓' : '○';
-          const color = isActive ? '#2ecc71' : '#555550';
+          const color = isActive ? QUALITY_TEXT.set : '#5d5a52';
           lines.push({ text: `${prefix} (${bonus.count}) ${getSetBonusDesc(setDef.id, bi, bonus.description)}`, color, size: 11 });
         }
       }
     }
 
-    if (base) {
-      lines.push({ text: t('ui.tooltip.sellPrice', { price: String(base.sellPrice) }), color: '#f1c40f', size: 12 });
+    const container = this.add.container(0, 0).setDepth(PANEL_STYLE.depth.tooltip);
+    // Header: framed icon + name + quality/level
+    const iconSize = px(40);
+    const head = this.createItemSlot(pad + iconSize / 2, pad + iconSize / 2, iconSize, item, { interactive: false });
+    container.add(head.objects);
+    const textX = pad + iconSize + px(10);
+    const nameText = this.add.text(textX, pad - px(1), getItemDisplayName(item), {
+      fontSize: fs(14), color: qColor, fontFamily: PANEL_STYLE.tooltip.font, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+      wordWrap: { width: tipW - textX - pad, useAdvancedWrap: true },
+    });
+    container.add(nameText);
+    const qualText = this.add.text(textX, nameText.y + nameText.height + px(2), `${getQualityLabel(item.quality)}  ·  Lv.${item.level}`, {
+      fontSize: fs(11), color: '#9a8f80', fontFamily: PANEL_STYLE.tooltip.font,
+    });
+    container.add(qualText);
+    let ly = Math.max(pad + iconSize, qualText.y + qualText.height) + px(8);
+    container.add(addDivider(this, tipW / 2, ly, tipW - pad * 2));
+    ly += px(8);
+    for (const line of lines) {
+      if ('divider' in line) {
+        container.add(addDivider(this, tipW / 2, ly + px(3), tipW - pad * 4, false));
+        ly += px(9);
+        continue;
+      }
+      const txt = this.add.text(pad, ly, line.text, {
+        fontSize: fs(line.size), color: line.color, fontFamily: PANEL_STYLE.tooltip.font,
+        fontStyle: line.bold ? 'bold' : 'normal', lineSpacing: px(PANEL_STYLE.tooltip.lineSpacing),
+        wordWrap: { width: tipW - pad * 2, useAdvancedWrap: true },
+      });
+      container.add(txt);
+      ly += txt.height + px(3);
     }
-
-    let tipH = px(12);
-    for (const line of lines) tipH += px(line.size) + px(4);
-    tipH += px(8);
+    if (base) {
+      ly += px(4);
+      container.add(this.add.image(pad + px(7), ly + px(8), coinTexture(this, px(12))));
+      container.add(this.add.text(pad + px(17), ly + px(8), t('ui.tooltip.sellPrice', { price: String(base.sellPrice) }), {
+        fontSize: fs(11), color: '#ffd35a', fontFamily: PANEL_STYLE.tooltip.font,
+      }).setOrigin(0, 0.5));
+      ly += px(16);
+    }
+    const tipH = Math.ceil((ly + pad) / px(4)) * px(4);
 
     // Clamp to screen
-    let tx = screenX + px(12);
+    let tx = screenX + px(16);
     let ty = screenY - px(10);
-    if (tx + tipW > W) tx = screenX - tipW - px(12);
-    if (ty + tipH > H) ty = H - tipH - px(4);
+    if (tx + tipW > W - px(4)) tx = screenX - tipW - px(16);
+    if (ty + tipH > H - px(4)) ty = H - tipH - px(4);
     if (ty < px(4)) ty = px(4);
     if (tx < px(4)) tx = px(4);
-
-    const qualityBorderColors: Record<string, number> = {
-      normal: 0x555555, magic: 0x5dade2, rare: 0xf1c40f, legendary: 0xe67e22, set: 0x2ecc71,
-    };
-    const borderColor = qualityBorderColors[item.quality] ?? PANEL_STYLE.tooltip.border.color;
-    this.tooltipContainer = this.add.container(tx, ty).setDepth(PANEL_STYLE.depth.tooltip);
-    this.tooltipContainer.add(
-      this.add.rectangle(0, 0, tipW, tipH, PANEL_STYLE.tooltip.bg.color, PANEL_STYLE.tooltip.bg.alpha)
-        .setOrigin(0, 0).setStrokeStyle(PANEL_STYLE.tooltip.border.width * DPR, borderColor)
-    );
-    let ly = px(6);
-    for (const line of lines) {
-      this.tooltipContainer.add(this.add.text(px(8), ly, line.text, {
-        fontSize: fs(line.size), color: line.color, fontFamily: PANEL_STYLE.tooltip.font, wordWrap: { width: tipW - px(16), useAdvancedWrap: true },
-      }));
-      ly += px(line.size) + px(4);
-    }
+    container.setPosition(tx, ty);
+    container.addAt(addFrame(this, 0, 0, tipW, tipH, { variant: 'tooltip', accent: qualityNum(item.quality) }), 0);
+    this.tooltipContainer = container;
   }
 
   private hideItemTooltip(): void {
@@ -3581,27 +3483,21 @@ export class UIScene extends Phaser.Scene {
       }
     }});
 
-    const popW = px(80), btnH = px(24);
-    const popH = actions.length * btnH + px(8);
+    const popW = px(108), btnH = px(28), padY = px(9);
+    const popH = actions.length * btnH + padY * 2;
     let popX = screenX;
     let popY = screenY;
     if (popX + popW > W) popX = W - popW - px(4);
     if (popY + popH > H) popY = H - popH - px(4);
 
     this.contextPopup = this.add.container(popX, popY).setDepth(PANEL_STYLE.depth.contextMenu);
-    this.contextPopup.add(this.add.rectangle(0, 0, popW, popH, 0x0a0a18, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(1 * DPR), 0x555566));
+    this.contextPopup.add(addFrame(this, 0, 0, popW, popH, { variant: 'tooltip', accent: qualityNum(item.quality) }));
     actions.forEach((action, i) => {
-      const by = px(4) + i * btnH;
-      const btnBg = this.add.rectangle(px(4), by, popW - px(8), btnH - px(2), 0x1a1a2e).setOrigin(0, 0)
-        .setInteractive({ useHandCursor: true });
-      btnBg.on('pointerdown', () => action.callback());
-      btnBg.on('pointerover', () => btnBg.setFillStyle(0x2a2a3e));
-      btnBg.on('pointerout', () => btnBg.setFillStyle(0x1a1a2e));
-      this.contextPopup!.add(btnBg);
+      const by = padY + i * btnH + btnH / 2;
       const isDiscard = action.label === t('ui.context.discard');
-      this.contextPopup!.add(this.add.text(popW / 2, by + btnH / 2 - px(1), action.label, {
-        fontSize: fs(13), color: isDiscard ? '#e74c3c' : '#e0d8cc', fontFamily: FONT,
-      }).setOrigin(0.5));
+      this.contextPopup!.add(this.makeButton(popW / 2, by, popW - px(16), btnH - px(4), action.label, () => action.callback(), {
+        variant: isDiscard ? 'danger' : 'secondary', fontSize: 13,
+      }));
     });
   }
 
@@ -3611,27 +3507,27 @@ export class UIScene extends Phaser.Scene {
 
   private showDiscardConfirm(item: ItemInstance): void {
     this.hideContextPopup();
-    const popW = px(160), popH = px(60);
-    const popX = (W - popW) / 2, popY = (H - popH) / 2;
-    this.contextPopup = this.add.container(popX, popY).setDepth(PANEL_STYLE.depth.confirmDialog);
-    this.contextPopup.add(this.add.rectangle(0, 0, popW, popH, 0x0a0a18, 0.95).setOrigin(0, 0).setStrokeStyle(Math.round(1 * DPR), 0xe74c3c));
-    this.contextPopup.add(this.add.text(popW / 2, px(8), t('ui.context.discardConfirmTitle'), {
-      fontSize: fs(14), color: '#e74c3c', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
-    const yesBtn = this.add.text(popW / 2 - px(30), px(34), t('ui.context.confirmYes'), {
-      fontSize: fs(13), color: '#e74c3c', fontFamily: FONT,
-    }).setInteractive({ useHandCursor: true });
-    yesBtn.on('pointerdown', () => {
+    const popW = px(260);
+    this.contextPopup = this.add.container(0, 0).setDepth(PANEL_STYLE.depth.confirmDialog);
+    const title = this.add.text(popW / 2, px(20), t('ui.context.discardConfirmTitle'), {
+      fontSize: fs(14), color: '#ff8a72', fontFamily: FONT, fontStyle: 'bold', align: 'center',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+      wordWrap: { width: popW - px(36), useAdvancedWrap: true },
+    }).setOrigin(0.5, 0);
+    const nameT = this.add.text(popW / 2, title.y + title.height + px(6), getItemDisplayName(item), {
+      fontSize: fs(12), color: qualityHex(item.quality), fontFamily: FONT, align: 'center',
+      wordWrap: { width: popW - px(36), useAdvancedWrap: true },
+    }).setOrigin(0.5, 0);
+    const popH = nameT.y + nameT.height + px(52);
+    this.contextPopup.setPosition((W - popW) / 2, (H - popH) / 2);
+    this.contextPopup.add(addFrame(this, 0, 0, popW, popH, { variant: 'tooltip', accent: 0xc0503c }));
+    this.contextPopup.add([title, nameT]);
+    this.contextPopup.add(this.makeButton(popW / 2 - px(56), popH - px(26), px(92), px(28), btnLabel(t('ui.context.confirmYes')), () => {
       this.zone.inventorySystem.discardItem(item.uid);
       this.hideContextPopup();
       this.refreshInventory();
-    });
-    this.contextPopup.add(yesBtn);
-    const noBtn = this.add.text(popW / 2 + px(30), px(34), t('ui.context.confirmNo'), {
-      fontSize: fs(13), color: '#27ae60', fontFamily: FONT,
-    }).setInteractive({ useHandCursor: true });
-    noBtn.on('pointerdown', () => this.hideContextPopup());
-    this.contextPopup.add(noBtn);
+    }, { variant: 'danger', fontSize: 13 }));
+    this.contextPopup.add(this.makeButton(popW / 2 + px(56), popH - px(26), px(92), px(28), btnLabel(t('ui.context.confirmNo')), () => this.hideContextPopup(), { fontSize: 13 }));
   }
 
   // --- Socket Panel ---
@@ -3651,153 +3547,134 @@ export class UIScene extends Phaser.Scene {
     this.socketPanelSlot = equipSlot;
     audioManager.playSFX('click');
 
-    const pw = px(360), ph = px(380), panelX = (W - pw) / 2, panelY = px(60);
+    const pw = px(400), ph = px(420), panelX = (W - pw) / 2, panelY = px(50);
     this.socketPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.subPanel);
-    this.animatePanelOpen(this.socketPanel);
+    const panel = this.socketPanel;
+    this.animatePanelOpen(panel);
 
     // Background
-    this.socketPanel.add(this.createPanelBg(pw, ph));
+    panel.add(this.createPanelBg(pw, ph));
 
     // Title
-    this.socketPanel.add(this.createPanelTitle(pw, t('ui.socket.title')));
+    panel.add(this.createPanelTitle(pw, t('ui.socket.title')));
 
     // Close button
-    this.socketPanel.add(this.createPanelCloseBtn(pw, () => {
+    panel.add(this.createPanelCloseBtn(pw, () => {
       if (this.socketPanel) { this.socketPanel.destroy(); this.socketPanel = null; this.socketPanelSlot = null; }
     }));
 
-    // Item name
-    const qualityColors: Record<string, string> = {
-      normal: '#cccccc', magic: '#5dade2', rare: '#f1c40f', legendary: '#e67e22', set: '#2ecc71',
-    };
-    this.socketPanel.add(this.add.text(pw / 2, px(36), equipItem.name, {
-      fontSize: fs(15), color: qualityColors[equipItem.quality] ?? '#ccc', fontFamily: FONT, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    // Item header: framed icon + name
+    const head = this.createItemSlot(px(40), px(66), px(40), equipItem, { interactive: false });
+    panel.add(head.objects);
+    panel.add(this.add.text(px(68), px(58), getItemDisplayName(equipItem), {
+      fontSize: fs(15), color: qualityHex(equipItem.quality), fontFamily: FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+    }).setOrigin(0, 0.5));
+    panel.add(this.add.text(px(68), px(78), t('ui.socket.slotCount', { filled: String(equipItem.sockets.length), max: String(maxSockets) }), {
+      fontSize: fs(12), color: UI_COLORS.textSoft, fontFamily: FONT,
+    }).setOrigin(0, 0.5));
 
     // Socket slots display
-    const sockStartY = px(62);
-    const sockSize = px(48);
-    const sockGap = px(12);
+    const sockStartY = px(96);
+    const sockSize = px(52);
+    const sockGap = px(26);
     const totalW = maxSockets * sockSize + (maxSockets - 1) * sockGap;
     const sockStartX = (pw - totalW) / 2;
-
-    this.socketPanel.add(this.add.text(pw / 2, sockStartY, t('ui.socket.slotCount', { filled: String(equipItem.sockets.length), max: String(maxSockets) }), {
-      fontSize: fs(13), color: '#aaa', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
-
-    const GEM_COLORS: Record<string, number> = {
-      g_ruby: 0xcc3333, g_sapphire: 0x3366cc, g_emerald: 0x33aa33, g_topaz: 0xccaa33, g_diamond: 0xaaddff,
-    };
-    const GEM_LABELS: Record<string, string> = {
-      g_ruby: t('ui.socket.gemLabel.g_ruby'), g_sapphire: t('ui.socket.gemLabel.g_sapphire'), g_emerald: t('ui.socket.gemLabel.g_emerald'), g_topaz: t('ui.socket.gemLabel.g_topaz'), g_diamond: t('ui.socket.gemLabel.g_diamond'),
-    };
+    const sockWell = this.add.graphics();
+    drawWell(sockWell, px(18), sockStartY, pw - px(36), sockSize + px(66), px(6));
+    panel.add(sockWell);
 
     for (let i = 0; i < maxSockets; i++) {
       const sx = sockStartX + i * (sockSize + sockGap);
-      const sy = sockStartY + px(22);
+      const sy = sockStartY + px(10);
       const filled = i < equipItem.sockets.length;
       const gem = filled ? equipItem.sockets[i] : null;
+      const cx = sx + sockSize / 2, cy = sy + sockSize / 2;
 
-      // Slot background
-      const gemIconKey = gem ? gem.gemId.replace(/_\d+$/, '') : '';
-      const slotColor = gem ? (GEM_COLORS[gemIconKey] ?? 0x333366) : 0x1a1a2e;
-      const slotBg = this.add.rectangle(sx + sockSize / 2, sy + sockSize / 2, sockSize, sockSize, slotColor, gem ? 0.7 : 0.4)
-        .setStrokeStyle(Math.round(2 * DPR), gem ? 0x8be9fd : 0x444466);
-      this.socketPanel!.add(slotBg);
+      // Round iron socket
+      const sockG = this.add.graphics();
+      sockG.fillStyle(0x000000, 0.6);
+      sockG.fillCircle(cx, cy + 1.5, sockSize / 2);
+      sockG.fillStyle(0x3a3540, 1);
+      sockG.fillCircle(cx, cy, sockSize / 2);
+      sockG.fillStyle(0x070609, 1);
+      sockG.fillCircle(cx, cy, sockSize / 2 - px(5));
+      sockG.lineStyle(1.5, gem ? 0x8be9fd : 0xd4a54a, gem ? 0.9 : 0.6);
+      sockG.strokeCircle(cx, cy, sockSize / 2 - px(5));
+      sockG.lineStyle(1, 0x000000, 1);
+      sockG.strokeCircle(cx, cy, sockSize / 2);
+      panel.add(sockG);
 
       if (gem) {
-        // Gem icon text
-        const gemLabel = GEM_LABELS[gemIconKey] ?? '◆';
-        this.socketPanel!.add(this.add.text(sx + sockSize / 2, sy + sockSize / 2 - px(4), gemLabel, {
-          fontSize: fs(18), color: '#fff', fontFamily: FONT, fontStyle: 'bold',
-        }).setOrigin(0.5));
-
+        const gemIcon = getItemBase(gem.gemId)?.icon ?? gem.gemId.replace(/_\d+$/, '');
+        panel.add(this.add.image(cx, cy, ensureItemIcon(this, gemIcon)).setDisplaySize(sockSize - px(14), sockSize - px(14)));
         // Tier indicator
-        this.socketPanel!.add(this.add.text(sx + sockSize / 2, sy + sockSize / 2 + px(12), `T${gem.tier}`, {
-          fontSize: fs(10), color: '#aaa', fontFamily: FONT,
-        }).setOrigin(0.5));
+        panel.add(this.add.text(cx + sockSize / 2 - px(4), cy + sockSize / 2 - px(4), `T${gem.tier}`, {
+          fontSize: fs(10), color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
+          stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+        }).setOrigin(1, 1));
 
         // Gem name below slot
         const gemDisp = STAT_DISPLAY[gem.stat];
         const gemStatLabel = gemDisp ? gemDisp.label : gem.stat;
         const gemSuffix = gemDisp?.isPercent ? '%' : '';
-        this.socketPanel!.add(this.add.text(sx + sockSize / 2, sy + sockSize + px(4), `${gem.name} (+${gem.value}${gemSuffix}${gemStatLabel})`, {
-          fontSize: fs(10), color: '#8be9fd', fontFamily: FONT,
-        }).setOrigin(0.5, 0));
+        const gemT = this.add.text(cx, sy + sockSize + px(6), `${gem.name} (+${gem.value}${gemSuffix}${gemStatLabel})`, {
+          fontSize: fs(10), color: '#8be9fd', fontFamily: FONT, align: 'center',
+        }).setOrigin(0.5, 0);
+        const maxW = sockSize + sockGap - px(4);
+        if (gemT.width > maxW) gemT.setScale(maxW / gemT.width, 1);
+        panel.add(gemT);
 
         // Remove button
-        const removeBtn = this.add.text(sx + sockSize / 2, sy + sockSize + px(18), t('ui.socket.remove'), {
-          fontSize: fs(11), color: '#e74c3c', fontFamily: FONT,
-        }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
         const socketIndex = i;
-        removeBtn.on('pointerdown', () => {
+        panel.add(this.makeButton(cx, sy + sockSize + px(34), px(56), px(22), t('ui.socket.remove'), () => {
           this.zone.inventorySystem.unsocketGem(equipSlot, socketIndex);
           this.zone.invalidateEquipStats();
           this.refreshSocketPanel(equipSlot);
           this.refreshInventory();
-        });
-        this.socketPanel!.add(removeBtn);
+        }, { variant: 'danger', fontSize: 11 }));
       } else {
         // Empty slot indicator
-        this.socketPanel!.add(this.add.text(sx + sockSize / 2, sy + sockSize / 2, '◇', {
-          fontSize: fs(20), color: '#333366', fontFamily: FONT,
+        panel.add(this.add.text(cx, cy, '◇', {
+          fontSize: fs(20), color: '#5a5060', fontFamily: FONT,
         }).setOrigin(0.5));
 
         // Empty label below
-        this.socketPanel!.add(this.add.text(sx + sockSize / 2, sy + sockSize + px(4), t('ui.socket.emptySlot'), {
-          fontSize: fs(10), color: '#555', fontFamily: FONT,
+        panel.add(this.add.text(cx, sy + sockSize + px(6), t('ui.socket.emptySlot'), {
+          fontSize: fs(10), color: UI_COLORS.dim, fontFamily: FONT,
         }).setOrigin(0.5, 0));
       }
     }
 
-    // Divider
-    const divY = sockStartY + px(22) + sockSize + px(40);
-    this.socketPanel.add(this.add.rectangle(pw / 2, divY, pw - px(20), Math.round(1 * DPR), 0x333344));
-
-    // Available gems from inventory
-    this.socketPanel.add(this.add.text(pw / 2, divY + px(8), t('ui.socket.gemsInBag'), {
-      fontSize: fs(14), color: '#c0934a', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
+    // Divider + available gems from inventory
+    const divY = sockStartY + sockSize + px(80);
+    panel.add(addSectionHeader(this, px(18), divY, pw - px(36), t('ui.socket.gemsInBag')));
 
     const gemsInInventory = this.zone.inventorySystem.inventory.filter(item => {
       const b = getItemBase(item.baseId);
       return b && b.type === 'gem';
     });
 
-    const gemGridY = divY + px(30);
+    const gemGridY = divY + px(14);
     const gemSlotSize = px(40);
-    const gemGap = px(6);
+    const gemGap = px(12);
     const gemCols = 7;
     const hasEmptySlots = equipItem.sockets.length < maxSockets;
+    const gridW = gemCols * gemSlotSize + (gemCols - 1) * gemGap;
+    const gridX = (pw - gridW) / 2;
 
     if (gemsInInventory.length === 0) {
-      this.socketPanel.add(this.add.text(pw / 2, gemGridY + px(20), t('ui.socket.noGems'), {
-        fontSize: fs(13), color: '#555', fontFamily: FONT,
+      panel.add(this.add.text(pw / 2, gemGridY + px(26), t('ui.socket.noGems'), {
+        fontSize: fs(13), color: UI_COLORS.dim, fontFamily: FONT,
       }).setOrigin(0.5));
     } else {
       gemsInInventory.forEach((gemItem, i) => {
-        const gx = px(14) + (i % gemCols) * (gemSlotSize + gemGap);
-        const gy = gemGridY + Math.floor(i / gemCols) * (gemSlotSize + gemGap + px(2));
-
-        const gemIconKey = gemItem.baseId.replace(/_\d+$/, '');
-        const gemColor = GEM_COLORS[gemIconKey] ?? 0x333366;
-        const gemBg = this.add.rectangle(gx + gemSlotSize / 2, gy + gemSlotSize / 2, gemSlotSize, gemSlotSize, gemColor, 0.5)
-          .setStrokeStyle(Math.round(1 * DPR), hasEmptySlots ? 0x8be9fd : 0x444466)
-          .setInteractive({ useHandCursor: hasEmptySlots });
-        this.socketPanel!.add(gemBg);
-
-        // Gem label
-        const label = GEM_LABELS[gemIconKey] ?? '◆';
-        this.socketPanel!.add(this.add.text(gx + gemSlotSize / 2, gy + gemSlotSize / 2 - px(2), label, {
-          fontSize: fs(14), color: '#fff', fontFamily: FONT, fontStyle: 'bold',
-        }).setOrigin(0.5));
-
-        // Quantity
-        if (gemItem.quantity > 1) {
-          this.socketPanel!.add(this.add.text(gx + gemSlotSize - px(2), gy + gemSlotSize - px(2), `${gemItem.quantity}`, {
-            fontSize: fs(10), color: '#ffd700', fontFamily: FONT,
-          }).setOrigin(1, 1));
-        }
+        const gx = gridX + (i % gemCols) * (gemSlotSize + gemGap);
+        const gy = gemGridY + Math.floor(i / gemCols) * (gemSlotSize + px(18));
+        if (gy + gemSlotSize > ph - px(52)) return;
+        const { slot: gemBg, objects } = this.createItemSlot(gx + gemSlotSize / 2, gy + gemSlotSize / 2, gemSlotSize, gemItem, { interactive: true });
+        panel.add(objects);
+        if (!hasEmptySlots) gemBg.setAlpha(0.6);
 
         // Stat label below gem slot
         const gInfo = GEM_STAT_MAP[gemItem.baseId];
@@ -3805,9 +3682,11 @@ export class UIScene extends Phaser.Scene {
           const gDisp = STAT_DISPLAY[gInfo.stat];
           const gLabel = gDisp ? gDisp.label : gInfo.stat;
           const gSuffix = gDisp?.isPercent ? '%' : '';
-          this.socketPanel!.add(this.add.text(gx + gemSlotSize / 2, gy + gemSlotSize + px(1), `+${gInfo.value}${gSuffix}${gLabel}`, {
+          const gT = this.add.text(gx + gemSlotSize / 2, gy + gemSlotSize + px(2), `+${gInfo.value}${gSuffix}${gLabel}`, {
             fontSize: fs(9), color: '#8be9fd', fontFamily: FONT,
-          }).setOrigin(0.5, 0));
+          }).setOrigin(0.5, 0);
+          if (gT.width > gemSlotSize + gemGap - px(2)) gT.setScale((gemSlotSize + gemGap - px(2)) / gT.width, 1);
+          panel.add(gT);
         }
 
         // Tooltip on hover
@@ -3832,16 +3711,12 @@ export class UIScene extends Phaser.Scene {
     }
 
     // Unequip button at bottom
-    const unequipBtn = this.add.text(pw / 2, ph - px(22), t('ui.socket.unequip'), {
-      fontSize: fs(13), color: '#e74c3c', fontFamily: FONT,
-    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    unequipBtn.on('pointerdown', () => {
+    panel.add(this.makeButton(pw / 2, ph - px(28), px(140), px(30), t('ui.socket.unequip'), () => {
       if (this.socketPanel) { this.socketPanel.destroy(); this.socketPanel = null; this.socketPanelSlot = null; }
       this.zone.inventorySystem.unequip(equipSlot);
       this.zone.invalidateEquipStats();
       this.refreshInventory();
-    });
-    this.socketPanel.add(unequipBtn);
+    }, { variant: 'danger', fontSize: 13 }));
   }
 
   /** Refresh the socket panel for the current slot. */
@@ -3867,18 +3742,19 @@ export class UIScene extends Phaser.Scene {
   }
 
   private buildCompanionPanel(): void {
-    const pw = px(500), ph = px(520), panelX = (W - pw) / 2, panelY = px(10);
+    const pw = px(520), ph = px(540), panelX = (W - pw) / 2, panelY = px(10);
     this.companionPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
-    this.animatePanelOpen(this.companionPanel);
+    const panel = this.companionPanel;
+    this.animatePanelOpen(panel);
 
     // Background
-    this.companionPanel.add(this.createPanelBg(pw, ph));
+    panel.add(this.createPanelBg(pw, ph));
 
     // Title
-    this.companionPanel.add(this.createPanelTitle(pw, t('ui.companion.title')));
+    panel.add(this.createPanelTitle(pw, t('ui.companion.title')));
 
     // Close button
-    this.companionPanel.add(this.createPanelCloseBtn(pw, () => this.toggleCompanion()));
+    panel.add(this.createPanelCloseBtn(pw, () => this.toggleCompanion()));
 
     const mercSys = this.zone?.mercenarySystem;
     if (!mercSys) return;
@@ -3886,32 +3762,36 @@ export class UIScene extends Phaser.Scene {
     const merc = mercSys.getMercenary();
 
     // Mercenary section header
-    this.companionPanel.add(this.add.text(px(14), px(36), t('ui.companion.mercHeader'), {
-      fontSize: fs(13), color: '#c0934a', fontFamily: FONT,
-    }));
+    panel.add(addSectionHeader(this, px(18), px(54), pw - px(36), t('ui.companion.mercHeader')));
+    const mercCard = this.add.graphics();
+    drawCard(mercCard, px(18), px(66), pw - px(36), px(36), merc
+      ? { border: merc.alive ? 0x4a4250 : 0xc0503c, strip: merc.alive ? 0x6fd35a : 0xc0503c }
+      : { border: 0x2e2a32 });
+    panel.add(mercCard);
 
     if (!merc) {
       // No mercenary — compact hire hint
-      this.companionPanel.add(this.add.text(px(14), px(56), t('ui.companion.noMerc'), {
-        fontSize: fs(12), color: '#888', fontFamily: FONT,
-      }));
+      panel.add(this.add.text(px(30), px(84), t('ui.companion.noMerc'), {
+        fontSize: fs(12), color: UI_COLORS.muted, fontFamily: FONT,
+        wordWrap: { width: pw - px(60), useAdvancedWrap: true },
+      }).setOrigin(0, 0.5));
     } else {
       // Has mercenary — show compact info
       const def = MERCENARY_DEFS[merc.type];
       const statusText = merc.alive
         ? t('ui.companion.mercStatus', { name: getMercenaryName(merc.type, def.name), type: getMercenaryTypeLabel(merc.type), level: String(merc.level), hp: String(Math.ceil(merc.hp)), maxHp: String(merc.maxHp) })
         : t('ui.companion.mercDead', { name: getMercenaryName(merc.type, def.name), type: getMercenaryTypeLabel(merc.type), level: String(merc.level) });
-      this.companionPanel.add(this.add.text(px(14), px(56), statusText, {
-        fontSize: fs(12), color: merc.alive ? '#e0d8cc' : '#e74c3c', fontFamily: FONT,
-      }));
+      panel.add(this.add.text(px(30), px(84), statusText, {
+        fontSize: fs(12), color: merc.alive ? UI_COLORS.text : '#ff8a72', fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(0, 0.5));
     }
 
     // Pet section
     this.renderPetSection(pw, ph);
 
     // Footer
-    this.companionPanel.add(this.add.text(pw / 2, ph - px(14), t('ui.companion.footer'), {
-      fontSize: fs(10), color: '#3a3a4a', fontFamily: FONT,
+    panel.add(this.add.text(pw / 2, ph - px(18), t('ui.companion.footer'), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
 
@@ -4128,33 +4008,17 @@ export class UIScene extends Phaser.Scene {
 
     // Weapon slot
     const weaponItem = merc.equipment.weapon;
-    const weaponBg = this.add.rectangle(px(14) + slotSize / 2, sy + slotSize / 2, slotSize, slotSize,
-      weaponItem ? this.getQualityColorNum(weaponItem.quality) : 0x222233)
-      .setStrokeStyle(Math.round(1 * DPR), roleColor, 0.5);
-    this.companionPanel.add(weaponBg);
+    this.companionPanel.add(this.createItemSlot(px(14) + slotSize / 2, sy + slotSize / 2, slotSize, weaponItem ?? null, { interactive: false }).objects);
     this.companionPanel.add(this.add.text(px(14) + slotSize / 2, sy + slotSize + px(2), t('ui.companion.weapon'), {
-      fontSize: fs(10), color: '#777788', fontFamily: FONT,
+      fontSize: fs(10), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5, 0));
-    if (weaponItem) {
-      this.companionPanel.add(this.add.text(px(14) + slotSize / 2, sy + slotSize / 2, weaponItem.name.charAt(0), {
-        fontSize: fs(14), color: '#fff', fontFamily: FONT, fontStyle: 'bold',
-      }).setOrigin(0.5));
-    }
 
     // Armor slot
     const armorItem = merc.equipment.armor;
-    const armorBg = this.add.rectangle(px(14) + slotSize * 2, sy + slotSize / 2, slotSize, slotSize,
-      armorItem ? this.getQualityColorNum(armorItem.quality) : 0x222233)
-      .setStrokeStyle(Math.round(1 * DPR), roleColor, 0.5);
-    this.companionPanel.add(armorBg);
+    this.companionPanel.add(this.createItemSlot(px(14) + slotSize * 2, sy + slotSize / 2, slotSize, armorItem ?? null, { interactive: false }).objects);
     this.companionPanel.add(this.add.text(px(14) + slotSize * 2, sy + slotSize + px(2), t('ui.companion.armor'), {
-      fontSize: fs(10), color: '#777788', fontFamily: FONT,
+      fontSize: fs(10), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5, 0));
-    if (armorItem) {
-      this.companionPanel.add(this.add.text(px(14) + slotSize * 2, sy + slotSize / 2, armorItem.name.charAt(0), {
-        fontSize: fs(14), color: '#fff', fontFamily: FONT, fontStyle: 'bold',
-      }).setOrigin(0.5));
-    }
 
     sy += slotSize + px(22);
 
@@ -4254,107 +4118,102 @@ export class UIScene extends Phaser.Scene {
     if (!this.companionPanel) return;
     const hs = this.zone?.homesteadSystem;
     if (!hs) return;
+    const panel = this.companionPanel;
 
-    const petStartY = px(82);
-    const maxSlots = hs.getMaxPetSlots();
+    const petStartY = px(122);
 
-    this.companionPanel.add(this.add.text(px(14), petStartY, t('ui.companion.petHeader', { count: String(hs.pets.length) }), {
-      fontSize: fs(13), color: '#c0934a', fontFamily: FONT,
-    }));
+    panel.add(addSectionHeader(this, px(18), petStartY, pw - px(36), t('ui.companion.petHeader', { count: String(hs.pets.length) })));
 
     if (hs.pets.length === 0) {
-      this.companionPanel.add(this.add.text(px(14), petStartY + px(22), t('ui.companion.noPets'), {
-        fontSize: fs(11), color: '#888', fontFamily: FONT,
-        wordWrap: { width: pw - px(28), useAdvancedWrap: true },
+      panel.add(this.add.text(px(18), petStartY + px(16), t('ui.companion.noPets'), {
+        fontSize: fs(12), color: UI_COLORS.muted, fontFamily: FONT,
+        wordWrap: { width: pw - px(36), useAdvancedWrap: true },
       }));
       return;
     }
 
-    const cardH = px(52);
-    const startY = petStartY + px(22);
+    const cardH = px(58);
+    const startY = petStartY + px(14);
     const allPets = hs.getAllPets();
+    const cardX = px(18), cardW = pw - px(36);
 
     const rarityColors: Record<string, string> = {
-      common: '#88cc88', rare: '#5599ff', epic: '#cc66ff',
+      common: '#a8d8a0', rare: '#7fb0ff', epic: '#d08cff',
     };
 
     hs.pets.forEach((pet, i) => {
       const def = allPets.find(p => p.id === pet.petId);
       if (!def) return;
-      const cy = startY + i * (cardH + px(4));
-      if (cy + cardH > ph - px(30)) return; // Prevent overflow
+      const cy = startY + i * (cardH + px(6));
+      if (cy + cardH > ph - px(34)) return; // Prevent overflow
 
       const isActive = hs.activePet === pet.petId;
-      const rarityColor = rarityColors[def.rarity] ?? '#888';
-      const cardBgColor = isActive ? 0x1a2a1a : 0x111122;
-      const borderColor = isActive ? 0x27ae60 : 0x333344;
+      const rarityColor = rarityColors[def.rarity] ?? '#aaa';
 
       // Card background
-      const cardBg = this.add.rectangle(pw / 2, cy + cardH / 2, pw - px(24), cardH, cardBgColor, 0.95)
-        .setStrokeStyle(Math.round(1 * DPR), borderColor, 0.8)
+      const cardG = this.add.graphics();
+      drawCard(cardG, cardX, cy, cardW, cardH, isActive
+        ? { fill: 0x172414, border: 0x6fd35a, glow: 0x6fd35a, strip: 0x6fd35a }
+        : { border: 0x3f3845 });
+      panel.add(cardG);
+      const cardBg = this.add.rectangle(cardX, cy, cardW - px(120), cardH, 0x000000, 0).setOrigin(0, 0)
         .setInteractive({ useHandCursor: true });
-      this.companionPanel!.add(cardBg);
+      panel.add(cardBg);
 
       // Active indicator
       if (isActive) {
-        this.companionPanel!.add(this.add.text(px(16), cy + px(4), '★', {
-          fontSize: fs(14), color: '#f1c40f', fontFamily: FONT,
-        }));
+        panel.add(this.add.text(cardX + px(14), cy + px(14), '★', {
+          fontSize: fs(15), color: '#ffd98a', fontFamily: FONT,
+          stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+        }).setOrigin(0.5));
       }
 
       // Pet name with evolution
       const displayName = hs.getPetDisplayName(pet);
-      this.companionPanel!.add(this.add.text(px(32), cy + px(4), `${displayName} Lv.${pet.level}`, {
+      panel.add(this.add.text(cardX + px(28), cy + px(6), `${displayName} Lv.${pet.level}`, {
         fontSize: fs(13), color: rarityColor, fontFamily: FONT, fontStyle: 'bold',
       }));
 
       // Description
-      this.companionPanel!.add(this.add.text(px(32), cy + px(20), getPetDesc(pet.petId, def.description), {
-        fontSize: fs(10), color: '#888', fontFamily: FONT,
-        wordWrap: { width: pw - px(200), useAdvancedWrap: true },
+      panel.add(this.add.text(cardX + px(28), cy + px(23), getPetDesc(pet.petId, def.description), {
+        fontSize: fs(10), color: UI_COLORS.muted, fontFamily: FONT,
+        wordWrap: { width: cardW - px(170), useAdvancedWrap: true }, maxLines: 1,
       }));
 
       // EXP bar
       const expNeeded = pet.level * 20;
       const expRatio = pet.level >= def.maxLevel ? 1 : pet.exp / expNeeded;
-      const barW = px(80), barH = px(6);
-      const barX = px(32), barY = cy + px(36);
-      this.companionPanel!.add(
-        this.add.rectangle(barX + barW / 2, barY + barH / 2, barW, barH, 0x1a1a1a)
-          .setStrokeStyle(Math.round(1 * DPR), 0x333333)
-      );
-      if (expRatio > 0) {
-        this.companionPanel!.add(
-          this.add.rectangle(barX, barY, Math.max(1, barW * expRatio), barH, 0x8e44ad).setOrigin(0, 0)
-        );
-      }
+      const barW = px(110), barH = px(7);
+      const barX = cardX + px(28), barY = cy + px(42);
+      const barG = this.add.graphics();
+      drawWell(barG, barX, barY, barW, barH, px(3));
+      drawBarFill(barG, barX + 1, barY + 1, Math.round((barW - 2) * Math.max(0, Math.min(1, expRatio))), barH - 2, 0x9b4fd0);
+      panel.add(barG);
       const expText = pet.level >= def.maxLevel ? 'MAX' : `${pet.exp}/${expNeeded}`;
-      this.companionPanel!.add(this.add.text(barX + barW + px(4), barY - px(1), expText, {
-        fontSize: fs(9), color: '#b08cce', fontFamily: FONT,
-      }));
+      panel.add(this.add.text(barX + barW + px(6), barY + barH / 2, expText, {
+        fontSize: fs(10), color: '#d0b0f0', fontFamily: FONT,
+      }).setOrigin(0, 0.5));
 
       // Evolution badge
       if (pet.evolved > 0) {
         const evoBadge = pet.evolved >= 2 ? t('ui.companion.evoSupreme') : t('ui.companion.evoAwakened');
-        this.companionPanel!.add(this.add.text(barX + barW + px(44), barY - px(1), `[${evoBadge}]`, {
-          fontSize: fs(9), color: '#f1c40f', fontFamily: FONT,
-        }));
+        panel.add(this.add.text(barX + barW + px(60), barY + barH / 2, `[${evoBadge}]`, {
+          fontSize: fs(10), color: '#ffd98a', fontFamily: FONT, fontStyle: 'bold',
+        }).setOrigin(0, 0.5));
       }
 
       // Bonus stat display
       const evoMult = hs.getEvolutionMultiplier(pet);
       const baseBonus = def.bonusValue + def.bonusPerLevel * pet.level;
       const bonusVal = Math.floor(baseBonus * evoMult);
-      this.companionPanel!.add(this.add.text(pw - px(110), cy + px(4), `+${bonusVal} ${def.bonusStat}`, {
-        fontSize: fs(11), color: '#aaa', fontFamily: FONT,
-      }));
+      panel.add(this.add.text(cardX + cardW - px(12), cy + px(8), `+${bonusVal} ${getPetStatLabel(def.bonusStat)}`, {
+        fontSize: fs(11), color: UI_COLORS.textSoft, fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(1, 0));
 
-      // Activate button
+      // Activate / deactivate button
+      const btnY = cy + px(40);
       if (!isActive) {
-        const actBtn = this.add.text(pw - px(60), cy + px(22), t('ui.companion.activate'), {
-          fontSize: fs(12), color: '#27ae60', fontFamily: FONT,
-        }).setInteractive({ useHandCursor: true });
-        actBtn.on('pointerdown', () => {
+        panel.add(this.makeButton(cardX + cardW - px(44), btnY, px(72), px(24), t('ui.companion.activate'), () => {
           hs.setActivePet(pet.petId);
           // Respawn pet sprite
           const zoneScene = this.zone as any;
@@ -4362,13 +4221,9 @@ export class UIScene extends Phaser.Scene {
           this.companionPanel?.destroy();
           this.companionPanel = null;
           this.buildCompanionPanel();
-        });
-        this.companionPanel!.add(actBtn);
+        }, { variant: 'success', fontSize: 11 }));
       } else {
-        const deactBtn = this.add.text(pw - px(60), cy + px(22), t('ui.companion.deactivate'), {
-          fontSize: fs(12), color: '#888', fontFamily: FONT,
-        }).setInteractive({ useHandCursor: true });
-        deactBtn.on('pointerdown', () => {
+        panel.add(this.makeButton(cardX + cardW - px(44), btnY, px(72), px(24), t('ui.companion.deactivate'), () => {
           hs.setActivePet(null);
           // Remove pet sprite
           const zoneScene = this.zone as any;
@@ -4376,44 +4231,36 @@ export class UIScene extends Phaser.Scene {
           this.companionPanel?.destroy();
           this.companionPanel = null;
           this.buildCompanionPanel();
-        });
-        this.companionPanel!.add(deactBtn);
+        }, { fontSize: 11 }));
       }
 
       // Feed button
-      const feedBtn = this.add.text(pw - px(110), cy + px(36), t('ui.companion.feed'), {
-        fontSize: fs(11), color: pet.level >= def.maxLevel ? '#555' : '#5dade2', fontFamily: FONT,
-      });
-      if (pet.level < def.maxLevel) {
-        feedBtn.setInteractive({ useHandCursor: true });
-        feedBtn.on('pointerdown', () => {
-          // Check if player has the feed item
-          const inv = this.zone?.inventorySystem;
-          if (!inv) return;
-          const feedItemIdx = inv.inventory.findIndex(it => it.baseId === def.feedItem);
-          if (feedItemIdx === -1) {
-            EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.companion.feedNeeded', { item: def.feedItem }), type: 'system' });
-            return;
-          }
-          // Consume feed item
-          const feedItem = inv.inventory[feedItemIdx];
-          if (feedItem.quantity > 1) {
-            feedItem.quantity--;
-          } else {
-            inv.inventory.splice(feedItemIdx, 1);
-          }
-          hs.feedPet(pet.petId);
-          // Respawn pet sprite to update name if evolved
-          const zoneScene = this.zone as any;
-          if (zoneScene?.spawnPetSprite && hs.activePet === pet.petId) {
-            zoneScene.spawnPetSprite();
-          }
-          this.companionPanel?.destroy();
-          this.companionPanel = null;
-          this.buildCompanionPanel();
-        });
-      }
-      this.companionPanel!.add(feedBtn);
+      panel.add(this.makeButton(cardX + cardW - px(122), btnY, px(72), px(24), t('ui.companion.feed'), () => {
+        // Check if player has the feed item
+        const inv = this.zone?.inventorySystem;
+        if (!inv) return;
+        const feedItemIdx = inv.inventory.findIndex(it => it.baseId === def.feedItem);
+        if (feedItemIdx === -1) {
+          EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.companion.feedNeeded', { item: def.feedItem }), type: 'system' });
+          return;
+        }
+        // Consume feed item
+        const feedItem = inv.inventory[feedItemIdx];
+        if (feedItem.quantity > 1) {
+          feedItem.quantity--;
+        } else {
+          inv.inventory.splice(feedItemIdx, 1);
+        }
+        hs.feedPet(pet.petId);
+        // Respawn pet sprite to update name if evolved
+        const zoneScene = this.zone as any;
+        if (zoneScene?.spawnPetSprite && hs.activePet === pet.petId) {
+          zoneScene.spawnPetSprite();
+        }
+        this.companionPanel?.destroy();
+        this.companionPanel = null;
+        this.buildCompanionPanel();
+      }, { variant: 'secondary', fontSize: 11, color: '#9fd4ff', disabled: pet.level >= def.maxLevel }));
 
       // Click card to toggle active
       cardBg.on('pointerdown', () => {
@@ -4436,26 +4283,30 @@ export class UIScene extends Phaser.Scene {
   // --- Achievement Unlock Toast ---
   private handleAchievementUnlocked(data: { achievement: import('../data/types').AchievementDefinition }): void {
     const ach = data.achievement;
-    const toastW = px(320), toastH = px(60);
+    const toastW = px(360), toastH = px(62);
     const toastX = (W - toastW) / 2, toastY = px(60);
     const toast = this.add.container(toastX, toastY).setDepth(PANEL_STYLE.depth.toast).setAlpha(0);
 
-    // Background with gold border
-    const bg = this.add.graphics();
-    bg.fillStyle(0x1a1a0a, 0.95);
-    bg.fillRoundedRect(0, 0, toastW, toastH, px(6));
-    bg.lineStyle(Math.round(2 * DPR), 0xf1c40f, 0.9);
-    bg.strokeRoundedRect(0, 0, toastW, toastH, px(6));
-    toast.add(bg);
+    // Framed plate with gold accent
+    toast.add(addFrame(this, 0, 0, toastW, toastH, { variant: 'tooltip', accent: 0xffd98a }));
+    const medal = this.add.graphics();
+    medal.fillStyle(0x000000, 0.6);
+    medal.fillCircle(px(28), toastH / 2 + 1, px(16));
+    medal.fillStyle(0x5a3a10, 1);
+    medal.fillCircle(px(28), toastH / 2, px(15));
+    medal.lineStyle(2, 0xffd98a, 1);
+    medal.strokeCircle(px(28), toastH / 2, px(15));
+    toast.add(medal);
 
     // Gold star icon
-    toast.add(this.add.text(px(14), toastH / 2, '★', {
-      fontSize: fs(22), color: '#f1c40f', fontFamily: FONT,
-    }).setOrigin(0, 0.5));
+    toast.add(this.add.text(px(28), toastH / 2, '★', {
+      fontSize: fs(20), color: '#ffd98a', fontFamily: FONT,
+    }).setOrigin(0.5, 0.5));
 
     // Achievement name and description
-    toast.add(this.add.text(px(42), px(10), t('ui.achievement.toastUnlock', { name: ach.name }), {
-      fontSize: fs(14), color: '#f1c40f', fontFamily: FONT, fontStyle: 'bold',
+    toast.add(this.add.text(px(52), px(10), t('ui.achievement.toastUnlock', { name: ach.name }), {
+      fontSize: fs(14), color: '#ffd98a', fontFamily: FONT, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }));
     const rewardParts: string[] = [];
     if (ach.reward) {
@@ -4465,9 +4316,9 @@ export class UIScene extends Phaser.Scene {
     }
     if (ach.title) rewardParts.push(t('ui.achievement.titleReward', { title: ach.title }));
     const subText = rewardParts.length > 0 ? `${ach.description}  |  ${rewardParts.join('  ')}` : ach.description;
-    toast.add(this.add.text(px(42), px(32), subText, {
-      fontSize: fs(11), color: '#e0d8cc', fontFamily: FONT,
-      wordWrap: { width: toastW - px(56), useAdvancedWrap: true },
+    toast.add(this.add.text(px(52), px(32), subText, {
+      fontSize: fs(11), color: UI_COLORS.text, fontFamily: FONT,
+      wordWrap: { width: toastW - px(66), useAdvancedWrap: true }, maxLines: 2,
     }));
 
     // Animate in
@@ -4498,74 +4349,72 @@ export class UIScene extends Phaser.Scene {
     this.closeAllPanels();
     audioManager.playSFX('click');
 
-    const pw = px(520), ph = px(500), panelX = (W - pw) / 2, panelY = px(10);
+    const pw = px(560), ph = px(540), panelX = (W - pw) / 2, panelY = px(10);
     this.achievementPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
-    this.animatePanelOpen(this.achievementPanel);
+    const panel = this.achievementPanel;
+    this.animatePanelOpen(panel);
 
     // Background
-    this.achievementPanel.add(this.createPanelBg(pw, ph));
+    panel.add(this.createPanelBg(pw, ph));
 
     // Title
-    this.achievementPanel.add(this.createPanelTitle(pw, t('ui.achievement.title')));
+    panel.add(this.createPanelTitle(pw, t('ui.achievement.title')));
 
     // Close button
-    this.achievementPanel.add(this.createPanelCloseBtn(pw, () => this.toggleAchievement()));
+    panel.add(this.createPanelCloseBtn(pw, () => this.toggleAchievement()));
 
     // Unlocked title display
     const achSystem = this.zone?.achievementSystem;
     if (!achSystem) return;
     const achievements = achSystem.getAll();
     const unlockedTitles = achievements.filter(a => a.isUnlocked && a.title).map(a => a.title!);
-    if (unlockedTitles.length > 0) {
-      this.achievementPanel.add(this.add.text(pw / 2, px(34), t('ui.achievement.currentTitle', { title: unlockedTitles[unlockedTitles.length - 1] }), {
-        fontSize: fs(12), color: '#f1c40f', fontFamily: FONT,
-      }).setOrigin(0.5, 0));
-    }
-
-    // Summary line
     const unlocked = achievements.filter(a => a.isUnlocked).length;
-    this.achievementPanel.add(this.add.text(pw / 2, px(48), t('ui.achievement.unlocked', { count: String(unlocked), total: String(achievements.length) }), {
-      fontSize: fs(12), color: '#888', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
+
+    // Summary line: progress bar + count (+ current title)
+    const sumY = px(54);
+    const sumBarW = px(200);
+    const sumG = this.add.graphics();
+    drawWell(sumG, px(20), sumY - px(4), sumBarW, px(8), px(4));
+    drawBarFill(sumG, px(21), sumY - px(3), Math.round((sumBarW - 2) * (achievements.length ? unlocked / achievements.length : 0)), px(6), 0xd4a54a);
+    panel.add(sumG);
+    panel.add(this.add.text(px(20) + sumBarW + px(10), sumY, t('ui.achievement.unlocked', { count: String(unlocked), total: String(achievements.length) }), {
+      fontSize: fs(12), color: UI_COLORS.textSoft, fontFamily: FONT, fontStyle: 'bold',
+    }).setOrigin(0, 0.5));
+    if (unlockedTitles.length > 0) {
+      panel.add(this.add.text(pw - px(20), sumY, t('ui.achievement.currentTitle', { title: unlockedTitles[unlockedTitles.length - 1] }), {
+        fontSize: fs(12), color: UI_COLORS.goldBright, fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(1, 0.5));
+    }
 
     // Achievement list
-    const listTop = px(68);
+    const listTop = px(72);
     const rowH = px(56);
-    const listH = ph - listTop - px(22);
+    const listH = ph - listTop - px(30);
     const maxVisible = Math.floor(listH / rowH);
+    const listC = this.add.container(0, 0);
+    panel.add(listC);
 
-    // Create scrollable content
-    for (let i = 0; i < Math.min(achievements.length, maxVisible); i++) {
-      const ach = achievements[i];
-      const ry = listTop + i * rowH;
-      this.renderAchievementRow(ach, px(10), ry, pw - px(20), rowH - px(4));
-    }
+    let scrollOffset = 0;
+    const rebuildList = () => {
+      listC.removeAll(true);
+      const start = scrollOffset;
+      const end = Math.min(start + maxVisible, achievements.length);
+      for (let i = start; i < end; i++) {
+        const ach = achievements[i];
+        const ry = listTop + (i - start) * rowH;
+        this.renderAchievementRow(ach, px(18), ry, pw - px(36), rowH - px(6), listC);
+      }
+      // Scroll indicator
+      if (achievements.length > maxVisible) {
+        listC.add(this.add.text(pw - px(20), ph - px(18), `${scrollOffset + 1}-${end}/${achievements.length}`, {
+          fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
+        }).setOrigin(1, 0.5));
+      }
+    };
+    rebuildList();
 
     // Scroll support if more than visible
     if (achievements.length > maxVisible) {
-      let scrollOffset = 0;
-      const rebuildList = () => {
-        // Remove old list items (keep bg, title, close, summary)
-        const keepCount = 6 + (unlockedTitles.length > 0 ? 1 : 0);
-        while (this.achievementPanel && this.achievementPanel.list.length > keepCount) {
-          const child = this.achievementPanel.list[this.achievementPanel.list.length - 1];
-          if (child && 'destroy' in child) (child as Phaser.GameObjects.GameObject).destroy();
-          this.achievementPanel.remove(child);
-        }
-        const start = scrollOffset;
-        const end = Math.min(start + maxVisible, achievements.length);
-        for (let i = start; i < end; i++) {
-          const ach = achievements[i];
-          const ry = listTop + (i - start) * rowH;
-          this.renderAchievementRow(ach, px(10), ry, pw - px(20), rowH - px(4));
-        }
-        // Scroll indicator
-        if (this.achievementPanel) {
-          this.achievementPanel.add(this.add.text(pw - px(14), ph - px(16), `${scrollOffset + 1}-${end}/${achievements.length}`, {
-            fontSize: fs(10), color: '#555', fontFamily: FONT,
-          }).setOrigin(1, 1));
-        }
-      };
       // Mouse wheel scroll — store handler ref for cleanup
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const achWheelHandler = (_pointer: Phaser.Input.Pointer, _gx: number[], _gy: number[], _gz: number[], _gw: number, _gh: number, dy: number) => {
@@ -4576,8 +4425,8 @@ export class UIScene extends Phaser.Scene {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.input.on('wheel', achWheelHandler as any);
       // Cleanup on panel destroy
-      const originalDestroy = this.achievementPanel.destroy.bind(this.achievementPanel);
-      this.achievementPanel.destroy = (...args: Parameters<typeof originalDestroy>) => {
+      const originalDestroy = panel.destroy.bind(panel);
+      panel.destroy = (...args: Parameters<typeof originalDestroy>) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.input.off('wheel', achWheelHandler as any);
         return originalDestroy(...args);
@@ -4585,89 +4434,73 @@ export class UIScene extends Phaser.Scene {
     }
 
     // Footer
-    this.achievementPanel.add(this.add.text(pw / 2, ph - px(14), t('ui.achievement.footer'), {
-      fontSize: fs(10), color: '#3a3a4a', fontFamily: FONT,
+    panel.add(this.add.text(pw / 2, ph - px(18), t('ui.achievement.footer'), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
 
   private renderAchievementRow(
     ach: import('../data/types').AchievementDefinition & { current: number; isUnlocked: boolean },
-    x: number, y: number, w: number, h: number
+    x: number, y: number, w: number, h: number,
+    target: Phaser.GameObjects.Container,
   ): void {
-    if (!this.achievementPanel) return;
     const isUnlocked = ach.isUnlocked;
 
     // Row background
     const rowBg = this.add.graphics();
-    const bgColor = isUnlocked ? 0x1a1a0a : 0x0c0c18;
-    const borderColor = isUnlocked ? 0xc0934a : 0x2a2a3e;
-    const borderAlpha = isUnlocked ? 0.8 : 0.4;
-    rowBg.fillStyle(bgColor, 0.9);
-    rowBg.fillRoundedRect(x, y, w, h, px(4));
-    rowBg.lineStyle(Math.round(1.5 * DPR), borderColor, borderAlpha);
-    rowBg.strokeRoundedRect(x, y, w, h, px(4));
-    // Unlocked glow
-    if (isUnlocked) {
-      rowBg.lineStyle(Math.round(1 * DPR), 0xf1c40f, 0.15);
-      rowBg.strokeRoundedRect(x - px(1), y - px(1), w + px(2), h + px(2), px(5));
-    }
-    this.achievementPanel.add(rowBg);
+    drawCard(rowBg, x, y, w, h, isUnlocked
+      ? { fill: 0x241d12, border: 0xd4a54a, strip: 0xffd98a }
+      : { fill: 0x141216, border: 0x2e2a32 });
+    target.add(rowBg);
 
-    // Icon area
-    const iconSize = px(36);
-    const iconX = x + px(6);
-    const iconY = y + (h - iconSize) / 2;
+    // Icon area: medal
+    const iconSize = px(38);
+    const iconCx = x + px(12) + iconSize / 2;
+    const iconCy = y + h / 2;
     const iconGfx = this.add.graphics();
-    iconGfx.fillStyle(isUnlocked ? 0x2a2a0a : 0x080810, 0.9);
-    iconGfx.fillRoundedRect(iconX, iconY, iconSize, iconSize, px(3));
-    iconGfx.lineStyle(Math.round(1 * DPR), isUnlocked ? 0xf1c40f : 0x333344, 0.6);
-    iconGfx.strokeRoundedRect(iconX, iconY, iconSize, iconSize, px(3));
-    this.achievementPanel.add(iconGfx);
+    iconGfx.fillStyle(0x000000, 0.6);
+    iconGfx.fillCircle(iconCx, iconCy + 1.5, iconSize / 2);
+    iconGfx.fillStyle(isUnlocked ? 0x5a3a10 : 0x1a171d, 1);
+    iconGfx.fillCircle(iconCx, iconCy, iconSize / 2);
+    iconGfx.lineStyle(2, isUnlocked ? 0xffd98a : 0x3f3845, 1);
+    iconGfx.strokeCircle(iconCx, iconCy, iconSize / 2 - 1);
+    target.add(iconGfx);
 
     // Star icon (gold for unlocked, grey for locked)
-    const starColor = isUnlocked ? '#f1c40f' : '#444455';
-    this.achievementPanel.add(this.add.text(iconX + iconSize / 2, iconY + iconSize / 2, isUnlocked ? '★' : '☆', {
-      fontSize: fs(18), color: starColor, fontFamily: FONT,
+    target.add(this.add.text(iconCx, iconCy, isUnlocked ? '★' : '☆', {
+      fontSize: fs(19), color: isUnlocked ? '#ffd98a' : '#5a5060', fontFamily: FONT,
     }).setOrigin(0.5));
 
     // Text area
-    const textX = iconX + iconSize + px(8);
-    const textAreaW = w - iconSize - px(20);
+    const textX = x + px(12) + iconSize + px(12);
+    const rightW = px(110);
+    const textAreaW = w - (textX - x) - rightW - px(10);
 
     // Name
-    const nameColor = isUnlocked ? '#f1c40f' : '#777788';
-    this.achievementPanel.add(this.add.text(textX, y + px(4), ach.name, {
-      fontSize: fs(13), color: nameColor, fontFamily: FONT, fontStyle: 'bold',
+    target.add(this.add.text(textX, y + px(7), ach.name, {
+      fontSize: fs(13), color: isUnlocked ? UI_COLORS.goldBright : UI_COLORS.textSoft, fontFamily: FONT, fontStyle: 'bold',
     }));
 
     // Description
-    this.achievementPanel.add(this.add.text(textX, y + px(20), ach.description, {
-      fontSize: fs(10), color: isUnlocked ? '#e0d8cc' : '#555566', fontFamily: FONT,
-      wordWrap: { width: textAreaW - px(100), useAdvancedWrap: true },
+    target.add(this.add.text(textX, y + px(25), ach.description, {
+      fontSize: fs(11), color: isUnlocked ? UI_COLORS.text : UI_COLORS.muted, fontFamily: FONT,
+      wordWrap: { width: textAreaW, useAdvancedWrap: true }, maxLines: 2,
     }));
 
     // Progress bar
-    const barW = px(80), barH = px(8);
-    const barX = x + w - barW - px(8);
-    const barY = y + px(8);
+    const barW = px(96), barH = px(8);
+    const barX = x + w - barW - px(12);
+    const barY = y + px(10);
     const progress = Math.min(ach.current / ach.required, 1);
-
     const barGfx = this.add.graphics();
-    barGfx.fillStyle(0x1a1a2e, 1);
-    barGfx.fillRoundedRect(barX, barY, barW, barH, px(2));
-    const fillW = Math.round(progress * barW);
-    if (fillW > 0) {
-      barGfx.fillStyle(isUnlocked ? 0xf1c40f : 0x555577, 0.8);
-      barGfx.fillRoundedRect(barX, barY, fillW, barH, px(2));
-    }
-    barGfx.lineStyle(Math.round(1 * DPR), isUnlocked ? 0xf1c40f : 0x333344, 0.3);
-    barGfx.strokeRoundedRect(barX, barY, barW, barH, px(2));
-    this.achievementPanel.add(barGfx);
+    drawWell(barGfx, barX, barY, barW, barH, px(4));
+    drawBarFill(barGfx, barX + 1, barY + 1, Math.round((barW - 2) * progress), barH - 2, isUnlocked ? 0xd4a54a : 0x6a6280);
+    target.add(barGfx);
 
     // Progress text
     const progText = isUnlocked ? `${ach.required}/${ach.required}` : `${Math.min(ach.current, ach.required)}/${ach.required}`;
-    this.achievementPanel.add(this.add.text(barX + barW / 2, barY + barH + px(2), progText, {
-      fontSize: fs(9), color: isUnlocked ? '#f1c40f' : '#555566', fontFamily: FONT,
+    target.add(this.add.text(barX + barW / 2, barY + barH + px(3), progText, {
+      fontSize: fs(10), color: isUnlocked ? UI_COLORS.goldBright : UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5, 0));
 
     // Reward info
@@ -4679,10 +4512,11 @@ export class UIScene extends Phaser.Scene {
     }
     if (ach.title) rewardParts.push(t('ui.achievement.titleReward', { title: ach.title }));
     if (rewardParts.length > 0) {
-      const rewardColor = isUnlocked ? '#8be9fd' : '#444455';
-      this.achievementPanel.add(this.add.text(barX + barW / 2, barY + barH + px(14), rewardParts.join('  '), {
-        fontSize: fs(9), color: rewardColor, fontFamily: FONT,
-      }).setOrigin(0.5, 0));
+      const rt = this.add.text(barX + barW / 2, barY + barH + px(17), rewardParts.join('  '), {
+        fontSize: fs(10), color: isUnlocked ? '#8be9fd' : '#5a6a70', fontFamily: FONT,
+      }).setOrigin(0.5, 0);
+      if (rt.width > rightW) rt.setScale(rightW / rt.width, 1);
+      target.add(rt);
     }
   }
 
@@ -4695,27 +4529,29 @@ export class UIScene extends Phaser.Scene {
       return;
     }
     this.closeAllPanels();
-    const pw = px(360), ph = px(180), panelX = (W - pw) / 2, panelY = (H - ph) / 2;
+    const pw = px(420), ph = px(170), panelX = (W - pw) / 2, panelY = (H - ph) / 2;
     this.audioPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.audioPanel);
     this.audioPanel.add(this.createPanelBg(pw, ph));
     this.audioPanel.add(this.createPanelTitle(pw, t('ui.audio.title')));
 
     const settings = audioManager.getSettings();
-    const sliderW = px(160), sliderH = px(10), sliderX = px(90), labelX = px(14);
+    const sliderW = px(180), sliderH = px(8), sliderX = px(96), labelX = px(22);
     const hitH = px(28); // tall hit area for easy clicking
 
     const makeSlider = (y: number, label: string, initial: number, muted: boolean,
       onVolume: (v: number) => void, onMute: () => boolean) => {
-      this.audioPanel!.add(this.add.text(labelX, y, label, { fontSize: fs(14), color: '#e0d8cc', fontFamily: FONT }));
-      const track = this.add.rectangle(sliderX, y + px(6), sliderW, sliderH, 0x333344).setOrigin(0, 0.5);
-      const fill = this.add.rectangle(sliderX, y + px(6), sliderW * initial, sliderH, 0xc0934a).setOrigin(0, 0.5);
-      const handle = this.add.circle(sliderX + sliderW * initial, y + px(6), px(7), 0xe0d8cc);
-      const pctText = this.add.text(sliderX + sliderW + px(8), y + px(1), `${Math.round(initial * 100)}%`, {
-        fontSize: fs(12), color: '#aaa', fontFamily: FONT,
-      });
+      const cy = y + px(6);
+      this.audioPanel!.add(this.add.text(labelX, cy, label, { fontSize: fs(14), color: UI_COLORS.text, fontFamily: FONT, fontStyle: 'bold' }).setOrigin(0, 0.5));
+      const track = this.add.graphics();
+      drawWell(track, sliderX - px(1), cy - sliderH / 2 - px(1), sliderW + px(2), sliderH + px(2), px(4));
+      const fill = this.add.rectangle(sliderX, cy, sliderW * initial, sliderH - px(2), 0xd4a54a).setOrigin(0, 0.5);
+      const handle = this.add.circle(sliderX + sliderW * initial, cy, px(8), 0xe8c77a).setStrokeStyle(px(2), 0x3b2507);
+      const pctText = this.add.text(sliderX + sliderW + px(12), cy, `${Math.round(initial * 100)}%`, {
+        fontSize: fs(12), color: UI_COLORS.textSoft, fontFamily: FONT,
+      }).setOrigin(0, 0.5);
       // Invisible hit area covering the full track height
-      const hitArea = this.add.rectangle(sliderX + sliderW / 2, y + px(6), sliderW + px(14), hitH, 0x000000, 0)
+      const hitArea = this.add.rectangle(sliderX + sliderW / 2, cy, sliderW + px(14), hitH, 0x000000, 0)
         .setInteractive({ useHandCursor: true });
       this.audioPanel!.add([track, fill, handle, pctText, hitArea]);
 
@@ -4737,23 +4573,20 @@ export class UIScene extends Phaser.Scene {
       this.audioPanelInputCleanup.push(() => this.input.off('pointerup', pointerUpHandler));
 
       // Mute button
-      const muteBtn = this.add.text(sliderX + sliderW + px(42), y, muted ? t('ui.audio.muted') : t('ui.audio.unmuted'), {
-        fontSize: fs(12), color: muted ? '#c0392b' : '#27ae60', fontFamily: FONT,
-      }).setInteractive({ useHandCursor: true });
-      muteBtn.on('pointerdown', () => {
+      const muteBtn = this.makeButton(pw - px(50), cy, px(64), px(24), muted ? t('ui.audio.muted') : t('ui.audio.unmuted'), () => {
         const nowMuted = onMute();
-        muteBtn.setText(nowMuted ? t('ui.audio.muted') : t('ui.audio.unmuted')).setColor(nowMuted ? '#c0392b' : '#27ae60');
-      });
+        muteBtn.setLabel(btnLabel(nowMuted ? t('ui.audio.muted') : t('ui.audio.unmuted')), nowMuted ? '#ff8a72' : '#a8f090');
+      }, { fontSize: 11, color: muted ? '#ff8a72' : '#a8f090' });
       this.audioPanel!.add(muteBtn);
     };
 
     // BGM slider
-    makeSlider(px(46), t('ui.audio.bgm'), settings.bgmVolume, settings.bgmMuted,
+    makeSlider(px(60), t('ui.audio.bgm'), settings.bgmVolume, settings.bgmMuted,
       (v) => audioManager.setMusicVolume(v),
       () => { audioManager.toggleMusicMute(); return audioManager.getSettings().bgmMuted; });
 
     // SFX slider
-    makeSlider(px(90), t('ui.audio.sfx'), settings.sfxVolume, settings.sfxMuted,
+    makeSlider(px(108), t('ui.audio.sfx'), settings.sfxVolume, settings.sfxMuted,
       (v) => audioManager.setSFXVolume(v),
       () => { audioManager.toggleSFXMute(); return audioManager.getSettings().sfxMuted; });
 
@@ -4772,28 +4605,18 @@ export class UIScene extends Phaser.Scene {
     audioManager.playSFX('click');
 
     // Full-screen dark backdrop
-    this.miniBossDialogueBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.55)
-      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
+    this.miniBossDialogueBackdrop = this.createBackdrop(0.95);
 
     const pw = px(500), ph = px(260);
     const panelX = (W - pw) / 2, panelY = (H - ph) / 2;
     this.miniBossDialoguePanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.animatePanelOpen(this.miniBossDialoguePanel);
 
-    // Background with unified style + red accent border for boss encounter
-    const bg = this.add.rectangle(0, 0, pw, ph, PANEL_STYLE.bg.color, PANEL_STYLE.bg.alpha).setOrigin(0, 0)
-      .setStrokeStyle(Math.round(PANEL_STYLE.border.width * DPR), 0xe74c3c);
-    this.miniBossDialoguePanel.add(bg);
+    // Background with unified style + red accent for boss encounter
+    this.miniBossDialoguePanel.add(this.createPanelBg(pw, ph, px(PANEL_STYLE.header.height), { accent: 0xe0503c, gem: 0xe0503c }));
 
     // Boss name header
-    this.miniBossDialoguePanel.add(this.add.text(pw / 2, px(10), `⚔ ${bossName} ⚔`, {
-      fontSize: fs(PANEL_STYLE.header.fontSize), color: '#e74c3c', fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
-
-    // Separator line
-    this.miniBossDialoguePanel.add(
-      this.add.rectangle(pw / 2, px(42), pw - px(40), Math.round(1 * DPR), 0x660000).setOrigin(0.5, 0)
-    );
+    this.miniBossDialoguePanel.add(this.createPanelTitle(pw, `⚔ ${bossName} ⚔`, '#ff8a72'));
 
     // Collect all dialogue lines from the tree
     const lines: string[] = [];
@@ -4806,28 +4629,23 @@ export class UIScene extends Phaser.Scene {
       nodeId = node.nextNodeId;
     }
 
-    // Display lines with typewriter-style presentation
+    // Display lines (measured, so long lines never overlap)
     let dy = px(52);
     for (const line of lines) {
-      this.miniBossDialoguePanel.add(this.add.text(px(20), dy, line, {
-        fontSize: fs(13), color: '#ddd', fontFamily: FONT,
-        wordWrap: { width: pw - px(40), useAdvancedWrap: true }, lineSpacing: px(3),
-      }));
-      dy += px(50);
+      const lt = this.add.text(px(24), dy, `“${line}”`, {
+        fontSize: fs(14), color: '#f0e0d0', fontFamily: FONT, fontStyle: 'italic',
+        wordWrap: { width: pw - px(48), useAdvancedWrap: true }, lineSpacing: px(3),
+      });
+      this.miniBossDialoguePanel.add(lt);
+      dy += lt.height + px(12);
     }
 
     // Dismiss button
-    const btnY = ph - px(30);
-    const btn = this.add.text(pw / 2, btnY, t('ui.miniBoss.fight'), {
-      fontSize: fs(16), color: '#e74c3c', fontFamily: FONT, fontStyle: 'bold',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    btn.on('pointerover', () => btn.setColor('#ff6666'));
-    btn.on('pointerout', () => btn.setColor('#e74c3c'));
-    btn.on('pointerdown', () => {
+    const btnY = Math.max(ph - px(34), dy + px(20));
+    this.miniBossDialoguePanel.add(this.makeButton(pw / 2, btnY, px(180), px(34), t('ui.miniBoss.fight'), () => {
       this.closeMiniBossDialogue();
       onDismiss();
-    });
-    this.miniBossDialoguePanel.add(btn);
+    }, { variant: 'danger', fontSize: 15, bold: true }));
 
     // Also allow backdrop click to dismiss
     this.miniBossDialogueBackdrop.on('pointerdown', () => {
@@ -4858,8 +4676,7 @@ export class UIScene extends Phaser.Scene {
     audioManager.playSFX('click');
 
     // Semi-transparent backdrop
-    this.loreTextBackdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.4)
-      .setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
+    this.loreTextBackdrop = this.createBackdrop(0.75);
 
     const pw = px(440), ph = px(240);
     const panelX = (W - pw) / 2, panelY = (H - ph) / 2;
@@ -4869,25 +4686,21 @@ export class UIScene extends Phaser.Scene {
     // Background
     this.loreTextPanel.add(this.createPanelBg(pw, ph));
 
-    // Header icon + name
-    this.loreTextPanel.add(this.add.text(pw / 2, px(10), `📜 ${entry.name}`, {
-      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color, fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
-    }).setOrigin(0.5, 0));
+    // Header name
+    this.loreTextPanel.add(this.createPanelTitle(pw, entry.name));
 
     // Zone name
-    this.loreTextPanel.add(this.add.text(pw / 2, px(36), getZoneName(entry.zone), {
-      fontSize: fs(11), color: '#888', fontFamily: FONT,
-    }).setOrigin(0.5, 0));
+    this.loreTextPanel.add(this.add.text(pw / 2, px(50), getZoneName(entry.zone), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT, fontStyle: 'italic',
+    }).setOrigin(0.5, 0.5));
 
-    // Separator
-    this.loreTextPanel.add(
-      this.add.rectangle(pw / 2, px(52), pw - px(40), Math.round(1 * DPR), 0x333344).setOrigin(0.5, 0)
-    );
-
-    // Lore text
-    this.loreTextPanel.add(this.add.text(px(20), px(60), entry.text, {
-      fontSize: fs(12), color: '#ccc', fontFamily: FONT,
-      wordWrap: { width: pw - px(40), useAdvancedWrap: true }, lineSpacing: px(3),
+    // Lore text on a parchment-toned well
+    const loreWell = this.add.graphics();
+    drawWell(loreWell, px(18), px(64), pw - px(36), ph - px(82), px(4), 0x5a4a30);
+    this.loreTextPanel.add(loreWell);
+    this.loreTextPanel.add(this.add.text(px(30), px(74), entry.text, {
+      fontSize: fs(13), color: '#e8dcc0', fontFamily: FONT,
+      wordWrap: { width: pw - px(60), useAdvancedWrap: true }, lineSpacing: px(4),
     }));
 
     // Close button
@@ -4911,116 +4724,162 @@ export class UIScene extends Phaser.Scene {
   private renderLoreLogContent(): void {
     if (!this.questLogPanel || !this.zone) return;
 
-    const pw = px(700);
+    const pw = px(720), ph = px(520);
     const zoneOrder = ['emerald_plains', 'twilight_forest', 'anvil_mountains', 'scorching_desert', 'abyss_rift'];
 
     const collected = this.zone.getLoreCollected();
 
-    let dy = px(58);
+    // Two columns so all five zones fit inside the panel
+    const colW = (pw - px(48)) / 2;
+    const colX = [px(18), px(18) + colW + px(12)];
+    const colY = [px(90), px(90)];
+    const bottom = ph - px(18);
 
-    for (const zoneId of zoneOrder) {
+    zoneOrder.forEach((zoneId) => {
       const zoneLore = LoreByZone[zoneId] ?? [];
-      if (zoneLore.length === 0) continue;
+      if (zoneLore.length === 0) return;
+      const c = colY[0] <= colY[1] ? 0 : 1;
+      const x = colX[c];
+      let dy = colY[c];
+      if (dy > bottom - px(40)) return;
 
       const discoveredCount = zoneLore.filter(l => collected.has(l.id)).length;
       const totalCount = zoneLore.length;
       const zoneName = getZoneName(zoneId);
-      const progressColor = discoveredCount >= totalCount ? '#27ae60' : '#c0934a';
+      const complete = discoveredCount >= totalCount;
+      const progressColor = complete ? '#8ff07a' : UI_COLORS.heading;
 
       // Zone header with progress
-      this.questLogPanel.add(this.add.text(px(20), dy, `${zoneName}  —  ${t('ui.questLog.loreCollected', { count: String(discoveredCount), total: String(totalCount) })}`, {
-        fontSize: fs(15), color: progressColor, fontFamily: TITLE_FONT, fontStyle: 'bold',
+      this.questLogPanel!.add(this.add.text(x, dy, zoneName, {
+        fontSize: fs(14), color: progressColor, fontFamily: TITLE_FONT, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(2 * DPR),
       }));
-      dy += px(24);
+      this.questLogPanel!.add(this.add.text(x + colW, dy + px(2), t('ui.questLog.loreCollected', { count: String(discoveredCount), total: String(totalCount) }), {
+        fontSize: fs(11), color: UI_COLORS.textSoft, fontFamily: FONT,
+      }).setOrigin(1, 0));
+      dy += px(22);
 
       // Progress bar
-      const barX = px(20), barW = pw - px(60), barH = px(5);
-      this.questLogPanel.add(this.add.rectangle(barX, dy, barW, barH, 0x1a1a2e).setOrigin(0, 0)
-        .setStrokeStyle(Math.round(1 * DPR), 0x333344));
-      if (discoveredCount > 0) {
-        const fillW = Math.round(barW * (discoveredCount / totalCount));
-        this.questLogPanel.add(this.add.rectangle(barX, dy, fillW, barH, discoveredCount >= totalCount ? 0x27ae60 : 0xDAA520).setOrigin(0, 0));
-      }
+      const barG = this.add.graphics();
+      drawWell(barG, x, dy, colW, px(6), px(3));
+      drawBarFill(barG, x + 1, dy + 1, Math.round((colW - 2) * (discoveredCount / totalCount)), px(4), complete ? 0x5cc04a : 0xd4a54a);
+      this.questLogPanel!.add(barG);
       dy += px(12);
 
       // Lore entries
       for (const entry of zoneLore) {
+        if (dy > bottom - px(16)) break;
         const found = collected.has(entry.id);
         const icon = found ? '✦' : '?';
         const nameText = found ? entry.name : t('ui.questLog.loreUndiscovered');
-        const color = found ? '#e0d8cc' : '#444';
+        const color = found ? UI_COLORS.text : UI_COLORS.faint;
 
-        this.questLogPanel.add(this.add.text(px(30), dy, `${icon}  ${nameText}`, {
-          fontSize: fs(12), color, fontFamily: FONT,
+        this.questLogPanel!.add(this.add.text(x + px(8), dy, `${icon}  ${nameText}`, {
+          fontSize: fs(12), color, fontFamily: FONT, fontStyle: found ? 'bold' : 'normal',
         }));
 
         if (found) {
           // Show truncated lore text
           const truncText = entry.text.length > 40 ? entry.text.substring(0, 40) + '...' : entry.text;
-          this.questLogPanel.add(this.add.text(px(50), dy + px(16), truncText, {
-            fontSize: fs(10), color: '#777', fontFamily: FONT,
-            wordWrap: { width: pw - px(80), useAdvancedWrap: true },
-          }));
-          dy += px(36);
+          const tt = this.add.text(x + px(24), dy + px(16), truncText, {
+            fontSize: fs(10), color: UI_COLORS.muted, fontFamily: FONT,
+            wordWrap: { width: colW - px(28), useAdvancedWrap: true }, maxLines: 2,
+          });
+          this.questLogPanel!.add(tt);
+          dy += px(18) + tt.height + px(2);
         } else {
-          dy += px(20);
+          dy += px(19);
         }
       }
 
-      dy += px(8);
-    }
+      colY[c] = dy + px(12);
+    });
 
     // No lore message
     if (collected.size === 0) {
-      this.questLogPanel.add(this.add.text(pw / 2, px(120), t('ui.questLog.noLore'), {
-        fontSize: fs(14), color: '#555', fontFamily: FONT,
+      this.questLogPanel.add(this.add.text(pw / 2, ph - px(40), t('ui.questLog.noLore'), {
+        fontSize: fs(13), color: UI_COLORS.dim, fontFamily: FONT,
       }).setOrigin(0.5, 0));
     }
   }
 
-  /** Create a unified panel background rectangle using PANEL_STYLE. */
-  private createPanelBg(pw: number, ph: number): Phaser.GameObjects.Rectangle {
-    return this.add.rectangle(0, 0, pw, ph, PANEL_STYLE.bg.color, PANEL_STYLE.bg.alpha)
-      .setOrigin(0, 0)
-      .setStrokeStyle(Math.round(PANEL_STYLE.border.width * DPR), PANEL_STYLE.border.color);
+  /** Create the unified opaque panel frame (carved iron, gold filigree, header band). */
+  private createPanelBg(pw: number, ph: number, header: number = px(PANEL_STYLE.header.height), opts: { accent?: number; gem?: number } = {}): Phaser.GameObjects.Image {
+    return addFrame(this, 0, 0, pw, ph, { variant: 'panel', header, accent: opts.accent, gem: opts.gem });
   }
 
-  /** Create a unified panel header title using PANEL_STYLE. */
-  private createPanelTitle(pw: number, title: string): Phaser.GameObjects.Text {
-    return this.add.text(pw / 2, px(10), title, {
-      fontSize: fs(PANEL_STYLE.header.fontSize), color: PANEL_STYLE.header.color,
+  /** Create a unified panel header title (centred in the header band, flanked by gold flourishes). */
+  private createPanelTitle(pw: number, title: string, color: string = PANEL_STYLE.header.color): Phaser.GameObjects.Container {
+    const cy = px(PANEL_STYLE.header.height) / 2 + px(1);
+    const c = this.add.container(0, 0);
+    const text = this.add.text(pw / 2, cy, title, {
+      fontSize: fs(PANEL_STYLE.header.fontSize), color,
       fontFamily: PANEL_STYLE.header.font, fontStyle: 'bold',
-    }).setOrigin(0.5, 0);
+      stroke: '#120b04', strokeThickness: Math.round(3 * DPR),
+      shadow: { offsetX: 0, offsetY: 2, color: '#000000', blur: 4, fill: true },
+    }).setOrigin(0.5, 0.5);
+    c.add(addTitleFlourishes(this, pw / 2, cy, text.width));
+    c.add(text);
+    return c;
   }
 
-  /** Create a unified close button at top-right using PANEL_STYLE. */
-  private createPanelCloseBtn(pw: number, onClose: () => void): Phaser.GameObjects.Text {
-    const btn = this.add.text(pw - px(16), px(10), '✕', {
-      fontSize: fs(PANEL_STYLE.close.fontSize), color: PANEL_STYLE.close.color, fontFamily: FONT,
-    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-    btn.on('pointerdown', onClose);
-    btn.on('pointerover', () => btn.setColor(PANEL_STYLE.close.hoverColor));
-    btn.on('pointerout', () => btn.setColor(PANEL_STYLE.close.color));
-    return btn;
+  /** Create a unified close button (iron medallion) at the header's top-right. */
+  private createPanelCloseBtn(pw: number, onClose: () => void): Phaser.GameObjects.Image {
+    return addCloseButton(this, pw - px(22), px(PANEL_STYLE.header.height) / 2 + px(1), onClose);
+  }
+
+  /** Framed button (centre at x, y). */
+  private makeButton(x: number, y: number, w: number, h: number, label: string, onClick: (pointer: Phaser.Input.Pointer) => void, opts: Omit<ButtonOptions, 'onClick'> = {}): UiButton {
+    return addButton(this, x, y, w, h, btnLabel(label), { fontSize: 12, ...opts, onClick });
+  }
+
+  /**
+   * Item slot: quality-framed well + item icon (+ stack count). Returns the
+   * interactive slot image (for hover/click wiring) and all created objects.
+   */
+  private createItemSlot(cx: number, cy: number, size: number, item: ItemInstance | null, opts: { interactive?: boolean; showCount?: boolean } = {}): { slot: Phaser.GameObjects.Image; objects: Phaser.GameObjects.GameObject[] } {
+    const quality = item ? item.quality : null;
+    const slot = addSlot(this, cx, cy, size, quality);
+    const objects: Phaser.GameObjects.GameObject[] = [slot];
+    if (item) {
+      const iconKey = ensureItemIconFor(this, item);
+      const iconSize = size - px(6);
+      objects.push(this.add.image(cx, cy, iconKey).setDisplaySize(iconSize, iconSize));
+      if (opts.showCount !== false && item.quantity > 1) {
+        objects.push(this.add.text(cx + size / 2 - px(3), cy + size / 2 - px(2), `${item.quantity}`, {
+          fontSize: fs(11), color: '#ffe7a0', fontFamily: FONT, fontStyle: 'bold',
+          stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+        }).setOrigin(1, 1));
+      }
+    }
+    if (opts.interactive !== false) {
+      slot.setInteractive({ useHandCursor: true });
+      wireSlotHover(this, slot, size, quality);
+    }
+    return { slot, objects };
   }
 
   /** Create a unified tooltip container with PANEL_STYLE tooltip styling. */
   private createTooltipContainer(
     screenX: number, screenY: number, tipW: number, tipH: number, borderColor?: number,
-  ): { container: Phaser.GameObjects.Container; bg: Phaser.GameObjects.Rectangle } {
-    let tx = screenX + px(12);
+  ): { container: Phaser.GameObjects.Container; bg: Phaser.GameObjects.Image } {
+    let tx = screenX + px(16);
     let ty = screenY - px(10);
-    if (tx + tipW > W) tx = screenX - tipW - px(12);
-    if (ty + tipH > H) ty = H - tipH - px(4);
+    if (tx + tipW > W - px(4)) tx = screenX - tipW - px(16);
+    if (ty + tipH > H - px(4)) ty = H - tipH - px(4);
     if (ty < px(4)) ty = px(4);
     if (tx < px(4)) tx = px(4);
 
     const container = this.add.container(tx, ty).setDepth(PANEL_STYLE.depth.tooltip);
-    const bg = this.add.rectangle(0, 0, tipW, tipH, PANEL_STYLE.tooltip.bg.color, PANEL_STYLE.tooltip.bg.alpha)
-      .setOrigin(0, 0)
-      .setStrokeStyle(PANEL_STYLE.tooltip.border.width * DPR, borderColor ?? PANEL_STYLE.tooltip.border.color);
+    const bg = addFrame(this, 0, 0, tipW, tipH, { variant: 'tooltip', accent: borderColor ?? PANEL_STYLE.tooltip.border.color });
     container.add(bg);
     return { container, bg };
+  }
+
+  /** Modal backdrop: dims + vignettes the world, catches outside clicks. */
+  private createBackdrop(alpha = 1): Phaser.GameObjects.Image {
+    return this.add.image(W / 2, H / 2, backdropTexture(this, W, H))
+      .setDisplaySize(W, H).setAlpha(alpha).setInteractive().setDepth(PANEL_STYLE.depth.backdrop);
   }
 
   /** Animate a panel container opening with scale + alpha pop-in */
@@ -5087,6 +4946,10 @@ export class UIScene extends Phaser.Scene {
     this.skillSlots = [];
     this.skillCooldownOverlays = [];
     this.skillCooldownTexts = [];
+    this.skillReadyFlash = [];
+    this.skillCdLastFrac = [];
+    this.skillCdActive = [];
+    this.lootNotices = [];
     this.logTexts = [];
     this.questTrackerTexts = [];
     this.questTrackerExpanded = new Set();
@@ -5099,16 +4962,17 @@ export class UIScene extends Phaser.Scene {
     this.lastQuestTrackerSignature = '';
   }
 
-  /** Interpolate HP bar color: green -> yellow -> red based on ratio */
-  update(time: number): void {
+  /** Per-frame HUD sync: only cheap property updates (no static redraws). */
+  update(time: number, delta: number = 16): void {
     if (!this.player) return;
-    const globeH = GLOBE_R * 2;
-    const globeBottom = (H - px(50)) + GLOBE_R;
+    const orbBottom = HUD.orbY + GLOBE_R;
+    const orbSpan = GLOBE_R * 2;
+    const drift = delta * 0.012;
 
-    const hpR = Math.max(0, this.player.hp / this.player.maxHp);
-    const targetHpH = globeH * hpR;
-    this.hpBar.height += (targetHpH - this.hpBar.height) * 0.15;
-    this.hpBar.y = globeBottom - this.hpBar.height;
+    const hpR = Phaser.Math.Clamp(this.player.hp / this.player.maxHp, 0, 1);
+    this.hpLevel += (hpR - this.hpLevel) * 0.15;
+    this.hpBar.y = orbBottom - orbSpan * this.hpLevel - this.orbSurfaceOffset;
+    this.hpBar.tilePositionX += drift;
     const hpText = `${Math.ceil(this.player.hp)}/${this.player.maxHp}`;
     if (this.hpText.text !== hpText) this.hpText.setText(hpText);
     if (hpR < 0.3 && hpR > 0) {
@@ -5118,17 +4982,18 @@ export class UIScene extends Phaser.Scene {
       this.hpBar.alpha = 1;
     }
 
-    const manaR = Math.max(0, this.player.mana / this.player.maxMana);
-    const targetManaH = globeH * manaR;
-    this.manaBar.height += (targetManaH - this.manaBar.height) * 0.15;
-    this.manaBar.y = globeBottom - this.manaBar.height;
+    const manaR = Phaser.Math.Clamp(this.player.mana / this.player.maxMana, 0, 1);
+    this.manaLevel += (manaR - this.manaLevel) * 0.15;
+    this.manaBar.y = orbBottom - orbSpan * this.manaLevel - this.orbSurfaceOffset;
+    this.manaBar.tilePositionX -= drift * 0.8;
     const manaText = `${Math.ceil(this.player.mana)}/${this.player.maxMana}`;
     if (this.manaText.text !== manaText) this.manaText.setText(manaText);
 
-    const spiritRatio = this.player.spirit.ratio;
-    const spiritWidth = this.spiritBarBg.width * spiritRatio;
-    if (Math.abs(this.spiritBar.width - spiritWidth) > 0.5) {
-      this.spiritBar.width = spiritWidth;
+    const spiritRatio = Phaser.Math.Clamp(this.player.spirit.ratio, 0, 1);
+    const spiritWidth = Math.round(HUD.spiritW * spiritRatio);
+    if (spiritWidth !== this.spiritShown) {
+      this.spiritShown = spiritWidth;
+      this.spiritBar.setCrop(0, 0, spiritWidth, HUD.spiritH);
     }
     this.spiritBar.alpha = this.player.spirit.isResonating
       ? 0.82 + Math.sin(time * 0.012) * 0.18
@@ -5152,30 +5017,51 @@ export class UIScene extends Phaser.Scene {
       : t('ui.hud.dodgeCooldown', { seconds: (dodgeRemaining / 1000).toFixed(1) });
     if (this.dodgeText.text !== dodgeText) this.dodgeText.setText(dodgeText);
     const dodgeColor = dodgeReady ? '#9bd7ff' : '#778899';
-    if (this.dodgeText.style.color !== dodgeColor) this.dodgeText.setColor(dodgeColor);
+    if (this.dodgeText.style.color !== dodgeColor) {
+      this.dodgeText.setColor(dodgeColor);
+      this.dodgeDot.setFillStyle(dodgeReady ? 0x9bd7ff : 0x3a4450);
+    }
+
+    // Target frame HP (sampled, not every frame)
+    if (this.currentTargetId && time >= this.nextTargetRefreshAt) {
+      this.nextTargetRefreshAt = time + 100;
+      const monsters = (this.zone as unknown as { monsters?: { id: string; hp: number; maxHp: number }[] }).monsters;
+      const m = monsters?.find(mm => mm.id === this.currentTargetId);
+      const ratio = m && m.maxHp > 0 ? Phaser.Math.Clamp(m.hp / m.maxHp, 0, 1) : 0;
+      const wpx = Math.round(this.targetHpW * ratio);
+      if (wpx !== this.targetHpShown) {
+        this.targetHpShown = wpx;
+        this.targetHpFill.setCrop(0, 0, wpx, px(8));
+      }
+    }
 
     const expN = this.player.expToNextLevel();
-    this.expBar.width = (W - px(32)) * (this.player.exp / expN);
-    const levelText = `Lv.${this.player.level} (${this.player.exp}/${expN})`;
+    const expW = Math.round(HUD.expW * Phaser.Math.Clamp(this.player.exp / expN, 0, 1));
+    if (expW !== this.expShown) {
+      this.expShown = expW;
+      this.expBar.setCrop(0, 0, expW, HUD.expH);
+    }
+    const levelText = `Lv.${this.player.level}  (${this.player.exp}/${expN})`;
     if (this.levelText.text !== levelText) this.levelText.setText(levelText);
-    const goldText = `${this.player.gold} G`;
+    const goldText = `${this.player.gold}`;
     if (this.goldText.text !== goldText) this.goldText.setText(goldText);
     const autoCombatText = this.player.autoCombat ? t('ui.hud.autoCombat.on') : t('ui.hud.autoCombat.off');
-    const autoCombatColor = this.player.autoCombat ? '#27ae60' : '#666680';
+    const autoCombatColor = this.player.autoCombat ? '#8ff07a' : '#b0a8b4';
     if (this.autoCombatText.text !== autoCombatText) this.autoCombatText.setText(autoCombatText);
     if (this.autoCombatText.style.color !== autoCombatColor) this.autoCombatText.setColor(autoCombatColor);
 
     // Auto-loot button update
     const alLabels: Record<string, string> = { off: t('ui.hud.autoLoot.off'), all: t('ui.hud.autoLoot.all'), magic: t('ui.hud.autoLoot.magic'), rare: t('ui.hud.autoLoot.rare'), legendary: t('ui.hud.autoLoot.legendary') };
-    const alColors: Record<string, string> = { off: '#666680', all: '#e0d8cc', magic: '#2471a3', rare: '#c0934a', legendary: '#e67e22' };
+    const alColors: Record<string, string> = { off: '#b0a8b4', all: '#e0d8cc', magic: QUALITY_TEXT.magic, rare: QUALITY_TEXT.rare, legendary: QUALITY_TEXT.legendary };
     const autoLootText = alLabels[this.player.autoLootMode] ?? t('ui.hud.autoLoot.off');
-    const autoLootColor = alColors[this.player.autoLootMode] ?? '#666680';
+    const autoLootColor = alColors[this.player.autoLootMode] ?? '#b0a8b4';
     if (this.autoLootText.text !== autoLootText) this.autoLootText.setText(autoLootText);
     if (this.autoLootText.style.color !== autoLootColor) this.autoLootText.setColor(autoLootColor);
 
     if (this.zone && (this.zone as any).currentMapId) {
       const map = AllMaps[(this.zone as any).currentMapId] ?? (this.zone as any).mapData;
-      if (map && this.zoneLabel.text !== map.name) this.zoneLabel.setText(map.name);
+      const zoneName = map ? getZoneName((this.zone as any).currentMapId, map.name) : '';
+      if (map && this.zoneLabel.text !== zoneName) this.zoneLabel.setText(zoneName);
     }
 
     const skills = this.getSkillLoadout();
@@ -5183,22 +5069,33 @@ export class UIScene extends Phaser.Scene {
       const cd = this.player.skillCooldowns.get(skills[i].id) ?? 0;
       const remaining = cd - time;
       const onCd = remaining > 0;
-      if (this.skillCooldownOverlays[i].visible !== onCd) {
-        this.skillCooldownOverlays[i].setVisible(onCd);
-      }
-      // Show remaining seconds on cooldown
+      const overlay = this.skillCooldownOverlays[i];
       const cdText = this.skillCooldownTexts[i];
       if (onCd) {
+        const totalCd = getSkillCooldown(skills[i], this.player.getSkillLevel(skills[i].id));
+        const frac = Phaser.Math.Clamp(remaining / Math.max(1, totalCd), 0, 1);
+        if (Math.abs(frac - this.skillCdLastFrac[i]) > 0.004) {
+          this.skillCdLastFrac[i] = frac;
+          this.drawCooldownSweep(overlay, HUD.slot, frac);
+        }
         const secs = Math.ceil(remaining / 1000);
         if (cdText?.active) {
           if (!cdText.visible) cdText.setVisible(true);
           const nextText = `${secs}`;
           if (cdText.text !== nextText) cdText.setText(nextText);
         }
-        // Fade overlay alpha based on cooldown progress
-        const totalCd = getSkillCooldown(skills[i], this.player.getSkillLevel(skills[i].id));
-        this.skillCooldownOverlays[i].alpha = 0.3 + 0.4 * (remaining / totalCd);
+        this.skillCdActive[i] = true;
       } else {
+        if (this.skillCdActive[i]) {
+          this.skillCdActive[i] = false;
+          this.skillCdLastFrac[i] = -1;
+          overlay.clear();
+          const flash = this.skillReadyFlash[i];
+          if (flash?.active) {
+            flash.setAlpha(0.55);
+            this.tweens.add({ targets: flash, alpha: 0, duration: 320, ease: 'Quad.easeOut' });
+          }
+        }
         if (cdText?.active && cdText.visible) cdText.setVisible(false);
       }
     }
@@ -5212,6 +5109,29 @@ export class UIScene extends Phaser.Scene {
       this.nextQuestTrackerRefreshAt = time + 250;
       this.refreshQuestTracker();
     }
+  }
+
+  /** Radial cooldown sweep clipped to the square slot (remaining fraction darkened). */
+  private drawCooldownSweep(g: Phaser.GameObjects.Graphics, size: number, frac: number): void {
+    g.clear();
+    if (frac <= 0) return;
+    const half = size / 2 - px(3);
+    const proj = (a: number) => {
+      const c = Math.cos(a), sn = Math.sin(a);
+      const m = Math.max(Math.abs(c), Math.abs(sn));
+      return { x: (c / m) * half, y: (sn / m) * half };
+    };
+    const start = -Math.PI / 2;
+    const a0 = start + (1 - frac) * Math.PI * 2;
+    const a1 = start + Math.PI * 2;
+    const pts: { x: number; y: number }[] = [{ x: 0, y: 0 }];
+    for (let a = a0; a < a1; a += 0.1) pts.push(proj(a));
+    pts.push(proj(a1));
+    g.fillStyle(0x000000, 0.66);
+    g.fillPoints(pts, true);
+    const hand = proj(a0);
+    g.lineStyle(px(1.5), 0xffd98a, 0.85);
+    g.lineBetween(0, 0, hand.x, hand.y);
   }
 
   private refreshQuestTracker(): void {
@@ -5339,11 +5259,14 @@ export class UIScene extends Phaser.Scene {
     // Update background size
     if (this.questTrackerBg) {
       if (state.entries.length > 0) {
+        const bgH = Math.ceil((y + px(12)) / px(8)) * px(8);
         this.questTrackerBg.setVisible(true);
-        this.questTrackerBg.setSize(px(210), y + px(4));
-        this.questTrackerBg.setPosition(this.questTracker.x - px(4), this.questTracker.y - px(4));
+        this.questTracker.setVisible(true);
+        this.questTrackerBg.setTexture(frameTextureKey(this, px(218), bgH, 0.9));
+        this.questTrackerBg.setPosition(this.questTracker.x - px(9) - px(8), this.questTracker.y - px(7) - px(8));
       } else {
         this.questTrackerBg.setVisible(false);
+        this.questTracker.setVisible(false);
       }
     }
   }

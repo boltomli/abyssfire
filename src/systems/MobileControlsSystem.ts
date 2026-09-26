@@ -5,6 +5,7 @@ import type { Player } from '../entities/Player';
 import { t } from '../i18n';
 import { getSkillName } from '../i18n/gameAccessors';
 import { getLearnedSkillLoadout } from './SkillProgressionSystem';
+import { addButton, joystickTextures, medallionTexture, skillSlotTexture, keyBadgeTexture, type UiButton } from '../ui/UiKit';
 
 const FONT = '"Noto Sans SC", sans-serif';
 
@@ -31,8 +32,8 @@ export class MobileControlsSystem {
   private player: Player;
 
   // Joystick elements
-  private joystickBase!: Phaser.GameObjects.Arc;
-  private joystickThumb!: Phaser.GameObjects.Arc;
+  private joystickBase!: Phaser.GameObjects.Image;
+  private joystickThumb!: Phaser.GameObjects.Image;
   private joystickContainer!: Phaser.GameObjects.Container;
   private joystickState: JoystickState = { active: false, pointerId: -1, dx: 0, dy: 0 };
   private joystickRadius: number;
@@ -42,15 +43,24 @@ export class MobileControlsSystem {
   // Skill buttons
   private skillLoadout: Player['classData']['skills'] = [];
   private skillButtons: Phaser.GameObjects.Container[] = [];
+  private skillCdOverlays: Phaser.GameObjects.Rectangle[] = [];
 
   // Panel buttons
   private panelButtons: Phaser.GameObjects.Container[] = [];
 
   // Auto-combat button
-  private autoCombatBtn!: Phaser.GameObjects.Container;
+  private autoCombatBtn!: UiButton;
   private autoCombatLabel!: Phaser.GameObjects.Text;
   private dodgeBtn!: Phaser.GameObjects.Container;
   private targetBtn!: Phaser.GameObjects.Container;
+
+  /**
+   * Root container for every touch control. The gameplay camera is zoomed, and
+   * scroll-factor-0 objects are still scaled around the camera centre, so the
+   * root counter-scales by 1/zoom to keep controls at their screen positions.
+   */
+  private root!: Phaser.GameObjects.Container;
+  private appliedZoom = 0;
 
   // Responsive sizing
   private scale: number;
@@ -77,11 +87,35 @@ export class MobileControlsSystem {
     this.joystickRadius = 50 * this.scale;
     this.refreshSkillLoadout();
 
+    this.root = this.scene.add.container(0, 0).setDepth(5000).setScrollFactor(0);
     this.createJoystick();
     this.createSkillButtons();
     this.createCombatButtons();
     this.createAutoCombatButton();
     this.createPanelButtons();
+    this.applyCameraZoom();
+  }
+
+  /** Put an object under the root and make it (and its children) screen-fixed. */
+  private attach<T extends Phaser.GameObjects.GameObject>(obj: T): T {
+    this.root.add(obj);
+    const fix = (o: Phaser.GameObjects.GameObject) => {
+      (o as unknown as Phaser.GameObjects.Components.ScrollFactor).setScrollFactor?.(0);
+      if (o instanceof Phaser.GameObjects.Container) o.list.forEach(fix);
+    };
+    fix(obj);
+    return obj;
+  }
+
+  /** Counter the gameplay camera zoom so controls render at 1:1 screen coordinates. */
+  private applyCameraZoom(): void {
+    const cam = this.scene.cameras.main;
+    const z = cam.zoom || 1;
+    if (z === this.appliedZoom) return;
+    this.appliedZoom = z;
+    const cx = cam.width * cam.originX, cy = cam.height * cam.originY;
+    this.root.setScale(1 / z);
+    this.root.setPosition(cx - cx / z, cy - cy / z);
   }
 
   private getSkillLoadout(): typeof this.player.classData.skills {
@@ -116,17 +150,15 @@ export class MobileControlsSystem {
     this.joystickCenterX = cx;
     this.joystickCenterY = cy;
 
-    this.joystickContainer = this.scene.add.container(0, 0).setDepth(5000).setScrollFactor(0);
+    this.joystickContainer = this.scene.add.container(0, 0);
 
-    // Base circle
-    this.joystickBase = this.scene.add.circle(cx, cy, r, 0x222244, 0.35)
-      .setStrokeStyle(2, 0x4444aa, 0.5);
+    // Base ring + thumb knob (baked once by UiKit)
+    const tex = joystickTextures(this.scene, r);
+    this.joystickBase = this.scene.add.image(cx, cy, tex.base);
     this.joystickContainer.add(this.joystickBase);
 
     // Thumb
-    const thumbR = r * 0.45;
-    this.joystickThumb = this.scene.add.circle(cx, cy, thumbR, 0x6666cc, 0.5)
-      .setStrokeStyle(1.5, 0x8888ee, 0.6);
+    this.joystickThumb = this.scene.add.image(cx, cy, tex.thumb);
     this.joystickContainer.add(this.joystickThumb);
 
     // Touch zone (larger invisible area for easier grab)
@@ -140,6 +172,7 @@ export class MobileControlsSystem {
       this.updateJoystickThumb(pointer.x, pointer.y, cx, cy);
     });
 
+    this.attach(this.joystickContainer);
     this.scene.input.on('pointermove', this.pointerMoveHandler);
     this.scene.input.on('pointerup', this.pointerUpHandler);
   }
@@ -178,36 +211,46 @@ export class MobileControlsSystem {
       const x = startX + col * (btnSize + gap) + btnSize / 2;
       const y = startY + row * (btnSize + gap) + btnSize / 2;
 
-      const container = this.scene.add.container(x, y).setDepth(5000).setScrollFactor(0);
+      const container = this.scene.add.container(x, y);
 
-      const bg = this.scene.add.rectangle(0, 0, btnSize, btnSize, 0x1a1a2e, 0.6)
-        .setStrokeStyle(1.5, 0x555588, 0.7);
+      const bg = this.scene.add.image(0, 0, skillSlotTexture(this.scene, btnSize, 'normal').key);
       container.add(bg);
 
-      // Skill icon text (number + short name)
-      const label = this.scene.add.text(0, -6, `${i + 1}`, {
-        fontSize: `${Math.round(10 * this.scale)}px`,
-        color: '#8888bb',
-        fontFamily: FONT,
-      }).setOrigin(0.5);
-      container.add(label);
-
-      const nameLabel = this.scene.add.text(0, 8, getSkillName(skill.id, skill.name).slice(0, 2), {
-        fontSize: `${Math.round(9 * this.scale)}px`,
-        color: '#aaaacc',
-        fontFamily: FONT,
-      }).setOrigin(0.5);
-      container.add(nameLabel);
+      // Skill icon (painted emblem) — falls back to a short name
+      const iconKey = `skill_icon_${skill.id}`;
+      if (this.scene.textures.exists(iconKey)) {
+        container.add(this.scene.add.image(0, 0, iconKey).setDisplaySize(btnSize - 8, btnSize - 8));
+      } else {
+        container.add(this.scene.add.text(0, 0, getSkillName(skill.id, skill.name).slice(0, 2), {
+          fontSize: `${Math.round(11 * this.scale)}px`,
+          color: '#e0d8cc',
+          fontFamily: FONT,
+          fontStyle: 'bold',
+          stroke: '#000000',
+          strokeThickness: 2,
+        }).setOrigin(0.5));
+      }
 
       // Cooldown overlay
-      const cdOverlay = this.scene.add.rectangle(0, 0, btnSize, btnSize, 0x000000, 0.6).setVisible(false);
+      const cdOverlay = this.scene.add.rectangle(0, 0, btnSize - 6, btnSize - 6, 0x000000, 0.6).setVisible(false);
       container.add(cdOverlay);
+      this.skillCdOverlays.push(cdOverlay);
+
+      // Key badge
+      container.add(this.scene.add.image(btnSize / 2 - 9, btnSize / 2 - 8, keyBadgeTexture(this.scene, 14, 13)));
+      container.add(this.scene.add.text(btnSize / 2 - 9, btnSize / 2 - 8, `${i + 1}`, {
+        fontSize: `${Math.round(9 * this.scale)}px`,
+        color: '#f0dcae',
+        fontFamily: FONT,
+        fontStyle: 'bold',
+      }).setOrigin(0.5));
 
       bg.setInteractive({ useHandCursor: false });
       bg.on('pointerdown', () => {
         EventBus.emit(GameEvents.UI_SKILL_CLICK, { index: i, skillId: skill.id });
       });
 
+      this.attach(container);
       this.skillButtons.push(container);
     }
   }
@@ -226,7 +269,7 @@ export class MobileControlsSystem {
       y,
       btnSize,
       t('sys.mobile.target'),
-      0x33252a,
+      0x6a2a24,
       () => EventBus.emit(GameEvents.UI_TARGET_CYCLE, {}),
     );
     this.dodgeBtn = this.createCombatButton(
@@ -234,7 +277,7 @@ export class MobileControlsSystem {
       y,
       btnSize,
       t('sys.mobile.dodge'),
-      0x1d3042,
+      0x1f4a6a,
       () => {
         const direction = this.getDirection();
         EventBus.emit(GameEvents.UI_DODGE_REQUEST, direction);
@@ -250,18 +293,21 @@ export class MobileControlsSystem {
     color: number,
     onPress: () => void,
   ): Phaser.GameObjects.Container {
-    const container = this.scene.add.container(x, y).setDepth(5000).setScrollFactor(0);
-    const bg = this.scene.add.rectangle(0, 0, size, size, color, 0.72)
-      .setStrokeStyle(1.5 * this.scale, 0x7890aa, 0.75);
+    const container = this.scene.add.container(x, y);
+    const bg = this.scene.add.image(0, 0, medallionTexture(this.scene, size, color));
     const label = this.scene.add.text(0, 0, labelText, {
       fontSize: `${Math.round(10 * this.scale)}px`,
-      color: '#d6e4f2',
+      color: '#f0e6d6',
       fontFamily: FONT,
+      fontStyle: 'bold',
       align: 'center',
+      stroke: '#000000',
+      strokeThickness: 2,
     }).setOrigin(0.5);
     container.add([bg, label]);
     bg.setInteractive({ useHandCursor: false });
     bg.on('pointerdown', onPress);
+    this.attach(container);
     return container;
   }
 
@@ -272,31 +318,25 @@ export class MobileControlsSystem {
     const x = GAME_WIDTH - btnSize / 2 - 20 * this.scale - (btnSize + gap);
     const rows = Math.ceil(this.getSkillLoadout().length / 2);
     const skillBlockHeight = rows * (btnSize + gap);
-    const y = GAME_HEIGHT - skillBlockHeight - 20 * this.scale - btnSize / 2 - gap;
+    // One row above the dodge / target medallions (they share the same columns)
+    const y = GAME_HEIGHT - skillBlockHeight - 20 * this.scale - btnSize / 2 - gap - (btnSize + gap);
 
-    this.autoCombatBtn = this.scene.add.container(x, y).setDepth(5000).setScrollFactor(0);
-
-    const bg = this.scene.add.rectangle(0, 0, btnSize * 2 + gap, btnSize, 0x1a1a2e, 0.6)
-      .setStrokeStyle(1.5, 0x555588, 0.7);
-    this.autoCombatBtn.add(bg);
-
-    this.autoCombatLabel = this.scene.add.text(0, 0, t('sys.mobile.autoCombat.off'), {
-      fontSize: `${Math.round(10 * this.scale)}px`,
-      color: '#666680',
-      fontFamily: FONT,
-      align: 'center',
-      lineSpacing: 2,
-    }).setOrigin(0.5);
-    this.autoCombatBtn.add(this.autoCombatLabel);
-
-    bg.setInteractive({ useHandCursor: false });
-    bg.on('pointerdown', () => {
-      this.player.autoCombat = !this.player.autoCombat;
-      EventBus.emit(GameEvents.LOG_MESSAGE, {
-        text: t('sys.mobile.autoCombat.log', { state: this.player.autoCombat ? t('zone.combat.autoCombatOn') : t('zone.combat.autoCombatOff') }),
-        type: 'system',
-      });
+    this.autoCombatBtn = addButton(this.scene, x, y, btnSize * 2 + gap, btnSize, t('sys.mobile.autoCombat.off'), {
+      variant: 'secondary',
+      fontSize: Math.round(10 * this.scale),
+      color: '#b0a8b4',
+      onClick: () => {
+        this.player.autoCombat = !this.player.autoCombat;
+        EventBus.emit(GameEvents.LOG_MESSAGE, {
+          text: t('sys.mobile.autoCombat.log', { state: this.player.autoCombat ? t('zone.combat.autoCombatOn') : t('zone.combat.autoCombatOff') }),
+          type: 'system',
+        });
+      },
     });
+    this.attach(this.autoCombatBtn);
+    this.autoCombatLabel = this.autoCombatBtn.label;
+    this.autoCombatLabel.setLineSpacing(2);
+    this.autoCombatBtn.bg.setAlpha(0.9);
   }
 
   private createPanelButtons(): void {
@@ -318,34 +358,28 @@ export class MobileControlsSystem {
     for (let i = 0; i < panels.length; i++) {
       const p = panels[i];
       const x = startX + i * (btnSize + gap) + btnSize / 2;
-      const container = this.scene.add.container(x, y).setDepth(5000).setScrollFactor(0);
-
-      const bg = this.scene.add.rectangle(0, 0, btnSize, btnSize, 0x1a1a2e, 0.5)
-        .setStrokeStyle(1, 0x444466, 0.6);
-      container.add(bg);
-
-      const label = this.scene.add.text(0, 0, p.label, {
-        fontSize: `${Math.round(9 * this.scale)}px`,
-        color: '#9999bb',
-        fontFamily: FONT,
-      }).setOrigin(0.5);
-      container.add(label);
-
-      bg.setInteractive({ useHandCursor: false });
-      bg.on('pointerdown', () => {
-        EventBus.emit(GameEvents.UI_TOGGLE_PANEL, { panel: p.panel });
+      const container = addButton(this.scene, x, y, btnSize, btnSize, p.label, {
+        variant: 'ghost',
+        fontSize: Math.round(9 * this.scale),
+        onClick: () => EventBus.emit(GameEvents.UI_TOGGLE_PANEL, { panel: p.panel }),
       });
+      this.attach(container);
+      container.bg.setAlpha(0.85);
 
       this.panelButtons.push(container);
     }
   }
 
   update(_time: number, _delta: number): void {
+    this.applyCameraZoom();
+
     // Update auto-combat label
     if (this.autoCombatLabel) {
       const on = this.player.autoCombat;
-      this.autoCombatLabel.setText(on ? t('sys.mobile.autoCombat.on') : t('sys.mobile.autoCombat.off'));
-      this.autoCombatLabel.setColor(on ? '#27ae60' : '#666680');
+      const label = on ? t('sys.mobile.autoCombat.on') : t('sys.mobile.autoCombat.off');
+      const color = on ? '#8ff07a' : '#b0a8b4';
+      if (this.autoCombatLabel.text !== label) this.autoCombatLabel.setText(label);
+      if (this.autoCombatLabel.style.color !== color) this.autoCombatLabel.setColor(color);
     }
 
     // Update skill cooldown overlays
@@ -354,8 +388,8 @@ export class MobileControlsSystem {
     for (let i = 0; i < this.skillButtons.length; i++) {
       if (i >= skills.length) break;
       const cd = this.player.skillCooldowns.get(skills[i].id) ?? 0;
-      const overlay = this.skillButtons[i].getAt(3) as Phaser.GameObjects.Rectangle;
-      overlay.setVisible(now < cd);
+      const overlay = this.skillCdOverlays[i];
+      if (overlay && overlay.visible !== now < cd) overlay.setVisible(now < cd);
     }
   }
 
@@ -363,6 +397,7 @@ export class MobileControlsSystem {
     this.refreshSkillLoadout();
     for (const button of this.skillButtons) button.destroy();
     this.skillButtons = [];
+    this.skillCdOverlays = [];
     this.autoCombatBtn.destroy();
     this.dodgeBtn.destroy();
     this.targetBtn.destroy();
@@ -399,5 +434,6 @@ export class MobileControlsSystem {
     this.targetBtn.destroy();
     for (const btn of this.skillButtons) btn.destroy();
     for (const btn of this.panelButtons) btn.destroy();
+    this.root.destroy();
   }
 }

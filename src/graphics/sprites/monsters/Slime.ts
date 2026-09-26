@@ -1,146 +1,222 @@
 // src/graphics/sprites/monsters/Slime.ts
-import type { EntityDrawer, MonsterAction } from '../types';
-import type { DrawUtils } from '../../DrawUtils';
+//
+// 史莱姆 — glossy, jiggling jelly with a darker core, drifting bubbles, a
+// half-digested bone inside and big glaring eyes. Hops to move, rears up
+// and body-slams to attack, splats into a puddle on death.
+import type { MonsterAction } from '../types';
+import {
+  CENTER_X,
+  GROUND_Y,
+  blobPath,
+  cel,
+  samplePoseTrack,
+  tone,
+  vec,
+  type Key,
+  type V,
+} from '../rig/Rig';
+import { rigMonster } from '../rig/MonsterKit';
 
-export const SlimeDrawer: EntityDrawer = {
-  key: 'monster_slime',
-  frameW: 48,
-  frameH: 40,
-  totalFrames: 20,
+interface SlimePose {
+  /** Horizontal centre and how far the bottom is off the ground. */
+  x: number;
+  hop: number;
+  /** Base radius scale: squash (<1 tall / >1 wide). */
+  sx: number;
+  sy: number;
+  /** Top leans forward (+) or back (−). */
+  lean: number;
+  /** Eye openness 0 (X-ed out) … 1. */
+  eyes: number;
+  /** Forward pseudopod reach 0..1 (attack). */
+  reach: number;
+  /** Puddle spread for death 0..1. */
+  melt: number;
+  fx: number;
+}
 
-  drawFrame(ctx, frame, action, w, h, utils) {
-    const act = action as MonsterAction;
-    const s = w / 48; // scale factor
+const BODY = tone(0x5fcf5a, { light: 0.45, shadow: 0.35 });
+const CORE = 'rgba(28,110,48,0.55)';
+const W = 20;
+const H = 17;
 
-    // Animation phase
-    const frameCounts: Record<MonsterAction, number> = { idle: 4, walk: 6, attack: 4, hurt: 2, death: 4 };
-    const count = frameCounts[act] || 4;
-    const localFrame = frame % count;
-    const t = count > 1 ? localFrame / (count - 1) : 0;
-    const phase = (localFrame / count) * Math.PI * 2;
+const REST: SlimePose = { x: CENTER_X, hop: 0, sx: 1, sy: 1, lean: 0, eyes: 1, reach: 0, melt: 0, fx: 0 };
+const P = (o: Partial<SlimePose>): SlimePose => ({ ...REST, ...o });
 
-    // Animation parameters per action
-    let squishX = 1, squishY = 1, offsetY = 0, alpha = 1;
-    switch (act) {
-      case 'idle':
-        squishY = 1 + Math.sin(phase) * 0.08;
-        squishX = 1 - Math.sin(phase) * 0.05;
-        break;
-      case 'walk':
-        squishY = 1 + Math.sin(phase) * 0.12;
-        squishX = 1 - Math.sin(phase) * 0.08;
-        offsetY = -Math.abs(Math.sin(phase)) * 3 * s;
-        break;
-      case 'attack':
-        squishX = 1 + t * 0.3;
-        squishY = 1 - t * 0.15;
-        offsetY = -t * 4 * s;
-        break;
-      case 'hurt':
-        squishX = 1 - t * 0.15;
-        squishY = 1 + t * 0.1;
-        alpha = 0.7 + t * 0.3;
-        break;
-      case 'death':
-        squishY = 1 - t * 0.7;
-        squishX = 1 + t * 0.5;
-        alpha = 1 - t * 0.8;
-        break;
+const WALK: Key<SlimePose>[] = [
+  { at: 0, pose: P({ sx: 1.18, sy: 0.8 }) },
+  { at: 0.2, ease: 'out', pose: P({ x: CENTER_X + 1, sx: 0.86, sy: 1.18, hop: 6, lean: 0.12 }) },
+  { at: 0.45, pose: P({ x: CENTER_X + 2.5, sx: 0.92, sy: 1.1, hop: 9, lean: 0.06 }) },
+  { at: 0.7, ease: 'in', pose: P({ x: CENTER_X + 3, sx: 1, sy: 1.02, hop: 3 }) },
+  { at: 0.85, pose: P({ x: CENTER_X + 3, sx: 1.25, sy: 0.74 }) },
+  { at: 1, pose: P({ x: CENTER_X, sx: 1.18, sy: 0.8 }) },
+];
+
+const ATTACK: Key<SlimePose>[] = [
+  { at: 0, pose: REST },
+  { at: 0.33, ease: 'out', pose: P({ x: CENTER_X - 3, sx: 0.8, sy: 1.3, lean: -0.3, fx: 0.3 }) },
+  { at: 0.67, ease: 'in', pose: P({ x: CENTER_X + 4, sx: 0.95, sy: 1.1, hop: 6, lean: 0.35, reach: 0.4, fx: 0.7 }) },
+  { at: 1, ease: 'linear', pose: P({ x: CENTER_X + 5, sx: 1.3, sy: 0.72, lean: 0.25, reach: 1, fx: 1 }) },
+];
+
+const HURT: Key<SlimePose>[] = [
+  { at: 0, pose: P({ x: CENTER_X - 3, sx: 1.35, sy: 0.68, lean: -0.25, eyes: 0.35 }) },
+  { at: 1, pose: P({ x: CENTER_X - 1.5, sx: 0.9, sy: 1.12, lean: 0.1, eyes: 0.7 }) },
+];
+
+const DEATH: Key<SlimePose>[] = [
+  { at: 0, pose: P({ x: CENTER_X - 2, sx: 1.35, sy: 0.7, lean: -0.2, eyes: 0.3 }) },
+  { at: 0.33, pose: P({ x: CENTER_X - 2, sx: 0.85, sy: 1.25, eyes: 0 }) },
+  { at: 0.67, ease: 'in', pose: P({ x: CENTER_X - 2, sx: 1.6, sy: 0.5, eyes: 0, melt: 0.5 }) },
+  { at: 1, ease: 'out', pose: P({ x: CENTER_X - 1, sx: 1.65, sy: 0.3, eyes: 0, melt: 1 }) },
+];
+
+function slimePose(act: MonsterAction, t: number): SlimePose {
+  const ph = t * Math.PI * 2;
+  switch (act) {
+    case 'idle':
+      return P({ sx: 1 + Math.sin(ph) * 0.06, sy: 1 - Math.sin(ph) * 0.07, lean: Math.sin(ph + 0.8) * 0.05 });
+    case 'walk': return samplePoseTrack(WALK, t);
+    case 'attack': return samplePoseTrack(ATTACK, t);
+    case 'hurt': return samplePoseTrack(HURT, t);
+    case 'death': return samplePoseTrack(DEATH, t);
+  }
+}
+
+/** Dome outline: flat-ish base, top skewed by lean, optional forward pseudopod. */
+function outline(p: SlimePose): V[] {
+  const base = GROUND_Y - p.hop;
+  const w = W * p.sx;
+  const h = H * p.sy;
+  const pts: V[] = [];
+  const n = 14;
+  for (let i = 0; i <= n; i++) {
+    const a = Math.PI + (i / n) * Math.PI; // left → over the top → right
+    const k = Math.sin(a - Math.PI); // 0 at the base, 1 at the top
+    let x = p.x + Math.cos(a) * w + p.lean * h * k * 1.2;
+    let y = base - Math.abs(Math.sin(a)) * h * (1 - p.melt * 0.5);
+    if (p.reach > 0 && Math.cos(a) > 0.2) {
+      x += p.reach * 7 * Math.cos(a) * (1 - k);
+      y += p.reach * 2 * (1 - k);
     }
+    pts.push(vec(x, y));
+  }
+  // Base bulges slightly and drips when melting
+  pts.push(vec(p.x + w * 0.7, base + 1.2 + p.melt));
+  pts.push(vec(p.x, base + 1.6 + p.melt * 1.5));
+  pts.push(vec(p.x - w * 0.7, base + 1.2 + p.melt));
+  return pts;
+}
 
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    const cx = w / 2, baseY = h * 0.88;
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    utils.fillEllipse(ctx, cx, baseY + 2 * s, 17 * s * squishX, 3 * s);
-
-    // Puddle drip
-    ctx.fillStyle = 'rgba(7,52,17,0.25)';
-    utils.fillEllipse(ctx, cx, baseY, 18 * s * squishX, 4 * s);
-
-    // Main body
-    const bodyRx = 16 * s * squishX;
-    const bodyRy = 14 * s * squishY;
-    const bodyCy = baseY - bodyRy * 0.6 + offsetY;
-
-    // Soft green glow outline around body
-    utils.zoneEntityOutline(ctx, w, h);
-
-    const grad = ctx.createRadialGradient(
-      cx - bodyRx * 0.15, bodyCy - bodyRy * 0.2, 0,
-      cx, bodyCy, bodyRx
-    );
-    grad.addColorStop(0, '#28773b');
-    grad.addColorStop(0.5, '#125521');
-    grad.addColorStop(1, '#073410');
-    ctx.fillStyle = grad;
+function drawSlime(ctx: CanvasRenderingContext2D, p: SlimePose, t: number): void {
+  const pts = outline(p);
+  const base = GROUND_Y - p.hop;
+  const h = H * p.sy;
+  cel(ctx, () => blobPath(ctx, pts), BODY, { band: 2.6, hi: 1.2 });
+  ctx.save();
+  ctx.beginPath();
+  blobPath(ctx, pts);
+  ctx.clip();
+  // Dark jelly core
+  ctx.fillStyle = CORE;
+  ctx.beginPath();
+  ctx.ellipse(p.x + p.lean * 4, base - h * 0.42, W * p.sx * 0.55, h * 0.42, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Half-digested bone
+  ctx.save();
+  ctx.translate(p.x - 5 * p.sx + p.lean * 3, base - h * 0.3);
+  ctx.rotate(-0.5);
+  ctx.fillStyle = 'rgba(236,226,198,0.7)';
+  ctx.fillRect(-3.5, -0.7, 7, 1.4);
+  for (const sx of [-3.5, 3.5]) {
     ctx.beginPath();
-    ctx.ellipse(cx, bodyCy, bodyRx, bodyRy, 0, 0, Math.PI * 2);
+    ctx.arc(sx, -0.8, 1, 0, Math.PI * 2);
+    ctx.arc(sx, 0.8, 1, 0, Math.PI * 2);
     ctx.fill();
-
-    // Subsurface glow
-    const glowGrad = ctx.createRadialGradient(cx - 2 * s, bodyCy - 2 * s, 0, cx, bodyCy, bodyRx * 0.7);
-    glowGrad.addColorStop(0, 'rgba(63,167,78,0.25)');
-    glowGrad.addColorStop(1, 'rgba(18,85,34,0)');
-    ctx.fillStyle = glowGrad;
-    utils.fillEllipse(ctx, cx - 2 * s, bodyCy - 2 * s, bodyRx * 0.65, bodyRy * 0.6);
-
-    // End soft outline
-    utils.softOutlineEnd(ctx);
-
-    // Rim light on body edge
-    utils.zoneEntityRimLight(ctx, cx, bodyCy, bodyRx, bodyRy);
-
-    // Internal particles
-    ctx.fillStyle = 'rgba(7,63,18,0.4)';
-    utils.fillCircle(ctx, cx - 6 * s, bodyCy + 2 * s, 2 * s);
-    utils.fillCircle(ctx, cx + 4 * s, bodyCy + 4 * s, 1.5 * s);
-
-    // Specular highlight
-    ctx.fillStyle = 'rgba(255,255,255,0.07)';
-    ctx.save();
-    ctx.translate(cx - 6 * s, bodyCy - bodyRy * 0.4);
-    ctx.rotate(-0.25);
-    utils.fillEllipse(ctx, 0, 0, 5 * s, 3 * s);
-    ctx.restore();
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    utils.fillEllipse(ctx, cx - 7 * s, bodyCy - bodyRy * 0.5, 2.5 * s, 1.5 * s);
-
-    // Eyes
-    const eyeSpread = 6 * s * squishX;
-    for (const side of [-1, 1]) {
-      const ex = cx + side * eyeSpread;
-      const ey = bodyCy - bodyRy * 0.15;
-      ctx.fillStyle = '#0a3a0a';
-      utils.fillEllipse(ctx, ex, ey, 3 * s, 3.5 * s);
-      ctx.fillStyle = '#1d7730';  // keep emissive eye glow
-      utils.fillEllipse(ctx, ex, ey - 0.5 * s, 2 * s, 2.5 * s);
-      ctx.fillStyle = '#0a2a0a';
-      utils.fillEllipse(ctx, ex, ey - 1 * s, 1 * s, 1.2 * s);
-      ctx.fillStyle = 'rgba(170,255,170,0.5)';  // keep bright reflection
-      utils.fillCircle(ctx, ex - 0.5 * s, ey - 1.5 * s, 0.5 * s);
-    }
-
-    // Mouth
-    ctx.strokeStyle = '#0a3a10';
-    ctx.lineWidth = 0.8 * s;
+  }
+  ctx.restore();
+  // Rising bubbles
+  ctx.strokeStyle = 'rgba(210,255,200,0.7)';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i < 4; i++) {
+    const k = (i / 4 + t) % 1;
+    const bx = p.x + Math.sin(i * 2.3) * W * p.sx * 0.5;
+    const by = base - 2 - k * h * 0.8;
     ctx.beginPath();
-    ctx.moveTo(cx - 4 * s, bodyCy + bodyRy * 0.25);
-    ctx.quadraticCurveTo(cx, bodyCy + bodyRy * 0.35, cx + 4 * s, bodyCy + bodyRy * 0.25);
+    ctx.arc(bx, by, 0.6 + (i % 2) * 0.5, 0, Math.PI * 2);
     ctx.stroke();
+  }
+  // Glossy sheen
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.beginPath();
+  ctx.ellipse(p.x - W * p.sx * 0.35 + p.lean * h * 0.6, base - h * 0.72, 3.4 * p.sx, 1.6 * p.sy, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.beginPath();
+  ctx.arc(p.x - W * p.sx * 0.12 + p.lean * h * 0.7, base - h * 0.84, 0.9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 
-    // Drip tendrils
-    if (act !== 'death') {
-      ctx.fillStyle = 'rgba(7,52,17,0.6)';
+  // Eyes
+  const ex = p.x + 4 * p.sx + p.lean * h * 0.75;
+  const ey = base - h * 0.58;
+  for (const [dx, r] of [[0, 3], [5.6, 2.3]] as const) {
+    const cx = ex + dx * p.sx;
+    if (p.eyes <= 0.05) {
+      ctx.strokeStyle = '#123018';
+      ctx.lineWidth = 0.9;
       ctx.beginPath();
-      ctx.moveTo(cx - 10 * s, baseY - 2 * s);
-      ctx.quadraticCurveTo(cx - 12 * s, baseY + 2 * s, cx - 11 * s, baseY + 4 * s);
-      ctx.quadraticCurveTo(cx - 10 * s, baseY + 3 * s, cx - 9 * s, baseY - 1 * s);
+      ctx.moveTo(cx - r * 0.6, ey - r * 0.6);
+      ctx.lineTo(cx + r * 0.6, ey + r * 0.6);
+      ctx.moveTo(cx + r * 0.6, ey - r * 0.6);
+      ctx.lineTo(cx - r * 0.6, ey + r * 0.6);
+      ctx.stroke();
+      continue;
+    }
+    const ry = r * (0.35 + 0.65 * p.eyes);
+    ctx.fillStyle = '#f7fff0';
+    ctx.beginPath();
+    ctx.ellipse(cx, ey, r * 0.85, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#1d4a24';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    ctx.fillStyle = '#10200f';
+    ctx.beginPath();
+    ctx.ellipse(cx + r * 0.25, ey + 0.2, r * 0.42, Math.min(ry, r * 0.55), 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(cx + r * 0.05, ey - ry * 0.45, 0.8, 0.8);
+  }
+  // Angry brow when attacking
+  if (p.fx > 0.2) {
+    ctx.strokeStyle = '#1d4a24';
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(ex - 3, ey - 4.2);
+    ctx.lineTo(ex + 2.5, ey - 2.6);
+    ctx.moveTo(ex + 4 * p.sx, ey - 3);
+    ctx.lineTo(ex + 8 * p.sx, ey - 3.8);
+    ctx.stroke();
+  }
+}
+
+export const SlimeDrawer = rigMonster<SlimePose>({
+  key: 'monster_slime',
+  // Wider than tall for the lunge; width doesn't move the sprite in-game.
+  frameW: 72,
+  frameH: 40,
+  scale: 2.4,
+  pose: slimePose,
+  draw: (ctx, p, _act, t) => drawSlime(ctx, p, t),
+  shadow: (p) => ({ x: p.x, r: W * p.sx * 1.05, lift: p.hop * 1.5 }),
+  fx: (ctx, p) => {
+    if (p.melt > 0) {
+      ctx.fillStyle = `rgba(95,207,90,${0.35 * p.melt})`;
+      ctx.beginPath();
+      ctx.ellipse(p.x, GROUND_Y + 0.5, W * p.sx * 1.1, 3 * p.melt, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-
-    ctx.restore();
   },
-};
+  rim: 'rgba(230,255,220,0.6)',
+});

@@ -1,62 +1,42 @@
 // src/graphics/sprites/decorations/Boulder.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, glow, line, tuft, rgbaHex } from './DecorKit';
+import { drawRock } from './Rock';
 
-export const BoulderDrawer: EntityDrawer = {
-  key: 'decor_boulder',
-  frameW: 20,
-  frameH: 16,
-  totalFrames: 1,
+function boulder(key: string, col: number, opts: { snow?: boolean; lava?: boolean; moss?: [string, string] } = {}) {
+  return defineDecor({
+    key,
+    w: 76,
+    h: 62,
+    ground: 56,
+    tall: true,
+    draw(ctx, { cx, gy, r }) {
+      contactShadow(ctx, cx + 5, gy, 34, 10, 0.45);
+      drawRock(ctx, cx - 4, gy, 50, 44, col, r, 2);
+      drawRock(ctx, cx + 20, gy + 2, 24, 18, col, r, 1);
+      if (opts.snow) {
+        ctx.beginPath();
+        ctx.moveTo(cx - 24, gy - 30);
+        ctx.quadraticCurveTo(cx - 14, gy - 48, cx + 4, gy - 44);
+        ctx.quadraticCurveTo(cx + 14, gy - 40, cx + 16, gy - 32);
+        ctx.quadraticCurveTo(cx + 6, gy - 36, cx - 4, gy - 32);
+        ctx.quadraticCurveTo(cx - 14, gy - 34, cx - 24, gy - 30);
+        ctx.fillStyle = '#eef4fb';
+        ctx.fill();
+        ctx.strokeStyle = '#8fa2bd';
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+      }
+      if (opts.lava) {
+        glow(ctx, { x: cx - 2, y: gy - 16 }, 16, 0xff3a2a, 0.45);
+        line(ctx, [[cx - 12, gy - 32], [cx - 6, gy - 22], [cx - 9, gy - 12], [cx - 2, gy - 3]], rgbaHex(0xff5a3a, 1), 1.6);
+        line(ctx, [[cx - 12, gy - 32], [cx - 6, gy - 22], [cx - 9, gy - 12], [cx - 2, gy - 3]], '#ffd0a0', 0.6);
+      }
+      if (opts.moss) tuft(ctx, cx - 22, gy + 2, 9, 5, opts.moss[0], opts.moss[1], r);
+    },
+  });
+}
 
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 20;
-
-    // Ground shadow (increased opacity)
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    utils.fillEllipse(ctx, w / 2, h - s, 9 * s, 2.2 * s);
-
-
-    // Massive angular polygon boulder via clip
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(w * 0.10, h * 0.90);
-    ctx.lineTo(w * 0.05, h * 0.55);
-    ctx.lineTo(w * 0.14, h * 0.22);
-    ctx.lineTo(w * 0.38, h * 0.08);
-    ctx.lineTo(w * 0.65, h * 0.06);
-    ctx.lineTo(w * 0.88, h * 0.22);
-    ctx.lineTo(w * 0.95, h * 0.58);
-    ctx.lineTo(w * 0.85, h * 0.88);
-    ctx.closePath();
-    ctx.clip();
-
-    // Stone texture fill (darkened 30%: 0x4a4a50 → 0x343439)
-    utils.drawStoneTexture(ctx, w * 0.05, h * 0.06, w * 0.90, h * 0.84, 0x343439);
-
-    // Depth shading overlay
-    const grad = ctx.createLinearGradient(w * 0.1, h * 0.1, w * 0.9, h * 0.9);
-    grad.addColorStop(0, 'rgba(63,63,70,0.40)');
-    grad.addColorStop(0.35, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, 'rgba(7,7,10,0.55)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
-
-    ctx.restore();
-
-
-    // Moss on top — green ellipse overlay
-    ctx.fillStyle = 'rgba(55,90,40,0.38)';
-    utils.fillEllipse(ctx, w * 0.48, h * 0.20, w * 0.28, h * 0.12);
-    ctx.fillStyle = 'rgba(70,110,50,0.22)';
-    utils.fillEllipse(ctx, w * 0.52, h * 0.16, w * 0.18, h * 0.08);
-
-    // Edge highlight (top-left face, reduced)
-    ctx.strokeStyle = 'rgba(70,74,80,0.40)';
-    ctx.lineWidth = 0.8 * s;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.14, h * 0.22);
-    ctx.lineTo(w * 0.38, h * 0.08);
-    ctx.lineTo(w * 0.65, h * 0.06);
-    ctx.lineTo(w * 0.88, h * 0.22);
-    ctx.stroke();
-  },
-};
+export const BoulderDrawer = boulder('decor_boulder', 0x8e919c, { moss: ['#4f8a3a', '#8cc24f'] });
+export const BoulderSnowDrawer = boulder('decor_boulder_snow', 0x6f7f96, { snow: true });
+export const BoulderSandDrawer = boulder('decor_boulder_sand', 0xc79a62);
+export const BoulderBasaltDrawer = boulder('decor_boulder_basalt', 0x3e3446, { lava: true });

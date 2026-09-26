@@ -1,301 +1,217 @@
 // src/graphics/sprites/monsters/GoblinChief.ts
-import type { EntityDrawer, MonsterAction } from '../types';
-import type { DrawUtils } from '../../DrawUtils';
+//
+// 哥布林首领 — a bulkier goblin warlord: horned iron helm with nose guard,
+// wolf-pelt mantle with a skull pauldron, studded leather, red war paint
+// and a huge rusted cleaver brought down in an overhead chop.
+import {
+  CENTER_X,
+  GROUND_Y,
+  blobPath,
+  cel,
+  ellipsePath,
+  glow,
+  inBone,
+  lerpV,
+  limb,
+  polyPath,
+  tone,
+  vec,
+  type V,
+} from '../rig/Rig';
+import { basePose, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
+import { humanoidMonster } from '../rig/MonsterKit';
+import { goblinArm, goblinHand, goblinHead, goblinLeg, type GoblinLook } from './Goblin';
 
-const SKIN        = 0x3f6121;
-const SKIN_DARK   = 0x29430b;
-const SKIN_LIGHT  = 0x557738;
-const LEATHER     = 0x3f2716;
-const METAL_COLOR = 0x4a4a56;
-const GOLD_COLOR  = 0x614e21;
-const EYE_COLOR   = 0xcc4400;
+const LOOK: GoblinLook = {
+  skin: tone(0x65913a, { light: 0.32 }),
+  skinFar: tone(0x42632a, { light: 0.18 }),
+  cloth: tone(0x6a3b24),
+  strap: tone(0x3e2616),
+};
 
-export const GoblinChiefDrawer: EntityDrawer = {
-  key: 'monster_goblin_chief',
-  frameW: 60,
-  frameH: 68,
-  totalFrames: 20,
+const IRON = tone(0x7f8694, { light: 0.45 });
+const IRON_DARK = tone(0x4d5260);
+const HORN = tone(0xe6dab8, { light: 0.4, shadow: 0.3 });
+const FUR = tone(0x7a6e62, { light: 0.35 });
+const FUR_DARK = tone(0x4f463e);
+const LEATHER = tone(0x5e3a22, { light: 0.3 });
+const RUST = tone(0x9c5a2c);
+const BONE = tone(0xece2c6, { light: 0.4, shadow: 0.3 });
 
-  drawFrame(ctx, frame, action, w, h, utils) {
-    const act = action as MonsterAction;
-    const s = w / 60; // ~25% bigger than goblin
-
-    const frameCounts: Record<MonsterAction, number> = { idle: 4, walk: 6, attack: 4, hurt: 2, death: 4 };
-    const count = frameCounts[act] || 4;
-    const localFrame = frame % count;
-    const t = count > 1 ? localFrame / (count - 1) : 0;
-    const phase = (localFrame / count) * Math.PI * 2;
-
-    let alpha = 1;
-    let bodyOffsetX = 0;
-    let bodyOffsetY = 0;
-    let attackLunge = 0;
-    let globalRotation = 0;
-
-    switch (act) {
-      case 'idle':
-        bodyOffsetY = Math.sin(phase) * 0.9 * s;
-        break;
-      case 'walk':
-        bodyOffsetX = Math.sin(phase) * 1.8 * s;
-        bodyOffsetY = -Math.abs(Math.sin(phase)) * 1.8 * s;
-        break;
-      case 'attack':
-        attackLunge = t;
-        bodyOffsetX = t * 6 * s;
-        bodyOffsetY = -t * 3 * s;
-        break;
-      case 'hurt':
-        bodyOffsetX = -t * 5 * s;
-        alpha = 0.75 + t * 0.25;
-        break;
-      case 'death':
-        globalRotation = t * Math.PI * 0.55;
-        bodyOffsetY = t * h * 0.35;
-        alpha = 1 - t * 0.8;
-        break;
-    }
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    const cx = w / 2;
-    const baseY = h * 0.96;
-
-    ctx.translate(cx, baseY);
-    ctx.rotate(globalRotation);
-    ctx.translate(-cx, -baseY);
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    utils.fillEllipse(ctx, cx + bodyOffsetX * 0.4, baseY + 1 * s, 15 * s, 3.5 * s);
-
-    // ── Legs with metal-capped boots ─────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const legPhase = act === 'walk' ? phase + (side === -1 ? 0 : Math.PI) : 0;
-      const hipX = cx + side * 6 * s + bodyOffsetX * 0.4;
-      const hipY = baseY - 20 * s + bodyOffsetY;
-      const kneeX = hipX + side * 1.5 * s + Math.sin(legPhase) * 2.5 * s;
-      const kneeY = hipY + 10 * s;
-      const footX = hipX + side * 2.5 * s;
-      const footY = baseY - 1 * s;
-
-      utils.drawLimb(ctx, [
-        { x: hipX, y: hipY },
-        { x: kneeX, y: kneeY },
-        { x: footX, y: footY },
-      ], 4 * s, SKIN_DARK);
-
-      // Metal-capped boot
-      utils.drawMetalSurface(ctx, footX - 3.5 * s, footY - 2 * s, 7 * s, 4 * s, METAL_COLOR);
-    }
-
-    // ── Torso ─────────────────────────────────────────────────────────────────
-    const torsoX = cx + bodyOffsetX;
-    const torsoY = baseY - 34 * s + bodyOffsetY;
-
-    // Leather base
-    utils.drawLeatherTexture(ctx, torsoX - 8 * s, torsoY - 11 * s, 16 * s, 18 * s, LEATHER);
-
-    // Soft outline glow (purple-green — goblin)
-    utils.zoneEntityOutline(ctx, w, h);
-
-    // Skin fill
-    const torsoGrad = ctx.createRadialGradient(torsoX - 2 * s, torsoY - 3 * s, 0, torsoX, torsoY, 10 * s);
-    torsoGrad.addColorStop(0, utils.rgb(SKIN_LIGHT));
-    torsoGrad.addColorStop(0.6, utils.rgb(SKIN));
-    torsoGrad.addColorStop(1, utils.rgb(SKIN_DARK));
-    ctx.fillStyle = torsoGrad;
-    utils.fillEllipse(ctx, torsoX, torsoY, 9 * s, 11 * s);
-
-    // End soft outline
-    utils.softOutlineEnd(ctx);
-
-    // Rim light on torso
-    utils.zoneEntityRimLight(ctx, torsoX, torsoY, 9 * s, 11 * s);
-
-    // ── Shoulder pauldrons ───────────────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const pX = torsoX + side * 9 * s;
-      const pY = torsoY - 8 * s;
-      utils.drawMetalSurface(ctx, pX - 3 * s, pY - 2 * s, 6 * s, 5 * s, METAL_COLOR);
-      utils.fillEllipse(ctx, pX, pY, 4 * s, 3.5 * s);
-    }
-
-    // ── Arms ─────────────────────────────────────────────────────────────────
-    for (const side of [-1, 1]) {
-      const isRight = side === 1;
-      const armPhase = act === 'walk' ? phase + (isRight ? Math.PI : 0) : 0;
-      const shoulderX = torsoX + side * 9 * s;
-      const shoulderY = torsoY - 7 * s;
-
-      let elbowX: number, elbowY: number, handX: number, handY: number;
-
-      if (isRight && act === 'attack') {
-        elbowX = shoulderX + side * 5 * s + attackLunge * 4 * s;
-        elbowY = shoulderY + 6 * s - attackLunge * 4 * s;
-        handX = elbowX + side * 5 * s + attackLunge * 3 * s;
-        handY = elbowY + 6 * s - attackLunge * 3 * s;
-      } else {
-        elbowX = shoulderX + side * 3 * s + Math.sin(armPhase) * 2 * s;
-        elbowY = shoulderY + 7 * s;
-        handX = elbowX + side * 2 * s + Math.sin(armPhase) * 1.5 * s;
-        handY = elbowY + 8 * s + Math.sin(armPhase) * 2 * s;
-      }
-
-      utils.drawLimb(ctx, [
-        { x: shoulderX, y: shoulderY },
-        { x: elbowX, y: elbowY },
-        { x: handX, y: handY },
-      ], 4.5 * s, SKIN);
-
-      // War axe in right hand
-      if (isRight) {
-        const axeX = handX + side * 1.5 * s;
-        const axeY = handY;
-        // Handle
-        ctx.fillStyle = utils.rgb(0x3f2716);
-        ctx.fillRect(axeX - 1.2 * s, axeY - 16 * s, 2.4 * s, 18 * s);
-        // Blade body
-        utils.drawMetalSurface(ctx, axeX + 1 * s, axeY - 20 * s, 8 * s, 12 * s, METAL_COLOR);
-        // Blade polygon — forward edge
-        ctx.fillStyle = utils.rgb(utils.lighten(METAL_COLOR, 20));
-        ctx.beginPath();
-        ctx.moveTo(axeX + 9 * s, axeY - 20 * s);
-        ctx.lineTo(axeX + 14 * s, axeY - 16 * s);
-        ctx.lineTo(axeX + 9 * s, axeY - 8 * s);
-        ctx.closePath();
-        ctx.fill();
-        // Back spike
-        ctx.fillStyle = utils.rgb(METAL_COLOR);
-        ctx.beginPath();
-        ctx.moveTo(axeX + 1 * s, axeY - 16 * s);
-        ctx.lineTo(axeX - 5 * s, axeY - 14 * s);
-        ctx.lineTo(axeX + 1 * s, axeY - 12 * s);
-        ctx.closePath();
-        ctx.fill();
+function studdedTorso(ctx: CanvasRenderingContext2D, sk: Skeleton): void {
+  inBone(ctx, sk.neck, sk.pelvis, (len) => {
+    const body = [vec(-6, 0.4), vec(1, -1), vec(6.6, 1.6), vec(8.6, len * 0.55), vec(6.6, len + 0.6), vec(-5.4, len + 0.8), vec(-7, len * 0.5)];
+    cel(ctx, () => blobPath(ctx, body), LOOK.skin, { band: 1.6 });
+    // Leather cuirass with iron studs
+    const armor = [vec(-5.6, 3.6), vec(6.8, 3.4), vec(8, len * 0.62), vec(6.2, len - 1), vec(-5, len - 0.6), vec(-6.4, len * 0.5)];
+    cel(ctx, () => blobPath(ctx, armor), LEATHER, { band: 1.2 });
+    ctx.fillStyle = IRON.light;
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        ctx.fillRect(-2.6 + c * 3.4, 5.4 + r * 3.2, 0.9, 0.9);
       }
     }
-
-    // ── Head ─────────────────────────────────────────────────────────────────
-    const headX = torsoX + bodyOffsetX * 0.05;
-    const headY = torsoY - 22 * s + bodyOffsetY * 0.1;
-
-    // Neck
-    ctx.fillStyle = utils.rgb(SKIN_DARK);
-    ctx.fillRect(headX - 4 * s, torsoY - 14 * s, 8 * s, 6 * s);
-
-    // Skull base
-    const headGrad = ctx.createRadialGradient(headX - 2 * s, headY - 2 * s, 0, headX, headY, 11 * s);
-    headGrad.addColorStop(0, utils.rgb(SKIN_LIGHT));
-    headGrad.addColorStop(0.6, utils.rgb(SKIN));
-    headGrad.addColorStop(1, utils.rgb(SKIN_DARK));
-    ctx.fillStyle = headGrad;
-    utils.fillEllipse(ctx, headX, headY, 10.5 * s, 10 * s);
-
-    // Heavy brow ridge
-    ctx.strokeStyle = utils.rgb(SKIN_DARK);
-    ctx.lineWidth = 3 * s;
-    ctx.beginPath();
-    ctx.arc(headX, headY - 2 * s, 8 * s, Math.PI * 1.1, Math.PI * 1.9);
-    ctx.stroke();
-
-    // Battle scar across face — diagonal stroke + perpendicular tick marks
-    ctx.strokeStyle = utils.rgb(utils.darken(SKIN, 25), 0.7);
-    ctx.lineWidth = 1.2 * s;
-    ctx.beginPath();
-    ctx.moveTo(headX - 5 * s, headY - 4 * s);
-    ctx.lineTo(headX + 4 * s, headY + 3 * s);
-    ctx.stroke();
-    // Tick marks (stitches)
-    ctx.lineWidth = 0.7 * s;
-    for (let i = 0; i < 4; i++) {
-      const tx = headX - 4 * s + i * 2.5 * s;
-      const ty = headY - 3 * s + i * 1.75 * s;
+    // Belt with a trophy skull buckle
+    cel(ctx, () => polyPath(ctx, [vec(-5.8, len - 1.6), vec(7.2, len - 2), vec(7.4, len + 0.8), vec(-5.8, len + 1.2)]), LOOK.strap, { band: 0.4 });
+    cel(ctx, () => ellipsePath(ctx, vec(3.8, len - 0.4), 2, 1.8), BONE, { band: 0.4 });
+    ctx.fillStyle = '#2a1a12';
+    ctx.fillRect(3, len - 0.9, 0.7, 0.7);
+    ctx.fillRect(4.3, len - 0.9, 0.7, 0.7);
+    // Loincloth flaps
+    cel(ctx, () => polyPath(ctx, [vec(0.8, len + 0.8), vec(7, len), vec(6.4, len + 8.4), vec(3.8, len + 7.2), vec(1.4, len + 8.6)]), LOOK.cloth, { band: 0.8 });
+    // Wolf-pelt mantle
+    const mantle = [vec(-8, 1.6), vec(-3, -2.2), vec(3.6, -1.6), vec(8.4, 1.8), vec(7.6, 5.6), vec(1, 6.6), vec(-6, 6.2), vec(-9.4, 4.6)];
+    cel(ctx, () => blobPath(ctx, mantle), FUR, { band: 1.2 });
+    ctx.strokeStyle = FUR_DARK.base;
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < 6; i++) {
+      const x = -7 + i * 2.7;
       ctx.beginPath();
-      ctx.moveTo(tx - 1 * s, ty + 1.2 * s);
-      ctx.lineTo(tx + 1 * s, ty - 1.2 * s);
+      ctx.moveTo(x, 4.4);
+      ctx.lineTo(x + 0.6, 6.8);
       ctx.stroke();
     }
+  });
+}
 
-    // Bulbous warty nose
-    ctx.fillStyle = utils.rgb(SKIN);
-    utils.fillEllipse(ctx, headX + 1 * s, headY + 2 * s, 4 * s, 3 * s);
-    ctx.fillStyle = utils.rgb(utils.darken(SKIN, 15));
-    utils.fillCircle(ctx, headX + 3 * s, headY + 1 * s, 1.2 * s);
+function hornedHelm(ctx: CanvasRenderingContext2D, sk: Skeleton): void {
+  ctx.save();
+  ctx.translate(sk.head.x, sk.head.y);
+  ctx.rotate(sk.headAng);
+  // Horns (far one first)
+  cel(ctx, () => polyPath(ctx, [vec(-3, -5.4), vec(-7, -10), vec(-4.6, -14.6), vec(-3.6, -10), vec(-0.6, -6.6)]), tone(0xbcae8c), { band: 0.6 });
+  // Dome
+  const dome = [vec(-5.6, -1.4), vec(-4.6, -6.6), vec(1.2, -8.8), vec(6.4, -6), vec(7.6, -1.8), vec(2, -0.8)];
+  cel(ctx, () => blobPath(ctx, dome), IRON, { band: 1.4, hi: 0.7 });
+  // Rim band + nose guard
+  cel(ctx, () => polyPath(ctx, [vec(-6, -2.4), vec(7.8, -2.8), vec(7.8, -1), vec(-6, -0.6)]), IRON_DARK, { band: 0.5 });
+  cel(ctx, () => polyPath(ctx, [vec(6, -2), vec(7.6, -2), vec(7.8, 2.6), vec(6.8, 3.4)]), IRON_DARK, { band: 0.3 });
+  ctx.fillStyle = IRON.light;
+  for (const x of [-3.4, 0, 3.4]) ctx.fillRect(x, -2, 0.8, 0.8);
+  // Near horn
+  cel(ctx, () => polyPath(ctx, [vec(1.4, -7.6), vec(2.4, -12.6), vec(-1.6, -17.2), vec(0.6, -12.2), vec(-1.2, -7.8)]), HORN, { band: 0.7 });
+  ctx.restore();
+}
 
-    // Redder eyes
-    for (const side of [-1, 1]) {
-      const ex = headX + side * 4 * s;
-      const ey = headY - 1.5 * s;
-      ctx.fillStyle = utils.rgb(SKIN_DARK, 0.6);
-      utils.fillEllipse(ctx, ex, ey, 3 * s, 2.5 * s);
-      ctx.fillStyle = utils.rgb(EYE_COLOR);
-      utils.fillEllipse(ctx, ex, ey, 1.8 * s, 1.8 * s);
-      ctx.fillStyle = '#200800';
-      utils.fillCircle(ctx, ex, ey, 0.7 * s);
-      ctx.fillStyle = 'rgba(255,150,80,0.4)';
-      utils.fillCircle(ctx, ex - 0.5 * s, ey - 0.5 * s, 0.35 * s);
-    }
-
-    // Mouth with tusk
-    ctx.strokeStyle = '#1a0a00';
-    ctx.lineWidth = 1 * s;
+function warPaint(ctx: CanvasRenderingContext2D, sk: Skeleton): void {
+  ctx.save();
+  ctx.translate(sk.head.x, sk.head.y);
+  ctx.rotate(sk.headAng);
+  ctx.strokeStyle = 'rgba(190,30,30,0.9)';
+  ctx.lineWidth = 0.8;
+  for (const y of [1.4, 2.8]) {
     ctx.beginPath();
-    ctx.moveTo(headX - 3.5 * s, headY + 4 * s);
-    ctx.lineTo(headX + 3.5 * s, headY + 5 * s);
+    ctx.moveTo(1.2, y);
+    ctx.lineTo(4.2, y + 0.6);
     ctx.stroke();
-    // Tusk
-    ctx.fillStyle = '#e8d8b0';
-    ctx.beginPath();
-    ctx.moveTo(headX - 2 * s, headY + 5 * s);
-    ctx.lineTo(headX - 4 * s, headY + 9 * s);
-    ctx.lineTo(headX - 1 * s, headY + 5 * s);
-    ctx.closePath();
-    ctx.fill();
+  }
+  ctx.restore();
+}
 
-    // Large pointed ears
-    for (const side of [-1, 1]) {
-      const earBaseX = headX + side * 9 * s;
-      const earBaseY = headY - 1 * s;
-      const earTipX = earBaseX + side * 6 * s;
-      const earTipY = earBaseY - 7 * s;
-      ctx.fillStyle = utils.rgb(SKIN);
-      ctx.beginPath();
-      ctx.moveTo(earBaseX - side * 2 * s, earBaseY + 2 * s);
-      ctx.lineTo(earTipX, earTipY);
-      ctx.lineTo(earBaseX + side * 2 * s, earBaseY - 2 * s);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = utils.rgb(utils.darken(SKIN, 20), 0.5);
-      ctx.beginPath();
-      ctx.moveTo(earBaseX - side * 0.5 * s, earBaseY + 1 * s);
-      ctx.lineTo(earTipX, earTipY + 3 * s);
-      ctx.lineTo(earBaseX + side * 0.5 * s, earBaseY - 1 * s);
-      ctx.closePath();
-      ctx.fill();
-    }
+function skullPauldron(ctx: CanvasRenderingContext2D, sh: V): void {
+  cel(ctx, () => ellipsePath(ctx, vec(sh.x + 0.4, sh.y - 0.4), 4, 3.4), BONE, { band: 0.9 });
+  ctx.fillStyle = '#2a1a12';
+  ctx.beginPath();
+  ctx.ellipse(sh.x + 1.6, sh.y - 0.6, 0.9, 1.1, 0, 0, Math.PI * 2);
+  ctx.ellipse(sh.x - 0.8, sh.y - 0.6, 0.9, 1.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(sh.x - 0.2, sh.y + 1.2, 1.4, 1.2);
+}
 
-    // Battered crown (jagged polygon)
-    const crownY = headY - 11 * s;
-    utils.drawMetalSurface(ctx, headX - 8 * s, crownY, 16 * s, 5 * s, GOLD_COLOR);
-    // Jagged points
-    ctx.fillStyle = utils.rgb(GOLD_COLOR);
-    const points = [-6, -3, 0, 3, 6];
-    for (const px of points) {
-      ctx.beginPath();
-      ctx.moveTo(headX + (px - 1.5) * s, crownY);
-      ctx.lineTo(headX + px * s, crownY - 5 * s);
-      ctx.lineTo(headX + (px + 1.5) * s, crownY);
-      ctx.closePath();
-      ctx.fill();
-    }
-    // Crown gem — keep bright (emissive)
-    ctx.fillStyle = '#cc2222';
-    utils.fillCircle(ctx, headX, crownY + 2.5 * s, 2 * s);
-    ctx.fillStyle = 'rgba(255,100,100,0.5)';
-    utils.fillCircle(ctx, headX - 0.5 * s, crownY + 2 * s, 0.8 * s);
+function cleaver(ctx: CanvasRenderingContext2D, at: V, angle: number): void {
+  ctx.save();
+  ctx.translate(at.x, at.y);
+  ctx.rotate(angle);
+  cel(ctx, () => polyPath(ctx, [vec(-0.9, 5), vec(0.9, 5), vec(0.9, -3), vec(-0.9, -3)]), LEATHER, { band: 0.3 });
+  cel(ctx, () => ellipsePath(ctx, vec(0, 5.6), 1.3, 1.3), IRON_DARK, { band: 0.3 });
+  // Broad chopping blade, spine on the back (−x), edge forward (+x)
+  const blade = [vec(-1.6, -2.6), vec(1.4, -3.2), vec(6.4, -6.4), vec(6.8, -15.4), vec(-1.2, -16.8), vec(-2.2, -15)];
+  cel(ctx, () => polyPath(ctx, blade), IRON, { band: 1, hi: 0.5 });
+  // Rust blotches and a bright honed edge
+  ctx.fillStyle = RUST.base;
+  ctx.beginPath();
+  ctx.ellipse(1.4, -12.2, 1.6, 1.1, 0.3, 0, Math.PI * 2);
+  ctx.ellipse(3.6, -8, 1.1, 0.8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(240,244,250,0.85)';
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(6.2, -6.8);
+  ctx.lineTo(6.5, -15);
+  ctx.stroke();
+  ctx.fillStyle = '#2a2a30';
+  ctx.beginPath();
+  ctx.arc(0.6, -14.4, 0.9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
 
-    ctx.restore();
+const SKIN: HumanSkin = {
+  prop: {
+    thigh: 10.5, shin: 10.5, upperArm: 9, foreArm: 8.5,
+    torso: 14.5, neck: 6.8, ankle: 1.8,
+    hipN: vec(2, 0), hipF: vec(-2.4, -0.4),
+    shN: vec(1.2, 3.4), shF: vec(-4.2, 3),
+  },
+  armFar(ctx, sk) {
+    goblinArm(ctx, sk.shF, sk.elF, sk.handF, LOOK.skinFar);
+    goblinHand(ctx, sk.handF, LOOK.skinFar);
+  },
+  legFar(ctx, sk) {
+    goblinLeg(ctx, sk.hipF, sk.kneeF, sk.footF, sk.soleF, LOOK.skinFar);
+  },
+  legNear(ctx, sk) {
+    goblinLeg(ctx, sk.hipN, sk.kneeN, sk.footN, sk.soleN, LOOK.skin);
+    // Iron knee guard
+    cel(ctx, () => ellipsePath(ctx, vec(sk.kneeN.x + 0.8, sk.kneeN.y), 2.4, 2.1), IRON, { band: 0.6 });
+  },
+  torso(ctx, sk) {
+    studdedTorso(ctx, sk);
+  },
+  head(ctx, sk, p, t) {
+    goblinHead(ctx, sk, p, t, LOOK, 1.6);
+    warPaint(ctx, sk);
+    hornedHelm(ctx, sk);
+  },
+  armNear(ctx, sk) {
+    goblinArm(ctx, sk.shN, sk.elN, sk.handN, LOOK.skin);
+    limb(ctx, lerpV(sk.elN, sk.handN, 0.2), lerpV(sk.elN, sk.handN, 0.8), 2.2, 2, LEATHER);
+    skullPauldron(ctx, sk.shN);
+  },
+  weapon(ctx, sk, p) {
+    cleaver(ctx, sk.handN, p.wpn);
+    goblinHand(ctx, sk.handN, LOOK.skin);
   },
 };
+
+const READY: HumanPose = basePose({
+  root: vec(CENTER_X - 1.5, 71.5),
+  lean: 0.24,
+  head: -0.2,
+  footN: vec(CENTER_X + 6, GROUND_Y),
+  footF: vec(CENTER_X - 6.5, GROUND_Y),
+  handN: vec(CENTER_X + 8, 67),
+  handF: vec(CENTER_X + 2.5, 68),
+  wpn: 0.9,
+  flow: 0.1,
+});
+
+export const GoblinChiefDrawer = humanoidMonster({
+  key: 'monster_goblin_chief',
+  // Wide for the cleaver arc; width doesn't move the sprite in-game.
+  frameW: 84,
+  frameH: 68,
+  scale: 1.32,
+  skin: SKIN,
+  ready: READY,
+  attack: 'overhead',
+  contactWpn: 2.1,
+  walk: { stride: 6, lift: 3.4, bob: 1.5, lean: 0.06, armSwing: 2.4 },
+  shadowR: 12,
+  fx: (ctx, p, sk, act) => {
+    // Elite menace: faint ember glow in the eyes
+    if (act === 'death') return;
+    const eye = vec(sk.head.x + Math.sin(sk.headAng + 1.2) * 5, sk.head.y - Math.cos(sk.headAng + 1.2) * 5);
+    glow(ctx, eye, 2.4, 0xff5a2a, 0.35 + p.fx * 0.3);
+  },
+});

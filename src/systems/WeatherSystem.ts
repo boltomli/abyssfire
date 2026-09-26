@@ -1,19 +1,32 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from '../config';
 import type { RenderQualityProfile } from '../rendering/RenderQuality';
+import type { MapTheme } from '../data/types';
+import { getCurrentZoneTheme } from '../graphics/ZonePalette';
 
 interface WeatherConfig {
-  type: 'rain' | 'snow' | 'ember_storm' | 'ash' | 'none';
+  type: 'rain' | 'snow' | 'ember_storm' | 'ash' | 'sand' | 'none';
   /** Per-zone environmental ambience particles */
-  ambience?: 'fireflies' | 'dust_motes' | 'sparks' | 'bubbles';
+  ambience?: 'fireflies' | 'dust_motes' | 'sparks' | 'bubbles' | 'wisps' | 'pollen';
+  /** Tint for dust-like ambience */
+  tint?: number;
 }
 
 const ZONE_WEATHER: Record<string, WeatherConfig> = {
-  emerald_plains:   { type: 'none', ambience: 'fireflies' },
-  twilight_forest:  { type: 'rain', ambience: 'dust_motes' },
-  anvil_mountains:  { type: 'ash', ambience: 'sparks' },
-  scorching_desert: { type: 'ash', ambience: 'dust_motes' },
+  emerald_plains:   { type: 'none', ambience: 'pollen', tint: 0xffe8a0 },
+  twilight_forest:  { type: 'none', ambience: 'wisps' },
+  anvil_mountains:  { type: 'snow', ambience: 'dust_motes', tint: 0xdce8f4 },
+  scorching_desert: { type: 'sand', ambience: 'dust_motes', tint: 0xf0d8a8 },
   abyss_rift:       { type: 'ember_storm', ambience: 'sparks' },
+};
+
+/** Theme fallback for sub-dungeons / dungeon floors. */
+const THEME_WEATHER: Record<MapTheme, string> = {
+  plains: 'emerald_plains',
+  forest: 'twilight_forest',
+  mountain: 'anvil_mountains',
+  desert: 'scorching_desert',
+  abyss: 'abyss_rift',
 };
 
 export class WeatherSystem {
@@ -33,14 +46,14 @@ export class WeatherSystem {
 
   setZone(zoneId: string): void {
     this.cleanup();
-    const config = ZONE_WEATHER[zoneId];
+    const config = ZONE_WEATHER[zoneId] ?? ZONE_WEATHER[THEME_WEATHER[getCurrentZoneTheme()]];
     if (!config) return;
 
     if (config.type !== 'none') {
       this.createWeather(config.type);
     }
     if (config.ambience) {
-      this.createAmbience(config.ambience);
+      this.createAmbience(config.ambience, config.tint);
     }
   }
 
@@ -50,7 +63,31 @@ export class WeatherSystem {
       case 'snow': this.createSnow(); break;
       case 'ember_storm': this.createEmberStorm(); break;
       case 'ash': this.createAsh(); break;
+      case 'sand': this.createSand(); break;
     }
+  }
+
+  private createSand(): void {
+    this.ensureTexture('sand_streak', (g) => {
+      g.fillStyle(0xf2dcae, 0.8);
+      g.fillRect(0, 1, 10, 1);
+      g.fillStyle(0xffffff, 0.4);
+      g.fillRect(3, 0, 5, 1);
+    }, 10, 3);
+
+    this.weatherEmitter = this.scene.add.particles(0, 0, 'sand_streak', {
+      x: -30,
+      y: { min: -20, max: GAME_HEIGHT },
+      lifespan: { min: 2200, max: 3600 },
+      speedX: { min: 380, max: 560 },
+      speedY: { min: 10, max: 40 },
+      scale: { min: 0.8, max: 1.6 },
+      alpha: { start: 0.35, end: 0 },
+      frequency: this.frequency(90),
+      quantity: 1,
+    });
+    this.weatherEmitter.setScrollFactor(0);
+    this.weatherEmitter.setDepth(997);
   }
 
   private createRain(): void {
@@ -146,12 +183,42 @@ export class WeatherSystem {
 
   // ── Environmental Ambience ──────────────────────────────
 
-  private createAmbience(type: string): void {
+  private createAmbience(type: string, tint?: number): void {
     switch (type) {
       case 'fireflies': this.createFireflies(); break;
-      case 'dust_motes': this.createDustMotes(); break;
+      case 'dust_motes': this.createDustMotes(tint); break;
+      case 'pollen': this.createDustMotes(tint ?? 0xffe8a0, true); break;
       case 'sparks': this.createSparks(); break;
+      case 'wisps': this.createWisps(); break;
     }
+  }
+
+  /** Bioluminescent motes (twilight forest): slow drifting cyan / violet glows. */
+  private createWisps(): void {
+    this.ensureTexture('wisp', (g) => {
+      g.fillStyle(0xffffff, 0.25);
+      g.fillCircle(4, 4, 4);
+      g.fillStyle(0xffffff, 0.55);
+      g.fillCircle(4, 4, 2.4);
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(4, 4, 1.2);
+    }, 8, 8);
+
+    this.ambienceEmitter = this.scene.add.particles(0, 0, 'wisp', {
+      x: { min: -GAME_WIDTH, max: GAME_WIDTH * 2 },
+      y: { min: -GAME_HEIGHT, max: GAME_HEIGHT * 2 },
+      lifespan: { min: 4000, max: 7000 },
+      speed: { min: 3, max: 12 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.55, end: 0.25 },
+      alpha: { start: 0.8, end: 0 },
+      tint: [0x7ff5e6, 0xc9a2ff, 0x9ad0ff],
+      frequency: this.frequency(260),
+      quantity: 1,
+      blendMode: Phaser.BlendModes.ADD,
+    });
+    this.ambienceEmitter.setScrollFactor(0.5);
+    this.ambienceEmitter.setDepth(996);
   }
 
   private createFireflies(): void {
@@ -180,7 +247,7 @@ export class WeatherSystem {
     this.ambienceEmitter.setDepth(996);
   }
 
-  private createDustMotes(): void {
+  private createDustMotes(tint = 0xccbb99, bright = false): void {
     this.ambienceEmitter = this.scene.add.particles(0, 0, 'particle_circle', {
       x: { min: -GAME_WIDTH, max: GAME_WIDTH * 2 },
       y: { min: -GAME_HEIGHT, max: GAME_HEIGHT * 2 },
@@ -188,10 +255,11 @@ export class WeatherSystem {
       speed: { min: 1, max: 5 },
       angle: { min: 0, max: 360 },
       scale: { start: 0.5, end: 0.8 },
-      alpha: { start: 0.1, end: 0 },
-      tint: 0xccbb99,
-      frequency: this.frequency(600),
+      alpha: { start: bright ? 0.35 : 0.14, end: 0 },
+      tint,
+      frequency: this.frequency(bright ? 420 : 600),
       quantity: 1,
+      blendMode: bright ? Phaser.BlendModes.ADD : Phaser.BlendModes.NORMAL,
     });
     this.ambienceEmitter.setScrollFactor(0.3);
     this.ambienceEmitter.setDepth(996);
