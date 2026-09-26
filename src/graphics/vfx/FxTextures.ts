@@ -38,7 +38,7 @@ function make(scene: Phaser.Scene, key: string, w: number, h: number, res: numbe
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(w * res);
   canvas.height = Math.ceil(h * res);
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
   ctx.scale(res, res);
   draw(ctx, w, h);

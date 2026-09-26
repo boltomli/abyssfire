@@ -1361,7 +1361,7 @@ export class ZoneScene extends Phaser.Scene {
     if (!this.textures.exists(dustKey)) {
       const c = document.createElement('canvas');
       c.width = 8; c.height = 8;
-      const ctx = c.getContext('2d')!;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
       const grad = ctx.createRadialGradient(4, 4, 0, 4, 4, 4);
       grad.addColorStop(0, 'rgba(200,190,170,0.3)');
       grad.addColorStop(1, 'rgba(200,190,170,0)');

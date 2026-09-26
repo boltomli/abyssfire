@@ -41,7 +41,7 @@ export function ensureGlyph(scene: Phaser.Scene, id: GlyphId | string): string {
   const canvas = document.createElement('canvas');
   canvas.width = GLYPH_SIZE;
   canvas.height = GLYPH_SIZE;
-  drawGlyph(canvas.getContext('2d')!, id, GLYPH_SIZE);
+  drawGlyph(canvas.getContext('2d', { willReadFrequently: true })!, id, GLYPH_SIZE);
   scene.textures.addCanvas(key, canvas);
   return key;
 }

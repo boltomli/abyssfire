@@ -329,6 +329,7 @@ export function clothChain(anchor: V, length: number, segments: number, flow: nu
 // ── Frame compositing ───────────────────────────────────────────────────
 
 const canvasCache = new Map<string, HTMLCanvasElement>();
+const GLOW_DOWNSAMPLE = 3;
 
 function scratch(name: string, w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const key = `${name}:${w}x${h}`;
@@ -452,12 +453,21 @@ export function renderRigFrame(
   }
   ctx.globalAlpha = finish.alpha ?? 1;
   if (finish.glowColor) {
-    ctx.shadowColor = finish.glowColor;
-    ctx.shadowBlur = finish.glowBlur ?? 6;
+    // The glow is soft, so blur a 1/3-size copy and upscale it — full-size
+    // shadowBlur was the single most expensive step of sheet generation.
+    const gw = Math.ceil(w / GLOW_DOWNSAMPLE), gh = Math.ceil(h / GLOW_DOWNSAMPLE);
+    const [glowC, gx] = scratch('glow', gw, gh);
+    // Draw the silhouette off-canvas so only its shadow lands.
+    gx.shadowColor = finish.glowColor;
+    gx.shadowBlur = (finish.glowBlur ?? 6) / GLOW_DOWNSAMPLE;
+    gx.shadowOffsetX = gw * 2;
+    gx.drawImage(out, -gw * 2, 0, w / GLOW_DOWNSAMPLE, h / GLOW_DOWNSAMPLE);
+    gx.shadowBlur = 0;
+    gx.shadowOffsetX = 0;
+    gx.shadowColor = 'transparent';
+    ctx.drawImage(glowC, 0, 0, gw * GLOW_DOWNSAMPLE, gh * GLOW_DOWNSAMPLE);
   }
   ctx.drawImage(out, 0, 0);
-  ctx.shadowBlur = 0;
-  ctx.shadowColor = 'transparent';
   if (over) {
     ctx.save();
     toUnits(ctx, w, s, k);
