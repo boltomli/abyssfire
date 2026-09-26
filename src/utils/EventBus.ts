@@ -34,6 +34,10 @@ export const GameEvents = {
   QUEST_COMPLETED: 'quest:completed',
   QUEST_TURNED_IN: 'quest:turned_in',
   QUEST_FAILED: 'quest:failed',
+  /** An objective advanced: { questId, objectiveIndex, current, required, targetId, amount }. */
+  QUEST_PROGRESS: 'quest:progress',
+  /** The quest shown by the guide arrow changed: { questId | null }. */
+  QUEST_TRACKED_CHANGED: 'quest:tracked_changed',
   ACHIEVEMENT_UNLOCKED: 'achievement:unlocked',
   HOMESTEAD_UPGRADED: 'homestead:upgraded',
   ITEM_DISCARDED: 'item:discarded',

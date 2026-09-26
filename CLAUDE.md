@@ -93,6 +93,13 @@ Each zone (`src/data/maps/`) defines: tile grid, spawn points, NPC positions, ex
 - `Monster.takeDamage(amount, fromX, fromY, { isCrit, isTick })` plays the target-side reaction and returns the weight; pass `isTick` for DoTs.
 - Generated sprite sheets wrap into a grid ≤ 4096px (`computeSheetGrid`) — never emit a single-row strip wider than that.
 
+### Quests
+- Data: `src/data/quests/all_quests.ts`; the giver is whichever NPC lists the quest in `npcs.ts` (exactly one, standing in the quest's zone — enforced by `QuestContent.test.ts`, which also checks every kill/talk/collect target exists there).
+- Collect / craft_collect objectives need a `source`: `drop` (specific monsters + chance) or `gather` (an area + node count; spots are resolved deterministically on walkable tiles). `itemKind` picks the icon from `src/graphics/icons/QuestItemIcons.ts`.
+- `QuestWorld` (created by `ZoneScene`) owns gather nodes, quest-item pickups and the guide arrow; `QuestGuide.computeGuideTarget` decides where the arrow points (tracked quest → nearest target of its first unfinished objective, or the giver once complete).
+- Turn-in goes through `ZoneScene.turnInQuest(id, choiceIndex)`; `rewards.choices` generates class-appropriate pick-one gear (`QuestRewards.ts`).
+- NPC lines per quest live in `src/i18n/locales/questStory.ts` (`data.quest.<id>.offer` / `.complete`).
+
 ### Loot System (D2-style)
 Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4) -> Legendary (orange, fixed) -> Set (green). Affixes have tiers 1-5 scaling with zone difficulty.
 

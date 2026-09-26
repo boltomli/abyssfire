@@ -63,6 +63,8 @@ import { computeNPCIndicator } from '../ui/QuestNPCIndicators';
 import type { UIScene } from './UIScene';
 import { GameSession } from '../game/GameSession';
 import { ZoneTerrain } from '../graphics/terrain/ZoneTerrain';
+import { QuestWorld, questGiverOf } from '../systems/QuestWorld';
+import { generateRewardChoices, isCollectObjective, questDropChance, FALLBACK_COLLECT_CHANCE } from '../systems/QuestRewards';
 
 const TILE_KEYS = ['tile_grass', 'tile_dirt', 'tile_stone', 'tile_water', 'tile_wall', 'tile_camp', 'tile_camp_wall'];
 const CAMPFIRE_RECOVERY_RADIUS = 5;
@@ -109,13 +111,15 @@ export class ZoneScene extends Phaser.Scene {
   private simulationScheduler = new SimulationScheduler();
   private npcs: NPC[] = [];
   private mapData!: MapData;
-  private currentMapId!: string;
+  currentMapId!: string;
   private pathfinding!: PathfindingSystem;
   private combatSystem!: CombatSystem;
   private skillEffects!: SkillEffectSystem;
   lootSystem!: LootSystem;
   inventorySystem!: InventorySystem;
   questSystem!: QuestSystem;
+  /** Gather nodes, quest pickups and the guide arrow (null in dungeons). */
+  questWorld: QuestWorld | null = null;
   homesteadSystem!: HomesteadSystem;
   achievementSystem!: AchievementSystem;
   saveSystem!: SaveSystem;
@@ -437,6 +441,17 @@ export class ZoneScene extends Phaser.Scene {
     this.spawnStoryDecorations();
     this.spawnDungeonPortal();
     this.spawnMercenarySprite();
+    if (!this.isInDungeon) {
+      this.questWorld = new QuestWorld({
+        scene: this,
+        quests: this.questSystem,
+        mapId: this.currentMapId,
+        mapData: this.mapData,
+        player: () => this.player,
+        monsters: () => this.monsters,
+        npcs: () => this.npcs,
+      });
+    }
     this.spawnPetSprite();
     this.spawnEscortNpc();
     this.spawnDefendTarget();
@@ -564,6 +579,7 @@ export class ZoneScene extends Phaser.Scene {
     this.subscriptions.on(EventBus, GameEvents.PLAYER_DIED, this.handlePlayerDied, this);
     this.subscriptions.on(EventBus, GameEvents.PLAYER_LEVEL_UP, this.handlePlayerLevelUp, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_COMPLETED, this.handleQuestCompleted, this);
+    this.subscriptions.on(EventBus, GameEvents.QUEST_PROGRESS, this.handleQuestProgress, this);
     this.subscriptions.on(EventBus, GameEvents.UI_SKILL_CLICK, this.handleUiSkillClick, this);
     this.subscriptions.on(EventBus, GameEvents.UI_DODGE_REQUEST, this.handleUiDodgeRequest, this);
     this.subscriptions.on(EventBus, GameEvents.UI_TARGET_CYCLE, this.cycleCombatTarget, this);
@@ -819,9 +835,42 @@ export class ZoneScene extends Phaser.Scene {
     this.achievementSystem.checkLevel(data.level);
   }
 
-  private handleQuestCompleted(data: { questName: string }): void {
-    this.showQuestCompleteBanner(data.questName);
+  private handleQuestCompleted(data: { questId: string; questName: string }): void {
+    const giver = questGiverOf(data.questId);
+    const giverDef = giver ? NPCDefinitions[giver] : undefined;
+    this.showQuestCompleteBanner(
+      getQuestName(data.questId, data.questName),
+      giverDef ? t('zone.quest.returnTo', { npc: getNpcName(giverDef.id, giverDef.name) }) : '',
+    );
     this.updateNPCQuestMarkers();
+  }
+
+  /** Recent progress popups, so several in one moment stack instead of overlapping. */
+  private questPopupSlots: number[] = [];
+
+  /** Float "+1 Herb 3/5" (or "✓ …" when the objective is done) above the player. */
+  private handleQuestProgress(data: { questId: string; objectiveIndex: number; current: number; required: number; completesQuest: boolean }): void {
+    const quest = this.questSystem.quests.get(data.questId);
+    const obj = quest?.objectives[data.objectiveIndex];
+    if (!quest || !obj || !this.player?.sprite) return;
+    const name = getQuestTargetName(obj.targetId, obj.targetName);
+    const done = data.current >= data.required;
+    // Kill counts only surface at milestones to avoid spamming every kill.
+    if (obj.type === 'kill' && !done && data.required > 3 && data.current % Math.ceil(data.required / 4) !== 0) return;
+    const text = done ? `✓ ${name}` : `${obj.type === 'kill' ? '' : '+1 '}${name}  ${data.current}/${data.required}`;
+    const now = this.time.now;
+    this.questPopupSlots = this.questPopupSlots.filter(t0 => now - t0 < 900);
+    const slot = this.questPopupSlots.length;
+    this.questPopupSlots.push(now);
+    const popup = this.add.text(this.player.sprite.x, this.player.sprite.y - 70 - slot * 16, text, {
+      fontSize: fs(done ? 14 : 12.5), color: done ? '#9dff8a' : '#ffe08a', fontFamily: '"Noto Sans SC", sans-serif',
+      fontStyle: 'bold', stroke: '#1a0f04', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5).setDepth(ZONE_FLOATING_TEXT_DEPTH).setAlpha(0).setScale(0.8);
+    this.tweens.add({ targets: popup, alpha: 1, scale: 1, duration: 160, ease: 'Back.easeOut' });
+    this.tweens.add({
+      targets: popup, y: popup.y - 26, alpha: 0, delay: done ? 1300 : 800, duration: 700, ease: 'Sine.easeIn',
+      onComplete: () => popup.destroy(),
+    });
   }
 
   private handleUiSkillClick(data: { index: number; skillId: string }): void {
@@ -1017,6 +1066,7 @@ export class ZoneScene extends Phaser.Scene {
 
     this.collectOcclusionTargets();
     this.updateDecorOcclusion(delta);
+    this.questWorld?.update(delta);
     if (this.terrain) {
       if (this.terrain.hasPending()) {
         this.terrain.flush(4, (c, r) => !!this.tileSprites[r]?.[c], (c, r, key) => { this.tileSprites[r]?.[c]?.setTexture(key); });
@@ -3309,21 +3359,7 @@ export class ZoneScene extends Phaser.Scene {
       this.checkBossPetDrop(monster.definition.id);
     }
 
-    // Progress collect quests: monsters in this zone drop quest collectibles
-    const activeQuests = this.questSystem.getActiveQuests();
-    for (const { quest, progress } of activeQuests) {
-      if (progress.status !== 'active') continue;
-      if (quest.zone !== this.currentMapId) continue;
-      for (let i = 0; i < quest.objectives.length; i++) {
-        const obj = quest.objectives[i];
-        if (obj.type === 'collect' && progress.objectives[i].current < obj.required) {
-          if (Math.random() < 0.4) {
-            this.questSystem.updateProgress('collect', obj.targetId);
-          }
-          break;
-        }
-      }
-    }
+    this.rollQuestDrops(monster);
 
     const luckBonus = this.player.stats.lck + (homeBonus['magicFind'] ?? 0)
       + (this.isInDungeon && this.dungeonFloorConfig ? this.dungeonFloorConfig.magicFindBonus : 0);
@@ -3506,6 +3542,75 @@ export class ZoneScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Quest item drops: each unfinished collect objective whose source lists this
+   * monster rolls its chance; items pop out and fly to the player. Objectives
+   * without a source keep the legacy rule (any monster in the zone, first
+   * unfinished one per quest).
+   */
+  private rollQuestDrops(monster: Monster): void {
+    for (const { quest, progress } of this.questSystem.getActiveQuests()) {
+      if (progress.status !== 'active' || quest.zone !== this.currentMapId) continue;
+      let legacyRolled = false;
+      for (let i = 0; i < quest.objectives.length; i++) {
+        const obj = quest.objectives[i];
+        if (!isCollectObjective(obj) || progress.objectives[i].current >= obj.required) continue;
+        if (obj.source?.kind === 'gather') continue;
+        // Craft materials only drop from explicit sources.
+        if (!obj.source && obj.type === 'craft_collect') continue;
+        const chance = questDropChance(obj, monster.definition.id);
+        if (!obj.source) {
+          if (legacyRolled) continue;
+          legacyRolled = true;
+        }
+        if (chance <= 0 || Math.random() >= (obj.source ? chance : FALLBACK_COLLECT_CHANCE)) continue;
+        this.questWorld?.dropToPlayer(monster.sprite.x, monster.sprite.y, obj);
+        this.questSystem.updateProgress(obj.type, obj.targetId);
+      }
+    }
+  }
+
+  /** Pick-one equipment rewards for a quest, generated once per session so re-opening the card can't reroll them. */
+  getQuestRewardChoices(questId: string): ItemInstance[] {
+    const cached = this.questSystem.rewardChoiceCache.get(questId);
+    if (cached) return cached;
+    const quest = this.questSystem.quests.get(questId);
+    if (!quest) return [];
+    const choices = generateRewardChoices(quest, this.player.classData.id, this.player.level,
+      (baseId, level, quality) => this.lootSystem.createItem(baseId, level, quality));
+    this.questSystem.rewardChoiceCache.set(questId, choices);
+    return choices;
+  }
+
+  /**
+   * Turn in a completed quest and grant everything it pays: exp, gold, fixed
+   * items, the chosen equipment reward (default: the first choice) and pets.
+   * Returns false if the quest wasn't ready.
+   */
+  turnInQuest(questId: string, choiceIndex = 0): boolean {
+    const choices = this.getQuestRewardChoices(questId);
+    const reward = this.questSystem.turnInQuest(questId);
+    if (!reward) return false;
+    this.player.addExp(reward.exp);
+    this.player.gold += reward.gold;
+    const granted: ItemInstance[] = [];
+    for (const itemId of reward.items ?? []) {
+      const item = this.lootSystem.createItem(itemId, this.player.level, 'normal');
+      if (item) { item.identified = true; granted.push(item); }
+    }
+    const chosen = choices[Math.max(0, Math.min(choices.length - 1, choiceIndex))];
+    if (chosen) granted.push(chosen);
+    for (const item of granted) {
+      if (!this.inventorySystem.addItem(item)) this.inventorySystem.stash.push(item);
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.quest.rewardItem', { name: getLocalizedItemName(item) }), type: 'loot' });
+    }
+    this.questSystem.rewardChoiceCache.delete(questId);
+    if (reward.petReward) this.homesteadSystem.addPet(reward.petReward);
+    this.achievementSystem.update('quest');
+    this.autoSave();
+    return true;
+  }
+
   private interactNPC(npc: NPC): void {
     const def = npc.definition;
     EventBus.emit(GameEvents.LOG_MESSAGE, { text: def.dialogue[0], type: 'info' });
@@ -3522,78 +3627,24 @@ export class ZoneScene extends Phaser.Scene {
         EventBus.emit(GameEvents.SHOP_OPEN, { npcId: def.id, shopItems: def.shopItems ?? [], type: def.type });
         break;
       case 'quest': {
-        // Try to turn in completed quests first (only for non-dialogue-tree NPCs;
-        // dialogue-tree NPCs now use the compact quest card which handles turn-in)
-        const turnedIn: string[] = [];
-        if (def.quests && !def.dialogueTree) {
-          for (const qid of def.quests) {
-            const reward = this.questSystem.turnInQuest(qid);
-            if (reward) {
-              this.player.addExp(reward.exp);
-              this.player.gold += reward.gold;
-              this.achievementSystem.update('quest');
-              turnedIn.push(qid);
-              // Pet reward from quest
-              if (reward.petReward) {
-                this.homesteadSystem.addPet(reward.petReward);
-              }
-            }
-          }
+        // Quest NPCs open the quest card (accept / turn in with reward choice);
+        // with nothing to hand over they fall back to their dialogue tree or lines.
+        const completedQuests: string[] = [];
+        for (const [qid, prog] of this.questSystem.progress.entries()) {
+          if (prog.status === 'turned_in') completedQuests.push(qid);
         }
-
-        // If NPC has a dialogue tree, use the compact quest card / branching dialogue system
-        if (def.dialogueTree) {
-          // Collect turned-in quest IDs for the dialogue state
-          const completedQuests: string[] = [];
-          for (const [qid, prog] of this.questSystem.progress.entries()) {
-            if (prog.status === 'turned_in') completedQuests.push(qid);
-          }
-
-          EventBus.emit(GameEvents.NPC_INTERACT, {
-            npcId: def.id,
-            npcName: def.name,
-            dialogue: turnedIn.length > 0 ? t('zone.npc.questTurnedIn') : '',
-            actions: [],
-            dialogueTree: def.dialogueTree,
-            completedQuests,
-            questSystem: this.questSystem,
-            player: this.player,
-            homesteadSystem: this.homesteadSystem,
-            achievementSystem: this.achievementSystem,
-            turnedIn,
-          });
-          break;
-        }
-
-        // Fallback: linear dialogue (no dialogue tree defined)
-        // Build dialogue actions for available quests
-        const actions: { label: string; callback: () => void }[] = [];
-        if (def.quests) {
-          const available = this.questSystem.getAvailableQuests(def.quests, this.player.level);
-          for (const q of available) {
-            const prog = this.questSystem.progress.get(q.id);
-            if (!prog || (prog.status === 'failed' && q.reacceptable)) {
-              actions.push({
-                label: t('zone.npc.acceptQuest', { questName: getQuestName(q.id, q.name) }),
-                callback: () => { this.questSystem.acceptQuest(q.id); },
-              });
-            }
-          }
-        }
-
-        // Determine dialogue text
-        let dialogueText = def.dialogue[0];
-        if (turnedIn.length > 0) {
-          dialogueText = t('zone.npc.questTurnedIn');
-        } else if (actions.length === 0) {
-          dialogueText = def.dialogue.length > 1 ? def.dialogue[1] : def.dialogue[0];
-        }
-
         EventBus.emit(GameEvents.NPC_INTERACT, {
           npcId: def.id,
-          npcName: def.name,
-          dialogue: dialogueText,
-          actions,
+          npcName: getNpcName(def.id, def.name),
+          dialogue: def.dialogue.length > 1 ? def.dialogue[1] : def.dialogue[0],
+          actions: [],
+          dialogueTree: def.dialogueTree,
+          completedQuests,
+          questSystem: this.questSystem,
+          player: this.player,
+          homesteadSystem: this.homesteadSystem,
+          achievementSystem: this.achievementSystem,
+          turnedIn: [],
         });
         break;
       }
@@ -5389,7 +5440,7 @@ export class ZoneScene extends Phaser.Scene {
     });
   }
 
-  private showQuestCompleteBanner(questName: string): void {
+  private showQuestCompleteBanner(questName: string, hint = ''): void {
     const p = this.screenPos(0.5, 0.22);
     const z = this.cameras.main.zoom;
     const label = this.add.text(p.x, p.y, t('zone.questComplete'), {
@@ -5402,11 +5453,18 @@ export class ZoneScene extends Phaser.Scene {
       stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5).setScrollFactor(0).setDepth(ZONE_SCREEN_UI_DEPTH).setAlpha(0);
 
-    this.tweens.add({ targets: [label, name], alpha: 1, duration: 500, ease: 'Power2' });
-    this.time.delayedCall(2500, () => {
+    const parts: Phaser.GameObjects.Text[] = [label, name];
+    if (hint) {
+      parts.push(this.add.text(p.x, p.y + 52 * DPR / z, hint, {
+        fontSize: fs(13), color: '#ffd98a', fontFamily: '"Noto Sans SC", sans-serif',
+        stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(ZONE_SCREEN_UI_DEPTH).setAlpha(0));
+    }
+    this.tweens.add({ targets: parts, alpha: 1, duration: 500, ease: 'Power2' });
+    this.time.delayedCall(3000, () => {
       this.tweens.add({
-        targets: [label, name], alpha: 0, duration: 600,
-        onComplete: () => { label.destroy(); name.destroy(); },
+        targets: parts, alpha: 0, duration: 600,
+        onComplete: () => { for (const o of parts) o.destroy(); },
       });
     });
   }
@@ -6665,6 +6723,8 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    this.questWorld?.destroy();
+    this.questWorld = null;
     this.isTransitioning = false;
     this.isPortaling = false;
     this.destroyMercenarySprite();

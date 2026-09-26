@@ -359,13 +359,35 @@ export interface QuestObjective {
   required: number;
   current: number;
   location?: { col: number; row: number; radius: number };
+  /** Where a collect objective's items come from (default: any monster in the quest zone). */
+  source?: QuestItemSource;
+  /** Look of the collectible (icon + world node art); see QuestItemIcons. */
+  itemKind?: string;
 }
+
+/**
+ * Collect / craft_collect objective sources.
+ * - `drop`: killing one of `monsters` has `chance` to yield one item.
+ * - `gather`: `count` glowing nodes scattered on walkable ground within `area`
+ *   (resolved deterministically per quest); walking up gathers one each.
+ */
+export type QuestItemSource =
+  | { kind: 'drop'; monsters: string[]; chance: number }
+  | { kind: 'gather'; area: { col: number; row: number; radius: number }; count: number };
+
+/** Equipment reward the player picks at turn-in, generated for their class and level. */
+export type QuestRewardChoice = 'weapon' | 'armor' | 'helmet' | 'gloves' | 'boots' | 'belt' | 'jewelry' | 'offhand';
 
 export interface QuestReward {
   exp: number;
   gold: number;
+  /** Fixed item base ids (consumables, gems, set pieces). */
   items?: string[];
   petReward?: string;
+  /** Pick-one equipment rewards (class-appropriate, generated at turn-in). */
+  choices?: QuestRewardChoice[];
+  /** Quality of the generated choices (default: rare for main quests, magic for side). */
+  choiceQuality?: 'magic' | 'rare' | 'legendary';
 }
 
 export interface QuestProgress {

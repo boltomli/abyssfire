@@ -327,6 +327,12 @@ export class AudioManager {
       this.playSFX('npc_interact');
     });
 
+    EventBus.on(GameEvents.QUEST_PROGRESS, (p: { current: number; required: number; targetId: string; completesQuest: boolean }) => {
+      if (p.completesQuest) return; // the quest-complete fanfare covers it
+      if (p.current >= p.required) this.playSFX('quest_objective');
+      else if (p.targetId.startsWith('mat_') || p.targetId.startsWith('clue_')) this.playSFX('quest_progress');
+    });
+
     EventBus.on(GameEvents.QUEST_TURNED_IN, () => {
       this.playSFX('quest_complete');
     });

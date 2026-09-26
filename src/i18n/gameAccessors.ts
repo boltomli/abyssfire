@@ -212,6 +212,13 @@ export function getQuestDesc(questId: string, fallbackDesc: string): string {
   return val !== key ? val : fallbackDesc;
 }
 
+/** NPC lines for a quest's offer / in-progress / turn-in moments ('' when none written). */
+export function getQuestStory(questId: string, phase: 'offer' | 'progress' | 'complete'): string {
+  const key = `data.quest.${questId}.${phase}`;
+  const val = t(key);
+  return val !== key ? val : '';
+}
+
 /** Get translated zone name. */
 export function getZoneName(zoneId: string, fallbackName?: string): string {
   const key = `data.zone.${zoneId}`;
