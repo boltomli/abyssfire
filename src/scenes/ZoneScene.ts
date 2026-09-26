@@ -68,6 +68,7 @@ import { ZoneTerrain } from '../graphics/terrain/ZoneTerrain';
 import { QuestWorld, questGiverOf } from '../systems/QuestWorld';
 import { StoryDirector } from '../systems/StoryDirector';
 import { generateRewardChoices, isCollectObjective, questDropChance, FALLBACK_COLLECT_CHANCE } from '../systems/QuestRewards';
+import { huntsToSpawn, makeHuntDefinition } from '../systems/QuestHunts';
 
 const TILE_KEYS = ['tile_grass', 'tile_dirt', 'tile_stone', 'tile_water', 'tile_wall', 'tile_camp', 'tile_camp_wall'];
 const CAMPFIRE_RECOVERY_RADIUS = 5;
@@ -209,6 +210,10 @@ export class ZoneScene extends Phaser.Scene {
   private isPortaling = false;
   /** Mini-boss monster reference per zone (spawned at a fixed position). */
   private miniBossMonster: Monster | null = null;
+  /** Named quest monsters alive in this zone, by hunt id. */
+  private questHuntMonsters = new Map<string, Monster>();
+  /** Quest-spawned monsters (hunts and their packs) never respawn. */
+  private questSpawned = new WeakSet<Monster>();
   /** Set of mini-boss IDs whose pre-fight dialogue has been seen (persisted in save). */
   private miniBossDialogueSeen: Set<string> = new Set();
   /** Whether the mini-boss dialogue is currently being shown. */
@@ -477,6 +482,8 @@ export class ZoneScene extends Phaser.Scene {
     this.spawnPetSprite();
     this.spawnEscortNpc();
     this.spawnDefendTarget();
+    this.questHuntMonsters.clear();
+    this.spawnQuestHunts(false);
     this.buildCampDecorations();
     this.rebuildWorldCaches();
     for (const decor of this.campDecorPositions) {
@@ -609,6 +616,7 @@ export class ZoneScene extends Phaser.Scene {
     // Update NPC quest indicators immediately when quest state changes
     this.subscriptions.on(EventBus, GameEvents.QUEST_ACCEPTED, this.updateNPCQuestMarkers, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_ACCEPTED, this.handleQuestAcceptedWorld, this);
+    this.subscriptions.on(EventBus, GameEvents.QUEST_PROGRESS, this.handleQuestProgressWorld, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_TURNED_IN, this.updateNPCQuestMarkers, this);
     // React to locale changes for persistent UI elements
     this.subscriptions.on(EventBus, GameEvents.LOCALE_CHANGED, this.handleLocaleChanged, this);
@@ -3295,19 +3303,7 @@ export class ZoneScene extends Phaser.Scene {
             });
           }
         }
-        // Handle investigate clue objectives (location-based discovery)
-        if (obj.type === 'investigate_clue' && obj.location && progress.objectives[i].current < obj.required) {
-          const dx = this.player.tileCol - obj.location.col;
-          const dy = this.player.tileRow - obj.location.row;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist <= obj.location.radius) {
-            this.questSystem.updateProgress('investigate_clue', obj.targetId);
-            EventBus.emit(GameEvents.LOG_MESSAGE, {
-              text: t('zone.quest.clueFound', { targetName: getQuestTargetName(obj.targetId, obj.targetName) }),
-              type: 'system',
-            });
-          }
-        }
+        // Investigate clues are examined at their marks (QuestWorld).
         // Escort destination check is handled by updateEscortNpc() —
         // completion is gated on the escort NPC arriving, not just the player.
       }
@@ -3443,6 +3439,8 @@ export class ZoneScene extends Phaser.Scene {
     // Don't respawn mini-bosses
     if (this.miniBossMonster === monster) {
       this.miniBossMonster = null;
+    } else if (this.questSpawned.has(monster)) {
+      if (this.questHuntMonsters.get(monster.definition.id) === monster) this.questHuntMonsters.delete(monster.definition.id);
     } else {
       this.time.delayedCall(15000, () => this.respawnMonster(monster));
     }
@@ -6099,6 +6097,65 @@ export class ZoneScene extends Phaser.Scene {
     if (!quest || quest.zone !== this.currentMapId) return;
     if (quest.type === 'escort' && !this.escortQuestId) this.spawnEscortNpc();
     if (quest.type === 'defend' && !this.defendQuestId) this.spawnDefendTarget();
+    this.spawnQuestHunts(false);
+  }
+
+  /** A tracked-down hunt appears once the objectives before it are done. */
+  private handleQuestProgressWorld(): void {
+    if (this.isInDungeon) return;
+    this.spawnQuestHunts(true);
+  }
+
+  /** Put every due quest hunt (and its pack) into the world. */
+  private spawnQuestHunts(announce: boolean): void {
+    if (this.isInDungeon) return;
+    for (const [id, m] of this.questHuntMonsters) {
+      if (!m.isAlive()) this.questHuntMonsters.delete(id);
+    }
+    const due = huntsToSpawn(this.questSystem.getActiveQuests(), this.currentMapId, new Set(this.questHuntMonsters.keys()));
+    const zoneDefs = MonstersByZone[this.currentMapId] || [];
+    const baseOf = (id: string) => zoneDefs.find(m => m.id === id) || getMonsterDef(id);
+    for (const { hunt } of due) {
+      const base = baseOf(hunt.monsterId);
+      if (!base) continue;
+      const spot = this.mapData.collisions[hunt.row]?.[hunt.col]
+        ? { col: hunt.col, row: hunt.row }
+        : this.findWalkableNear(hunt.col, hunt.row, 6);
+      if (!spot) continue;
+      const def = DifficultySystem.scaleMonster(makeHuntDefinition(base, hunt, getMonsterName(hunt.huntId, hunt.name)), this.difficulty);
+      const monster = new Monster(this, def, spot.col, spot.row);
+      const affixes = this.eliteAffixSystem.rollAffixes(this.currentMapId, true);
+      if (affixes.length > 0) monster.applyEliteAffixes(affixes, this.eliteAffixSystem);
+      // A head taller than its kin.
+      const body = monster.sprite.list.find(o => o instanceof Phaser.GameObjects.Sprite) as Phaser.GameObjects.Sprite | undefined;
+      body?.setScale(body.scaleX * 1.25);
+      this.monsters.push(monster);
+      this.monsterGrid.insert(monster);
+      this.questSpawned.add(monster);
+      this.questHuntMonsters.set(hunt.huntId, monster);
+
+      const minionBase = hunt.minions ? baseOf(hunt.minions.monsterId) : undefined;
+      if (hunt.minions && minionBase) {
+        const minionDef = DifficultySystem.scaleMonster(minionBase, this.difficulty);
+        for (let i = 0; i < hunt.minions.count; i++) {
+          const c = spot.col + randomInt(-3, 3);
+          const r = spot.row + randomInt(-3, 3);
+          if (!this.mapData.collisions[r]?.[c]) continue;
+          const minion = new Monster(this, minionDef, c, r);
+          this.monsters.push(minion);
+          this.monsterGrid.insert(minion);
+          this.questSpawned.add(minion);
+        }
+      }
+
+      if (announce) {
+        EventBus.emit(GameEvents.LOG_MESSAGE, {
+          text: t('zone.quest.huntRevealed', { name: def.name }),
+          type: 'system',
+        });
+        this.cameras.main.shake(260, 0.004);
+      }
+    }
   }
 
   /** Nearest walkable tile within `radius` rings of (col, row), skipping the tile itself. */

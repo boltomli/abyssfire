@@ -27,7 +27,7 @@ export const NPCDefinitions: Record<string, NPCDefinition> = {
     name: '村长',
     type: 'quest',
     dialogue: ['勇士，翡翠平原上的怪物越来越多了...', '请帮助我们清除这些威胁!'],
-    quests: ['q_kill_slimes', 'q_collect_slime_gel', 'q_herb_gathering', 'q_kill_goblins', 'q_explore_goblin_camp', 'q_lost_pendant', 'q_find_goblin_chief', 'q_rare_mushroom', 'q_secure_plains', 'q_escort_merchant_plains', 'q_pet_sprite_friend'],
+    quests: ['q_kill_slimes', 'q_collect_slime_gel', 'q_herb_gathering', 'q_kill_goblins', 'q_explore_goblin_camp', 'q_lost_pendant', 'q_find_goblin_chief', 'q_secure_plains', 'q_escort_merchant_plains', 'q_pet_sprite_friend'],
     dialogueTree: DialogueTrees['quest_elder'],
   },
   quest_scout: {
@@ -129,7 +129,7 @@ export const NPCDefinitions: Record<string, NPCDefinition> = {
       '暮色森林的亡灵并非邪恶之物，它们是被黑暗力量困住的可怜灵魂。',
       '在森林深处有一座被遗忘的月光祭坛，也许能净化它们……但那里被强大的亡灵守卫着。',
     ],
-    quests: ['q_spider_nest', 'q_investigate_corruption_forest', 'q_ancient_relic', 'q_moonlight_herb'],
+    quests: ['q_spider_nest', 'q_investigate_corruption_forest', 'q_ancient_relic'],
   },
 
   // ─── Zone 3: Anvil Mountains — New Field NPCs ────────────────────────

@@ -176,7 +176,7 @@ export function buildQuestCardData(
 export function formatObjectiveLabel(obj: QuestObjective): string {
   const labels = getObjectiveTypeLabels();
   const typeLabel = labels[obj.type] ?? obj.type;
-  return `${typeLabel} ${getQuestTargetName(obj.targetId, obj.targetName)}`;
+  return `${typeLabel} ${getQuestTargetName(obj.targetId, obj.targetName, obj.labelKey)}`;
 }
 
 /** Display label for a reward-choice slot. */

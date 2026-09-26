@@ -109,7 +109,7 @@ export function formatTrackerObjective(
   const typeLabel = labels[obj.type] ?? obj.type;
   const done = current >= obj.required;
   return {
-    label: `${typeLabel} ${getQuestTargetName(obj.targetId, obj.targetName)}`,
+    label: `${typeLabel} ${getQuestTargetName(obj.targetId, obj.targetName, obj.labelKey)}`,
     progress: done ? '✓' : `${current}/${obj.required}`,
     done,
   };

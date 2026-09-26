@@ -318,7 +318,11 @@ export function getNpcName(npcId: string, fallbackName: string): string {
 }
 
 /** Get translated quest objective target name. */
-export function getQuestTargetName(targetId: string, fallbackName: string): string {
+export function getQuestTargetName(targetId: string, fallbackName: string, labelKey?: string): string {
+  if (labelKey) {
+    const label = t(labelKey);
+    if (label !== labelKey) return label;
+  }
   const key = `data.questTarget.${targetId}`;
   const val = t(key);
   return val !== key ? val : fallbackName;

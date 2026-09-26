@@ -23,6 +23,8 @@ export interface GuideWorld {
   giverOf(questId: string): string | null;
   /** Where the escorted NPC is (null when none is out). */
   escortTile?(): TilePoint | null;
+  /** Where an open clue's mark sits (it may be nudged off a wall). */
+  clueTile?(questId: string, objectiveIndex: number): TilePoint | null;
 }
 
 export type GuideReason = 'turn_in' | 'objective';
@@ -61,6 +63,10 @@ function objectiveTarget(
     const e = world.escortTile?.();
     if (e && Math.hypot(e.col - world.player.col, e.row - world.player.row) > 4) return e;
   }
+  if (obj.type === 'investigate_clue') {
+    const clue = world.clueTile?.(quest.id, index);
+    if (clue) return clue;
+  }
   if (obj.location) return { col: obj.location.col, row: obj.location.row };
   switch (obj.type) {
     case 'talk':
@@ -85,8 +91,10 @@ function objectiveTarget(
   }
   const ids = objectiveMonsters(obj);
   if (ids.length === 0) return quest.questArea ? { col: quest.questArea.col, row: quest.questArea.row } : null;
+  const hunt = obj.type === 'kill' ? quest.hunts?.find(h => h.huntId === obj.targetId) : undefined;
   return nearest(world.player, world.monsters(ids))
     ?? nearest(world.player, world.spawns(ids))
+    ?? (hunt ? { col: hunt.col, row: hunt.row } : null)
     ?? (quest.questArea ? { col: quest.questArea.col, row: quest.questArea.row } : null);
 }
 
