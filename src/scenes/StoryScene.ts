@@ -288,8 +288,9 @@ export class StoryScene extends Phaser.Scene {
     const sub = this.add.text(W / 2, H / 2 + 22, t(ch.subtitle), {
       fontFamily: SERIF, fontSize: '22px', color: '#e2cfa4', letterSpacing: 3,
     }).setOrigin(0.5).setDepth(DEPTH + 2).setAlpha(0);
-    const lineL = this.add.rectangle(W / 2 - 20, H / 2 + 52, 0, 2, 0xc9a45a).setOrigin(1, 0.5).setDepth(DEPTH + 2);
-    const lineR = this.add.rectangle(W / 2 + 20, H / 2 + 52, 0, 2, 0xc9a45a).setOrigin(0, 0.5).setDepth(DEPTH + 2);
+    // Grow by scaleX: tweening a Rectangle's width leaves its origin behind.
+    const lineL = this.add.rectangle(W / 2 - 20, H / 2 + 52, 260, 2, 0xc9a45a).setOrigin(1, 0.5).setDepth(DEPTH + 2).setScale(0, 1);
+    const lineR = this.add.rectangle(W / 2 + 20, H / 2 + 52, 260, 2, 0xc9a45a).setOrigin(0, 0.5).setDepth(DEPTH + 2).setScale(0, 1);
     const body = this.add.text(W / 2, H / 2 + 74, t(ch.text), {
       fontFamily: SERIF, fontSize: '19px', color: '#d8c8a8', align: 'center', lineSpacing: 8,
       wordWrap: { width: 820, useAdvancedWrap: true }, stroke: '#000000', strokeThickness: 3,
@@ -302,7 +303,7 @@ export class StoryScene extends Phaser.Scene {
     title.setScale(1.08);
     this.tweenTo(halo, { alpha: 0.55 }, 1200);
     await this.tweenTo(title, { alpha: 1, scale: 1 }, 900, 'Cubic.easeOut');
-    this.tweenTo([lineL, lineR], { width: 260 }, 700, 'Cubic.easeOut');
+    this.tweenTo([lineL, lineR], { scaleX: 1 }, 700, 'Cubic.easeOut');
     await this.tweenTo(sub, { alpha: 1 }, 600);
     await this.tweenTo(body, { alpha: 1 }, 900);
     await this.waitOrInput(3800);
@@ -375,7 +376,7 @@ export class StoryScene extends Phaser.Scene {
 
   private async say(speaker: Speaker, text: string, hooks: CutsceneHooks): Promise<void> {
     const boxW = 900, boxH = 150;
-    const bx = (W - boxW) / 2, by = H - BAR_H - boxH + 26;
+    const bx = (W - boxW) / 2, by = H - BAR_H - boxH - 10;
     const villain = speaker === 'villain';
     const box = this.add.graphics().setDepth(DEPTH + 3);
     box.fillStyle(villain ? 0x12061a : 0x100b07, 0.93);
@@ -393,9 +394,13 @@ export class StoryScene extends Phaser.Scene {
     const objs: Phaser.GameObjects.GameObject[] = [box, medal];
     const pic = hooks.portrait(speaker);
     if (pic && this.textures.exists(pic.key)) {
-      const img = this.add.image(pcx, pcy + 34, pic.key, pic.frame).setDepth(DEPTH + 4);
-      const scale = 150 / Math.max(img.height, 1);
+      // Frame the head and shoulders: the top ~45% of the character's opaque bounds.
+      const img = this.add.image(0, 0, pic.key, pic.frame).setDepth(DEPTH + 4).setOrigin(0, 0);
+      const b = this.opaqueBounds(pic.key, pic.frame);
+      const focusH = Math.max(1, b.h * 0.45);
+      const scale = 118 / Math.max(focusH, b.w * 0.8);
       img.setScale(scale);
+      img.setPosition(pcx - (b.x + b.w / 2) * scale, pcy - (b.y + focusH * 0.52) * scale);
       const mask = this.make.graphics({}, false).fillCircle(pcx, pcy, 53).createGeometryMask();
       img.setMask(mask);
       objs.push(img);
@@ -422,6 +427,36 @@ export class StoryScene extends Phaser.Scene {
     more.destroy();
     await this.tweenTo(objs, { alpha: 0 }, 160);
     for (const o of objs) o.destroy();
+  }
+
+  private readonly boundsCache = new Map<string, { x: number; y: number; w: number; h: number }>();
+
+  /** Opaque bounding box of a texture frame (cached), in frame pixels. */
+  private opaqueBounds(key: string, frame: number | string): { x: number; y: number; w: number; h: number } {
+    const id = `${key}#${frame}`;
+    const hit = this.boundsCache.get(id);
+    if (hit) return hit;
+    const fr = this.textures.getFrame(key, frame);
+    const full = { x: 0, y: 0, w: fr.cutWidth, h: fr.cutHeight };
+    const src = fr.source.image as CanvasImageSource | undefined;
+    if (!src) return full;
+    const c = document.createElement('canvas');
+    c.width = fr.cutWidth; c.height = fr.cutHeight;
+    const x = c.getContext('2d', { willReadFrequently: true })!;
+    x.drawImage(src, fr.cutX, fr.cutY, fr.cutWidth, fr.cutHeight, 0, 0, fr.cutWidth, fr.cutHeight);
+    const d = x.getImageData(0, 0, c.width, c.height).data;
+    let minX = c.width, minY = c.height, maxX = -1, maxY = -1;
+    for (let py = 0; py < c.height; py += 2) {
+      for (let px = 0; px < c.width; px += 2) {
+        if (d[(py * c.width + px) * 4 + 3] > 40) {
+          if (px < minX) minX = px; if (px > maxX) maxX = px;
+          if (py < minY) minY = py; if (py > maxY) maxY = py;
+        }
+      }
+    }
+    const out = maxX < 0 ? full : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+    this.boundsCache.set(id, out);
+    return out;
   }
 
   /** Stand-in portrait for speakers without a sprite: an eye in violet flame (villain) or a sigil. */
@@ -480,11 +515,11 @@ export class StoryScene extends Phaser.Scene {
     const epi = this.add.text(W / 2, H / 2 + 40, subtitle, {
       fontFamily: SERIF, fontSize: '22px', color: '#d9b98a', letterSpacing: 4, stroke: '#000000', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(DEPTH + 2).setAlpha(0);
-    const slash = this.add.rectangle(W / 2, H / 2 + 14, 0, 3, 0xff8a3c).setDepth(DEPTH + 2);
+    const slash = this.add.rectangle(W / 2, H / 2 + 14, 520, 3, 0xff8a3c).setDepth(DEPTH + 2).setScale(0, 1);
     await this.tweenTo(band, { fillAlpha: 0.6 }, 200);
     this.tweenTo(halo, { alpha: 0.6 }, 500);
     await this.tweenTo(name, { alpha: 1, scale: 1 }, 380, 'Back.easeOut');
-    this.tweenTo(slash, { width: 520 }, 380, 'Cubic.easeOut');
+    this.tweenTo(slash, { scaleX: 1 }, 380, 'Cubic.easeOut');
     await this.tweenTo(epi, { alpha: 1 }, 400);
     await this.waitOrInput(2200);
     await this.tweenTo([band, name, epi, slash, halo], { alpha: 0 }, 450);
