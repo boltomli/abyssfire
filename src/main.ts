@@ -5,6 +5,7 @@ import { MenuScene } from './scenes/MenuScene';
 import './systems/audio/AudioManager';
 import { getLocale } from './i18n';
 import { initializeFontManager } from './rendering/FontManager';
+import { installMobileShell } from './systems/MobileShell';
 
 const config: Phaser.Types.Core.GameConfig = {
   ...gameConfig,
@@ -12,5 +13,6 @@ const config: Phaser.Types.Core.GameConfig = {
 };
 
 void initializeFontManager(getLocale()).finally(() => {
-  new Phaser.Game(config);
+  const game = new Phaser.Game(config);
+  installMobileShell(game);
 });
