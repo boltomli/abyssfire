@@ -249,6 +249,7 @@ export class NPC {
       if (this.state === 'talking') this.setState('alert');
     });
     this.addListener(GameEvents.SHOP_CLOSE, () => {
+      this.stashOpen = false;
       if (this.state === 'talking') this.setState('alert');
     });
     this.addListener(GameEvents.UI_TOGGLE_PANEL, (data: { panel: string; npcId?: string }) => {

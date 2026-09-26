@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { BASE_STASH_SLOTS } from '../systems/InventorySystem';
 import { GAME_WIDTH, GAME_HEIGHT, DPR } from '../config';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import { DisposableScope } from '../utils/DisposableScope';
@@ -215,6 +216,10 @@ export class UIScene extends Phaser.Scene {
   private inventoryPanel: Phaser.GameObjects.Container | null = null;
   private shopPanel: Phaser.GameObjects.Container | null = null;
   private shopNpcId: string | null = null;
+  private stashPanel: Phaser.GameObjects.Container | null = null;
+  private stashNpcId: string | null = null;
+  private stashPage = 0;
+  private stashBagPage = 0;
   private mapPanel: Phaser.GameObjects.Container | null = null;
   private skillPanel: Phaser.GameObjects.Container | null = null;
   private charPanel: Phaser.GameObjects.Container | null = null;
@@ -721,7 +726,7 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  private handlePanelToggle(data: { panel: string }): void {
+  private handlePanelToggle(data: { panel: string; npcId?: string }): void {
     if (data.panel === 'inventory') this.toggleInventory();
     if (data.panel === 'map') this.toggleMap();
     if (data.panel === 'skills') this.toggleSkillTree();
@@ -731,6 +736,7 @@ export class UIScene extends Phaser.Scene {
     if (data.panel === 'audio') this.toggleAudioSettings();
     if (data.panel === 'companion') this.toggleCompanion();
     if (data.panel === 'achievement') this.toggleAchievement();
+    if (data.panel === 'stash') this.toggleStash(data.npcId ?? null);
   }
 
   private handleUiRefresh(data: { player: Player; zone: ZoneScene }): void {
@@ -1211,6 +1217,120 @@ export class UIScene extends Phaser.Scene {
       this.reopenShop(shopData);
     }, { variant: 'primary', fontSize: 13 }));
     this.contextPopup.add(this.makeButton(popW / 2 + px(62), popH - px(26), px(100), px(28), btnLabel(t('ui.shop.cancel')), () => this.hideContextPopup(), { fontSize: 13 }));
+  }
+
+  // --- Stash ---
+
+  private stashCapacity(): number {
+    return BASE_STASH_SLOTS + (this.zone.homesteadSystem?.getTotalBonuses().stashSlots ?? 0);
+  }
+
+  private toggleStash(npcId: string | null): void {
+    if (this.stashPanel) { this.closeAllPanels(); return; }
+    this.stashPage = 0;
+    this.stashBagPage = 0;
+    this.openStash(npcId);
+  }
+
+  private closeStash(): void {
+    if (!this.stashPanel) return;
+    this.stashPanel.destroy();
+    this.stashPanel = null;
+    if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
+    const closedNpcId = this.stashNpcId;
+    this.stashNpcId = null;
+    EventBus.emit(GameEvents.SHOP_CLOSE, { npcId: closedNpcId });
+  }
+
+  /** Stash on the left, bag on the right; clicking an item moves it across. */
+  private openStash(npcId: string | null, rebuild = false): void {
+    if (rebuild) {
+      this.stashPanel?.destroy(); this.stashPanel = null;
+      if (this.dialogueBackdrop) { this.dialogueBackdrop.destroy(); this.dialogueBackdrop = null; }
+    } else {
+      this.closeAllPanels();
+      audioManager.playSFX('click');
+    }
+    this.stashNpcId = npcId;
+    const inv = this.zone.inventorySystem;
+    const cap = this.stashCapacity();
+    const refresh = (): void => { this.hideItemTooltip(); this.openStash(npcId, true); };
+
+    this.dialogueBackdrop = this.createBackdrop(0.6);
+    this.dialogueBackdrop.on('pointerdown', () => { this.hideItemTooltip(); this.closeStash(); });
+
+    const pw = px(820), ph = px(480), panelX = (W - pw) / 2, panelY = px(40);
+    const dividerX = px(420);
+    const panel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
+    this.stashPanel = panel;
+    if (!rebuild) this.animatePanelOpen(panel);
+    panel.add(this.createPanelBg(pw, ph));
+    panel.add(this.createPanelTitle(pw, t('ui.stash.title')));
+    panel.add(this.createPanelCloseBtn(pw, () => { this.hideItemTooltip(); this.closeStash(); }));
+    panel.add(addVDivider(this, dividerX, px(46), ph - px(62)));
+
+    const cols = 8, rows = 5, perPage = cols * rows, gap = px(5), gridY = px(72);
+    const drawGrid = (
+      x: number, w: number, items: ItemInstance[], page: number, slotsTotal: number,
+      onPick: (item: ItemInstance) => void, setPage: (p: number) => void,
+    ): void => {
+      const size = Math.floor((w - gap * (cols - 1)) / cols);
+      const pages = Math.max(1, Math.ceil(slotsTotal / perPage));
+      const pg = Math.min(page, pages - 1);
+      for (let i = 0; i < perPage; i++) {
+        const idx = pg * perPage + i;
+        const cx = x + (i % cols) * (size + gap) + size / 2;
+        const cy = gridY + Math.floor(i / cols) * (size + gap) + size / 2;
+        const item = items[idx];
+        if (!item) {
+          // Slots past capacity read as locked.
+          panel.add(addSlot(this, cx, cy, size, null).setAlpha(idx < slotsTotal ? 0.7 : 0.25));
+          continue;
+        }
+        const { slot, objects } = this.createItemSlot(cx, cy, size, item);
+        panel.add(objects);
+        slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(item, pointer.x, pointer.y));
+        slot.on('pointerout', () => this.hideItemTooltip());
+        slot.on('pointerdown', () => onPick(item));
+      }
+      if (pages > 1) {
+        const pageY = gridY + rows * (size + gap) + px(12);
+        const pgCx = x + w / 2;
+        panel.add(this.makeButton(pgCx - px(70), pageY, px(64), px(24), t('ui.shop.prevPage'), () => { setPage(pg - 1); refresh(); }, { disabled: pg <= 0 }));
+        panel.add(this.add.text(pgCx, pageY, `${pg + 1}/${pages}`, {
+          fontSize: fs(12), color: UI_COLORS.textSoft, fontFamily: FONT,
+        }).setOrigin(0.5));
+        panel.add(this.makeButton(pgCx + px(70), pageY, px(64), px(24), t('ui.shop.nextPage'), () => { setPage(pg + 1); refresh(); }, { disabled: pg >= pages - 1 }));
+      }
+    };
+
+    // --- LEFT: stash ---
+    const leftX = px(18), leftW = dividerX - px(34);
+    panel.add(addSectionHeader(this, leftX, px(54), leftW - px(70), t('ui.stash.stored', { count: String(inv.stash.length), cap: String(cap) })));
+    panel.add(this.makeButton(leftX + leftW - px(30), px(54), px(56), px(22), t('ui.stash.sort'), () => {
+      inv.sortStash(); audioManager.playSFX('click'); refresh();
+    }, { fontSize: 11 }));
+    drawGrid(leftX, leftW, inv.stash, this.stashPage, Math.max(cap, inv.stash.length), item => {
+      if (inv.moveFromStash(item.uid)) audioManager.playSFX('click');
+      else EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.stash.bagFull'), type: 'system' });
+      refresh();
+    }, p => { this.stashPage = p; });
+
+    // --- RIGHT: bag ---
+    const rightX = dividerX + px(16), rightW = pw - rightX - px(18);
+    panel.add(addSectionHeader(this, rightX, px(54), rightW - px(70), t('ui.stash.bag', { count: String(inv.inventory.length) })));
+    panel.add(this.makeButton(rightX + rightW - px(30), px(54), px(56), px(22), t('ui.stash.sort'), () => {
+      inv.sortInventory(); audioManager.playSFX('click'); refresh();
+    }, { fontSize: 11 }));
+    drawGrid(rightX, rightW, inv.inventory, this.stashBagPage, Math.max(perPage, inv.inventory.length), item => {
+      if (inv.moveToStash(item.uid, cap)) audioManager.playSFX('click');
+      refresh();
+    }, p => { this.stashBagPage = p; });
+
+    panel.add(addDivider(this, pw / 2, ph - px(40), pw - px(36)));
+    panel.add(this.add.text(pw / 2, ph - px(22), t('ui.stash.hint'), {
+      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
+    }).setOrigin(0.5, 0.5));
   }
 
   // --- World Map ---
@@ -4896,6 +5016,7 @@ export class UIScene extends Phaser.Scene {
   private closeAllPanels(): void {
     if (this.inventoryPanel) { this.inventoryPanel.destroy(); this.inventoryPanel = null; }
     if (this.shopPanel) { const closedNpcId = this.shopNpcId; this.shopPanel.destroy(); this.shopPanel = null; this.shopNpcId = null; EventBus.emit(GameEvents.SHOP_CLOSE, { npcId: closedNpcId }); }
+    this.closeStash();
     if (this.mapPanel) { this.mapPanel.destroy(); this.mapPanel = null; }
     if (this.skillPanel) {
       if (this.skillTreeWheelHandler) { this.input.off('wheel', this.skillTreeWheelHandler); this.skillTreeWheelHandler = null; }
