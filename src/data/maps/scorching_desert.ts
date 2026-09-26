@@ -25,7 +25,7 @@ export const ScorchingDesertMap: MapData = {
     // Q3 — bottom-left quadrant
     { col: 45, row: 85, monsterId: 'sandworm', count: 6 },
     { col: 30, row: 80, monsterId: 'desert_scorpion', count: 4 },
-    { col: 45, row: 105, monsterId: 'phoenix', count: 2 },
+    { col: 45, row: 105, monsterId: 'phoenix', count: 1 },
     // Q4 — bottom-right quadrant
     { col: 95, row: 70, monsterId: 'desert_scorpion', count: 6 },
     { col: 80, row: 108, monsterId: 'sandworm', count: 3 },

@@ -9,7 +9,7 @@ export const AllQuests: QuestDefinition[] = [
   {
     id: 'q_kill_slimes',
     name: '史莱姆之灾',
-    description: '翡翠平原上的史莱姆正在侵蚀农田，请消灭它们以保护村庄。',
+    description: '你在精灵塔废墟的灰烬中醒来，被村长收留。那一夜火柱冲天后，北部湿地的史莱姆疯长，啃食庄稼。消灭它们，报答收留之恩。',
     zone: 'emerald_plains',
     type: 'kill',
     category: 'main',
@@ -22,8 +22,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_kill_goblins',
-    name: '哥布林猎杀',
-    description: '哥布林部落越来越嚣张了，消灭一批哥布林以震慑它们。',
+    name: '火光之眼',
+    description: '哥布林的眼中燃起了与你烙印相同的火光，它们成群劫掠村庄。消灭十五只哥布林，挫其锐气，也看看那火光从何而来。',
     zone: 'emerald_plains',
     type: 'kill',
     category: 'main',
@@ -37,8 +37,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_explore_goblin_camp',
-    name: '哥布林营地',
-    description: '哥布林首领隐藏在某个营地中，前去侦察他们的大本营。',
+    name: '篝火营地',
+    description: '哥布林营地的篝火七天七夜不熄，萨满正对着地底举行古老的仪式。潜入侦察，查明他们想唤醒什么。',
     zone: 'emerald_plains',
     type: 'explore',
     category: 'main',
@@ -51,8 +51,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_find_goblin_chief',
-    name: '首领之首',
-    description: '哥布林首领藏身于平原深处，找到并击败它！',
+    name: '碎牙之王',
+    description: '哥布林首领格罗克受深渊低语驱使，率部落撬动平原之下的封印。击败它，斩断这只伸向封印的手。',
     zone: 'emerald_plains',
     type: 'kill',
     category: 'main',
@@ -66,8 +66,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_secure_plains',
-    name: '确保平原安全',
-    description: '哥布林首领已被消灭，但仍需巡逻平原各处确保没有残余威胁。',
+    name: '灵脉之印',
+    description: '首领已死，但被撬动的灵脉仍在震颤。巡视平原东部与南部，让烙印之火安抚灵脉，稳住第一道封印。',
     zone: 'emerald_plains',
     type: 'explore',
     category: 'main',
@@ -162,8 +162,8 @@ export const AllQuests: QuestDefinition[] = [
   // --- Main Line (investigate undead rising) ---
   {
     id: 'q_explore_forest',
-    name: '暮色侦察',
-    description: '暮色森林中有不祥的气息，前去侦察森林的各个区域。',
+    name: '永夜之林',
+    description: '暮色森林已在暮光中沉睡数百年，近来亡灵复苏。侦察北部密林、废弃墓地与古老遗迹。',
     zone: 'twilight_forest',
     type: 'explore',
     category: 'main',
@@ -177,8 +177,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_kill_undead',
-    name: '亡灵净化',
-    description: '不死生物在暮色森林中游荡，将它们送回安息之所。',
+    name: '不安的亡者',
+    description: '亡灵被黑暗牵引，不得安息。击碎骷髅、焚尽腐尸，让亡者重归泥土。',
     zone: 'twilight_forest',
     type: 'kill',
     category: 'main',
@@ -193,8 +193,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_talk_hermit',
-    name: '隐士的智慧',
-    description: '森林深处住着一位隐士，他或许知道亡灵为何复苏。去找到他。',
+    name: '被抹去的名字',
+    description: '森林深处的隐士守着一段被遗忘的历史。找到他，问清亡灵复苏与封印的真相。',
     zone: 'twilight_forest',
     type: 'talk',
     category: 'main',
@@ -208,8 +208,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_kill_werewolf_alpha',
-    name: '狼王之祸',
-    description: '一只凶猛的狼人首领统治着森林的黑暗深处，必须消灭它。',
+    name: '噬月之狼',
+    description: '月之祭司的圣狼沃尔甘被低语腐化，成了狼人之王，盘踞在通往黑暗之源的路上。击败它，让它解脱。',
     zone: 'twilight_forest',
     type: 'kill',
     category: 'main',
@@ -224,8 +224,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_seal_dark_source',
-    name: '封印黑暗之源',
-    description: '隐士说亡灵源于森林深处的黑暗能量源，前去找到并净化它。',
+    name: '月辉之印',
+    description: '黑暗之源是被腐化的月辉之印，与生命之树纠缠在一起。杀穿尸群，以烙印之火重燃第二道封印。',
     zone: 'twilight_forest',
     type: 'kill',
     category: 'main',
@@ -321,8 +321,8 @@ export const AllQuests: QuestDefinition[] = [
   // --- Main Line (reclaim dwarf ruins) ---
   {
     id: 'q_explore_dwarf_ruins',
-    name: '矮人遗迹',
-    description: '铁砧山脉中隐藏着古老的矮人遗迹，前去探索其秘密。',
+    name: '沉默的铁砧',
+    description: '百年前一场地震撕裂了铁砧山脉，矮人被迫弃城。探索矿洞入口、锻造大厅与矮人王座，看看故土如今的模样。',
     zone: 'anvil_mountains',
     type: 'explore',
     category: 'main',
@@ -336,8 +336,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_kill_gargoyles',
-    name: '石翼之灾',
-    description: '石像鬼盘踞在山脉的高处，威胁着所有过往的旅人。',
+    name: '石翼蔽日',
+    description: '百年前那场“地震”惊醒了石像鬼，它们盘踞山巅，封死了商道。击碎它们，打通通往遗迹的路。',
     zone: 'anvil_mountains',
     type: 'kill',
     category: 'main',
@@ -351,8 +351,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_collect_dwarf_relics',
-    name: '矮人遗物',
-    description: '矮人的铸锭被石魔像吞进了肚里，符文碎片嵌在石像鬼身上。夺回这些遗物，铁匠用得上。',
+    name: '先王遗物',
+    description: '布鲁恩王的秘银锭被石魔像吞入腹中，符文碎片嵌在石像鬼身上。夺回这些遗物，为重铸神器做准备。',
     zone: 'anvil_mountains',
     type: 'collect',
     category: 'main',
@@ -367,8 +367,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_reforge_artifact',
-    name: '重铸神器',
-    description: '重铸神器需要秘银核心，山里的巨魔和石魔像体内都藏着这种东西。',
+    name: '命运之锤',
+    description: '命运之锤曾锻出五道封印，也能锻出新的钥匙。取回秘银核心，让布鲁恩王的神锤重见天日。',
     zone: 'anvil_mountains',
     type: 'collect',
     category: 'main',
@@ -382,8 +382,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_kill_stone_guardian',
-    name: '山巅巨魔',
-    description: '一头巨魔占据了矮人王座厅，把那里当成了自己的巢穴。击败它，夺回矮人的王座。',
+    name: '篡座者',
+    description: '巨魔戈尔姆盘踞在矮人王座之上，王座之下正是被低语侵蚀的铁砧之印。击败它，重燃第三道封印。',
     zone: 'anvil_mountains',
     type: 'kill',
     category: 'main',
@@ -465,8 +465,8 @@ export const AllQuests: QuestDefinition[] = [
   // --- Main Line (quell fire threat) ---
   {
     id: 'q_explore_desert',
-    name: '探索灼热沙漠',
-    description: '灼热的沙漠危机四伏，先探索周围的环境了解地形。',
+    name: '燃烧的沙海',
+    description: '灼热沙漠曾是日冕王国的疆土，如今烈焰横行。探索烈焰荒地与蝎谷，认清这片沙海。',
     zone: 'scorching_desert',
     type: 'explore',
     category: 'main',
@@ -479,8 +479,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_kill_fire_elementals',
-    name: '烈焰之心',
-    description: '火焰元素在沙丘间肆虐，消灭它们平息火焰。',
+    name: '无主之火',
+    description: '从火焰裂隙中逸出的渊火碎屑化作火焰元素，在沙丘间游荡，所过之处沙化琉璃。扑灭它们，让沙海喘息。',
     zone: 'scorching_desert',
     type: 'kill',
     category: 'main',
@@ -494,8 +494,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_explore_oasis',
-    name: '绿洲探索',
-    description: '沙漠中有一片隐藏的绿洲，据说那里有对抗火焰的线索。',
+    name: '泉水的记忆',
+    description: '隐秘的绿洲曾是日冕王国的皇家花园。前往那里聆听泉水，找寻王国覆灭的真相。',
     zone: 'scorching_desert',
     type: 'explore',
     category: 'main',
@@ -508,8 +508,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_kill_sandworms',
-    name: '沙虫巢穴',
-    description: '巨大的沙虫正在吞噬商路，找到它们的巢穴并清除威胁。',
+    name: '吞路之虫',
+    description: '沙虫被地底的热力逼上地面，吞噬了通往南方的商路。清除它们，打开通往火焰裂隙的路。',
     zone: 'scorching_desert',
     type: 'kill',
     category: 'main',
@@ -523,8 +523,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_seal_fire_rift',
-    name: '封印火焰裂隙',
-    description: '沙漠深处有一道火焰裂隙，击败守护它的凤凰来封印它。',
+    name: '日冕之印',
+    description: '日冕之印已碎，女王的圣鸟赫莉娅被渊火奴役，扇动着裂隙的烈焰。击败它，让它浴火重生，重燃第四道封印。',
     zone: 'scorching_desert',
     type: 'kill',
     category: 'main',
@@ -604,8 +604,8 @@ export const AllQuests: QuestDefinition[] = [
   // --- Main Line (seal the abyss) ---
   {
     id: 'q_explore_abyss',
-    name: '深渊之门',
-    description: '深渊裂隙已经开启，勇士必须探索这片被恶魔污染的领域。',
+    name: '渊火之门',
+    description: '五地之火皆汇于此。探索裂隙入口、恶魔尖塔与混沌王座，看清伊格纳罗斯的阵地。',
     zone: 'abyss_rift',
     type: 'explore',
     category: 'main',
@@ -619,8 +619,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_kill_demons',
-    name: '恶魔驱逐',
-    description: '深渊中的恶魔必须被消灭，否则它们将涌入凡间。',
+    name: '门缝之潮',
+    description: '渊火之门每开一寸，便有更多恶魔涌出。驱逐小恶魔与次级恶魔，别让一只越过裂隙。',
     zone: 'abyss_rift',
     type: 'kill',
     category: 'main',
@@ -635,8 +635,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_collect_demon_essence',
-    name: '恶魔精华',
-    description: '击杀深渊中的恶魔，收集它们的精华来封印裂隙，阻止更多恶魔入侵。',
+    name: '以渊为引',
+    description: '以渊火之物锁渊火之门，这是艾瑟琳留下的法子。猎杀深渊恶魔，收集它们的精华，作为终焉之钥的引子。',
     zone: 'abyss_rift',
     type: 'collect',
     category: 'main',
@@ -650,8 +650,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_forge_seal',
-    name: '锻造封印',
-    description: '封印碎片散落在英雄纪念碑附近的废墟里，收集它们来锻造封印深渊的钥匙。',
+    name: '终焉之钥',
+    description: '封印碎片散落在英雄纪念碑附近，是历代守望者以命换来的。收集它们，以命运之锤锻造终焉之钥。',
     zone: 'abyss_rift',
     type: 'collect',
     category: 'main',
@@ -665,8 +665,8 @@ export const AllQuests: QuestDefinition[] = [
   },
   {
     id: 'q_kill_abyss_lord',
-    name: '深渊领主',
-    description: '深渊领主是一切灾厄的根源，击败它来拯救这个世界！',
+    name: '焚誓者',
+    description: '被抹去名字的第六位贤者伊格纳罗斯，化身深渊领主端坐于混沌王座。以终焉之钥与烙印之火，终结这场千年之劫。',
     zone: 'abyss_rift',
     type: 'kill',
     category: 'main',

@@ -146,14 +146,22 @@ export class StoryScene extends Phaser.Scene {
   }
 
   private embers(color: number, depth: number): Phaser.GameObjects.Particles.ParticleEmitter | null {
-    const tex = this.textures.exists('fx_spark') ? 'fx_spark' : null;
+    const tex = this.textures.exists('fx_core') ? 'fx_core' : null;
     if (!tex) return null;
     return this.add.particles(0, 0, tex, {
       x: { min: 0, max: W }, y: H + 10,
-      speedY: { min: -70, max: -25 }, speedX: { min: -12, max: 12 },
-      scale: { start: 0.35, end: 0 }, alpha: { start: 0.9, end: 0 },
-      lifespan: { min: 4000, max: 8000 }, frequency: 90, tint: color, blendMode: 'ADD',
+      speedY: { min: -60, max: -18 }, speedX: { min: -14, max: 14 },
+      scale: { start: 0.12, end: 0.02 }, alpha: { start: 0.85, end: 0 },
+      lifespan: { min: 5000, max: 9000 }, frequency: 140, tint: color, blendMode: 'ADD',
     }).setDepth(depth);
+  }
+
+  /** Soft additive glow behind a title (instead of a text shadow, which boxes). */
+  private glowBehind(x: number, y: number, width: number, color: number, depth: number): Phaser.GameObjects.Image {
+    const tex = this.textures.exists('fx_glow') ? 'fx_glow' : '__WHITE';
+    const img = this.add.image(x, y, tex).setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(depth).setAlpha(0);
+    img.setDisplaySize(width, width * 0.32);
+    return img;
   }
 
   // ── Story sequences (prologue / epilogue / credits) ────────
@@ -204,7 +212,7 @@ export class StoryScene extends Phaser.Scene {
       parts.push(this.add.text(W / 2, y, t(slide.title), {
         fontFamily: SERIF, fontSize: '44px', color: '#f3d9a0', fontStyle: 'bold',
         stroke: '#1a0c04', strokeThickness: 6, letterSpacing: 4,
-      }).setOrigin(0.5).setShadow(0, 0, '#ff9a3c', 18, true, true));
+      }).setOrigin(0.5));
       y += 70;
     }
     if (slide.text) {
@@ -275,7 +283,8 @@ export class StoryScene extends Phaser.Scene {
     const title = this.add.text(W / 2, H / 2 - 36, t(ch.title), {
       fontFamily: SERIF, fontSize: '56px', color: '#f6e0a8', fontStyle: 'bold', letterSpacing: 8,
       stroke: '#140a03', strokeThickness: 7,
-    }).setOrigin(0.5).setDepth(DEPTH + 2).setAlpha(0).setShadow(0, 0, Phaser.Display.Color.IntegerToColor(mood.embers).rgba, 22, true, true);
+    }).setOrigin(0.5).setDepth(DEPTH + 2).setAlpha(0);
+    const halo = this.glowBehind(W / 2, H / 2 - 36, Math.max(420, title.width * 1.6), mood.embers, DEPTH + 1);
     const sub = this.add.text(W / 2, H / 2 + 22, t(ch.subtitle), {
       fontFamily: SERIF, fontSize: '22px', color: '#e2cfa4', letterSpacing: 3,
     }).setOrigin(0.5).setDepth(DEPTH + 2).setAlpha(0);
@@ -291,15 +300,16 @@ export class StoryScene extends Phaser.Scene {
     this.tweenTo(glow, { alpha: 0.55 }, 900);
     await this.tweenTo(num, { alpha: 1 }, 500);
     title.setScale(1.08);
+    this.tweenTo(halo, { alpha: 0.55 }, 1200);
     await this.tweenTo(title, { alpha: 1, scale: 1 }, 900, 'Cubic.easeOut');
     this.tweenTo([lineL, lineR], { width: 260 }, 700, 'Cubic.easeOut');
     await this.tweenTo(sub, { alpha: 1 }, 600);
     await this.tweenTo(body, { alpha: 1 }, 900);
     await this.waitOrInput(3800);
-    await this.tweenTo([num, title, sub, body, lineL, lineR, glow], { alpha: 0 }, 900);
+    await this.tweenTo([num, title, sub, body, lineL, lineR, glow, halo], { alpha: 0 }, 900);
     await this.tweenTo(shade, { fillAlpha: 0 }, 700);
     fx?.destroy();
-    for (const o of [shade, glow, num, title, sub, lineL, lineR, body]) o.destroy();
+    for (const o of [shade, glow, num, title, sub, lineL, lineR, body, halo]) o.destroy();
   }
 
   // ── Cutscenes ───────────────────────────────────────────────
@@ -465,17 +475,19 @@ export class StoryScene extends Phaser.Scene {
     const name = this.add.text(W / 2, H / 2 - 16, title, {
       fontFamily: SERIF, fontSize: '54px', color: '#ffe2a8', fontStyle: 'bold', letterSpacing: 6,
       stroke: '#2a0a02', strokeThickness: 8,
-    }).setOrigin(0.5).setDepth(DEPTH + 2).setAlpha(0).setScale(1.25).setShadow(0, 0, '#ff5a1a', 24, true, true);
+    }).setOrigin(0.5).setDepth(DEPTH + 2).setAlpha(0).setScale(1.25);
+    const halo = this.glowBehind(W / 2, H / 2 - 16, Math.max(460, name.width * 1.7), 0xff5a1a, DEPTH + 1);
     const epi = this.add.text(W / 2, H / 2 + 40, subtitle, {
       fontFamily: SERIF, fontSize: '22px', color: '#d9b98a', letterSpacing: 4, stroke: '#000000', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(DEPTH + 2).setAlpha(0);
     const slash = this.add.rectangle(W / 2, H / 2 + 14, 0, 3, 0xff8a3c).setDepth(DEPTH + 2);
     await this.tweenTo(band, { fillAlpha: 0.6 }, 200);
+    this.tweenTo(halo, { alpha: 0.6 }, 500);
     await this.tweenTo(name, { alpha: 1, scale: 1 }, 380, 'Back.easeOut');
     this.tweenTo(slash, { width: 520 }, 380, 'Cubic.easeOut');
     await this.tweenTo(epi, { alpha: 1 }, 400);
     await this.waitOrInput(2200);
-    await this.tweenTo([band, name, epi, slash], { alpha: 0 }, 450);
-    for (const o of [band, name, epi, slash]) o.destroy();
+    await this.tweenTo([band, name, epi, slash, halo], { alpha: 0 }, 450);
+    for (const o of [band, name, epi, slash, halo]) o.destroy();
   }
 }
