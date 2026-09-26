@@ -1,5 +1,17 @@
 import Phaser from 'phaser';
 import type { RenderQualityProfile } from '../rendering/RenderQuality';
+import { ZONE_MOODS, getCurrentZoneMood } from '../graphics/ZonePalette';
+import type { ZoneMood } from '../graphics/ZonePalette';
+import type { MapTheme } from '../data/types';
+
+/** Map ids → theme, for callers that pass a zone id. Unknown ids use the active zone theme. */
+const ZONE_THEME_BY_ID: Record<string, MapTheme> = {
+  emerald_plains: 'plains',
+  twilight_forest: 'forest',
+  anvil_mountains: 'mountain',
+  scorching_desert: 'desert',
+  abyss_rift: 'abyss',
+};
 
 export interface LightSource {
   x: number;
@@ -10,21 +22,6 @@ export interface LightSource {
   flicker?: boolean;
   id?: string;
 }
-
-interface ZoneAmbient {
-  color: number;
-  alpha: number;
-  fogColor?: number;
-  fogAlpha?: number;
-}
-
-const ZONE_AMBIENTS: Record<string, ZoneAmbient> = {
-  emerald_plains: { color: 0x040610, alpha: 0.10, fogColor: 0x112211, fogAlpha: 0.03 },
-  twilight_forest: { color: 0x020408, alpha: 0.22, fogColor: 0x0a1010, fogAlpha: 0.05 },
-  anvil_mountains: { color: 0x080608, alpha: 0.18, fogColor: 0x100808, fogAlpha: 0.04 },
-  scorching_desert: { color: 0x0c0804, alpha: 0.08, fogColor: 0x120e04, fogAlpha: 0.02 },
-  abyss_rift: { color: 0x040004, alpha: 0.32, fogColor: 0x100010, fogAlpha: 0.06 },
-};
 
 const OVERLAY_DEPTH = 3000;
 const LIGHT_TEXTURE = 'lighting_radial_gpu';
@@ -40,7 +37,13 @@ export class LightingSystem {
   private readonly scene: Phaser.Scene;
   private readonly quality: RenderQualityProfile;
   private readonly ambient: Phaser.GameObjects.Rectangle;
+  /** Drifting additive haze (zone mood). */
   private readonly fog: Phaser.GameObjects.Image;
+  /** Screen-edge vignette tinted per zone (multiply). */
+  private readonly vignette: Phaser.GameObjects.Image;
+  private hazeAlpha = 0.05;
+  /** How much luminance the ambient layer removes; lights add back about this much. */
+  private lightScale = 0.2;
   private readonly lightSprites: Phaser.GameObjects.Image[] = [];
   private readonly lights: LightSource[] = [];
   private readonly flickerSeeds = new Map<string, number>();
@@ -53,12 +56,18 @@ export class LightingSystem {
     this.quality = quality;
     this.ensureRadialTexture();
     const cam = scene.cameras.main;
+    // Opaque backdrop (game background colour) so the additive haze and the
+    // colour grade treat the empty space around the map uniformly.
+    if (cam.transparent) cam.setBackgroundColor(0x0f0f1a);
     this.ambient = scene.add.rectangle(0, 0, cam.width, cam.height, 0x040610, 1)
       .setOrigin(0).setScrollFactor(0).setDepth(OVERLAY_DEPTH)
       .setBlendMode(Phaser.BlendModes.MULTIPLY);
     this.fog = scene.add.image(cam.width / 2, cam.height / 2, LIGHT_TEXTURE)
       .setScrollFactor(0).setDepth(OVERLAY_DEPTH + 1)
-      .setBlendMode(Phaser.BlendModes.MULTIPLY).setAlpha(0.03);
+      .setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.03);
+    this.vignette = scene.add.image(cam.width / 2, cam.height / 2, LIGHT_TEXTURE)
+      .setScrollFactor(0).setDepth(OVERLAY_DEPTH)
+      .setBlendMode(Phaser.BlendModes.MULTIPLY).setVisible(false);
     this.resizeViewport();
   }
 
@@ -85,14 +94,46 @@ export class LightingSystem {
     const cam = this.scene.cameras.main;
     this.ambient.setSize(cam.width, cam.height).setDisplaySize(cam.width, cam.height);
     this.fog.setPosition(cam.width / 2, cam.height / 2).setDisplaySize(cam.width * 1.25, cam.height * 1.25);
+    this.vignette.setPosition(cam.width / 2, cam.height / 2).setDisplaySize(cam.width, cam.height);
   }
 
+  /** Vignette texture: transparent centre fading to the zone colour at the edges. */
+  private vignetteTexture(color: number, alpha: number): string {
+    const key = `lighting_vignette_${color.toString(16)}_${Math.round(alpha * 100)}`;
+    if (this.scene.textures.exists(key)) return key;
+    const w = 256, h = 144;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return LIGHT_TEXTURE;
+    const r = (color >> 16) & 255, g = (color >> 8) & 255, b = color & 255;
+    ctx.save();
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(1, h / w);
+    const grad = ctx.createRadialGradient(0, 0, w * 0.2, 0, 0, w * 0.62);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0)`);
+    grad.addColorStop(0.55, `rgba(${r},${g},${b},${alpha * 0.35})`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},${alpha})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(-w, -w, w * 2, w * 2);
+    ctx.restore();
+    this.scene.textures.addCanvas(key, canvas);
+    return key;
+  }
+
+  /** Apply the zone mood. Accepts a map id or theme; unknown ids use the active zone theme. */
   setZone(zoneId: string): void {
-    const config = ZONE_AMBIENTS[zoneId];
-    if (!config) return;
-    this.ambientAlpha = config.alpha;
-    this.ambient.setFillStyle(config.color, 1).setAlpha(config.alpha);
-    this.fog.setTint(config.fogColor ?? 0x111111).setAlpha(config.fogAlpha ?? 0.03);
+    const theme = ZONE_THEME_BY_ID[zoneId] ?? (zoneId in ZONE_MOODS ? zoneId as MapTheme : null);
+    const mood: ZoneMood = theme ? ZONE_MOODS[theme] : getCurrentZoneMood();
+    this.ambientAlpha = mood.ambientAlpha;
+    this.ambient.setFillStyle(mood.ambient, 1).setAlpha(mood.ambientAlpha);
+    const lum = (((mood.ambient >> 16) & 255) * 0.299 + ((mood.ambient >> 8) & 255) * 0.587 + (mood.ambient & 255) * 0.114) / 255;
+    this.lightScale = Math.max(0.12, mood.ambientAlpha * (1 - lum) * 1.4);
+    this.hazeAlpha = mood.hazeAlpha;
+    this.fog.setTint(mood.haze).setAlpha(mood.hazeAlpha);
+    this.vignette.setTexture(this.vignetteTexture(mood.vignette, mood.vignetteAlpha)).setVisible(true);
+    this.resizeViewport();
   }
 
   addLight(light: LightSource): void {
@@ -131,6 +172,7 @@ export class LightingSystem {
     const cam = this.scene.cameras.main;
     this.resizeViewport();
     this.ambient.setAlpha(Math.max(0, Math.min(1, this.ambientAlpha + Math.sin(this.time * 0.0015) * 0.015)));
+    this.fog.setAlpha(Math.max(0, this.hazeAlpha * (0.8 + Math.sin(this.time * 0.0007) * 0.2)));
     this.fog.setPosition(
       cam.width / 2 + Math.sin(this.time * 0.0008) * cam.width * 0.15,
       cam.height / 2 + Math.cos(this.time * 0.00056) * cam.height * 0.1,
@@ -164,7 +206,7 @@ export class LightingSystem {
         .setDisplaySize(light.radius * cam.zoom * 2, light.radius * cam.zoom * 2)
         // A light restores only the luminance removed by the ambient layer.
         // Mapping raw intensity directly to ADD alpha overexposes the scene.
-        .setTint(light.color).setAlpha(Math.max(0, Math.min(1, intensity * this.ambientAlpha)));
+        .setTint(light.color).setAlpha(Math.max(0, Math.min(1, intensity * this.lightScale)));
     });
     for (let i = visible.length; i < this.lightSprites.length; i++) this.lightSprites[i].setVisible(false);
   }
@@ -172,6 +214,7 @@ export class LightingSystem {
   destroy(): void {
     this.ambient.destroy();
     this.fog.destroy();
+    this.vignette.destroy();
     this.lightSprites.forEach(sprite => sprite.destroy());
     this.lightSprites.length = 0;
     this.lights.length = 0;

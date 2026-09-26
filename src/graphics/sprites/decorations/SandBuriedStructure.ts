@@ -1,70 +1,46 @@
 // src/graphics/sprites/decorations/SandBuriedStructure.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, shade, tone, polyP, line, glow, flat, ellipseP } from './DecorKit';
+import { block, courses } from './Stonework';
 
-export const SandBuriedStructureDrawer: EntityDrawer = {
+/** The top of a sun-bleached sandstone temple poking out of a dune. */
+export const SandBuriedStructureDrawer = defineDecor({
   key: 'decor_sand_buried_structure',
-  frameW: 28,
-  frameH: 18,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 28;
-
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    utils.fillEllipse(ctx, w / 2, h - s, 12 * s, 2 * s);
-
-    // Sand dune covering
-    ctx.fillStyle = utils.rgb(0xc8b480);
-    utils.fillEllipse(ctx, w / 2, h * 0.7, 12 * s, 4 * s);
-
-    // Exposed stone wall top
-    const stoneGrad = ctx.createLinearGradient(w * 0.15, h * 0.15, w * 0.85, h * 0.5);
-    stoneGrad.addColorStop(0, utils.rgb(0x8a7a60));
-    stoneGrad.addColorStop(0.5, utils.rgb(0x7a6a50));
-    stoneGrad.addColorStop(1, utils.rgb(0x6a5a40));
-    ctx.fillStyle = stoneGrad;
-    // Exposed blocks poking through sand
-    ctx.fillRect(w * 0.15, h * 0.25, 8 * s, h * 0.35);
-    ctx.fillRect(w * 0.55, h * 0.35, 6 * s, h * 0.25);
-
-    // Block lines (mortar)
-    ctx.strokeStyle = utils.rgb(0x5a4a35, 0.5);
-    ctx.lineWidth = 0.4 * s;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.15, h * 0.4);
-    ctx.lineTo(w * 0.15 + 8 * s, h * 0.4);
-    ctx.moveTo(w * 0.15, h * 0.5);
-    ctx.lineTo(w * 0.15 + 8 * s, h * 0.5);
-    ctx.moveTo(w * 0.55, h * 0.48);
-    ctx.lineTo(w * 0.55 + 6 * s, h * 0.48);
-    ctx.stroke();
-
-    // Arch doorway hint
-    ctx.fillStyle = utils.rgb(0x3a3020, 0.7);
-    ctx.beginPath();
-    ctx.arc(w * 0.3, h * 0.55, 2.5 * s, Math.PI, Math.PI * 2);
-    ctx.fillRect(w * 0.3 - 2.5 * s, h * 0.55, 5 * s, 2 * s);
-    ctx.fill();
-
-    // Sand overlay (partially burying)
-    ctx.fillStyle = utils.rgb(0xc8b480, 0.6);
-    ctx.beginPath();
-    ctx.moveTo(0, h * 0.6);
-    ctx.quadraticCurveTo(w * 0.3, h * 0.5, w * 0.5, h * 0.58);
-    ctx.quadraticCurveTo(w * 0.7, h * 0.52, w, h * 0.55);
-    ctx.lineTo(w, h);
-    ctx.lineTo(0, h);
-    ctx.closePath();
-    ctx.fill();
-
-    // Wind-blown sand streaks
-    ctx.strokeStyle = utils.rgb(0xb8a470, 0.3);
-    ctx.lineWidth = 0.5 * s;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.1, h * 0.65);
-    ctx.lineTo(w * 0.4, h * 0.62);
-    ctx.moveTo(w * 0.5, h * 0.7);
-    ctx.lineTo(w * 0.85, h * 0.66);
-    ctx.stroke();
+  w: 124,
+  h: 96,
+  ground: 86,
+  tall: true,
+  draw(ctx, { cx, gy, r }) {
+    const stone = 0xd8b27a;
+    contactShadow(ctx, cx + 6, gy, 56, 12, 0.35);
+    // Obelisk tip.
+    const t = tone(stone, { shadow: 0.4, light: 0.35 });
+    shade(ctx, polyP(ctx, [[cx + 22, gy - 10], [cx + 25, gy - 68], [cx + 30, gy - 76], [cx + 35, gy - 68], [cx + 38, gy - 10]]), t, { band: 5, hi: 1.2 });
+    for (let i = 0; i < 4; i++) line(ctx, [[cx + 27, gy - 58 + i * 11], [cx + 33, gy - 58 + i * 11]], t.shade, 0.8);
+    // Doorway lintel block.
+    block(ctx, cx - 40, gy - 6, 50, 34, 10, stone, r);
+    courses(ctx, cx - 40, gy - 6, 50, 34, 11, stone, r);
+    shade(ctx, polyP(ctx, [[cx - 24, gy - 6], [cx - 24, gy - 26], [cx - 6, gy - 26], [cx - 6, gy - 6]]), tone(0x3a2a30), { band: 4, hi: 0, stroke: 0.6 });
+    // Turquoise inlay (zone accent).
+    flat(ctx, polyP(ctx, [[cx - 18, gy - 34], [cx - 15, gy - 37], [cx - 12, gy - 34], [cx - 15, gy - 31]]), '#3fd0c8', '#1a6a70', 0.5);
+    glow(ctx, { x: cx - 15, y: gy - 34 }, 6, 0x3fd0c8, 0.5);
+    // Dune burying the base.
+    const sand = tone(0xe8c48a, { shadow: 0.25, light: 0.3 });
+    shade(ctx, () => {
+      ctx.moveTo(cx - 58, gy + 4);
+      ctx.quadraticCurveTo(cx - 40, gy - 14, cx - 16, gy - 8);
+      ctx.quadraticCurveTo(cx + 10, gy - 2, cx + 30, gy - 14);
+      ctx.quadraticCurveTo(cx + 48, gy - 18, cx + 60, gy + 4);
+      ctx.quadraticCurveTo(cx, gy + 10, cx - 58, gy + 4);
+      ctx.closePath();
+    }, sand, { band: 4, hi: 1.2, stroke: 0.6 });
+    for (const [x, y] of [[-36, -4], [-4, 0], [30, -6]] as const) {
+      ctx.beginPath();
+      ctx.moveTo(cx + x - 8, gy + y);
+      ctx.quadraticCurveTo(cx + x, gy + y - 2, cx + x + 8, gy + y);
+      ctx.strokeStyle = sand.shade;
+      ctx.lineWidth = 0.7;
+      ctx.stroke();
+    }
+    flat(ctx, ellipseP(ctx, cx + 48, gy + 2, 3, 1.4), '#c8a070');
   },
-};
+});

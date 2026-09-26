@@ -1,74 +1,56 @@
 // src/graphics/sprites/decorations/RitualCircle.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, glow, line, flat, ellipseP, shade, tone, rgbaHex } from './DecorKit';
 
-export const RitualCircleDrawer: EntityDrawer = {
+/** Glowing summoning circle etched into the ground, with candles and standing stones. */
+export const RitualCircleDrawer = defineDecor({
   key: 'decor_ritual_circle',
-  frameW: 30,
-  frameH: 18,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 30;
-    const cx = w / 2;
-    const cy = h * 0.55;
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    utils.fillEllipse(ctx, cx, h - s, 13 * s, 2.5 * s);
-
-    // Dark stained ground
-    ctx.fillStyle = 'rgba(40,10,15,0.25)';
-    utils.fillEllipse(ctx, cx, cy, 12 * s, 6 * s);
-
-    // Outer circle
-    ctx.strokeStyle = utils.rgb(0x8a2233, 0.7);
-    ctx.lineWidth = 1 * s;
+  w: 112,
+  h: 70,
+  ground: 50,
+  flat: true,
+  draw(ctx, { cx, gy }) {
+    const cy = gy - 6;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(1, 0.5);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 48);
+    g.addColorStop(0, rgbaHex(0xb04aff, 0.35));
+    g.addColorStop(1, rgbaHex(0xb04aff, 0));
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.ellipse(cx, cy, 11 * s, 5.5 * s, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Inner circle
-    ctx.strokeStyle = utils.rgb(0x661122, 0.6);
-    ctx.lineWidth = 0.8 * s;
+    ctx.arc(0, 0, 48, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = 'rgba(40,10,50,0.6)';
+    for (const rr of [40, 30]) { ctx.beginPath(); ctx.arc(0, 0, rr, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.lineWidth = 1.1;
+    ctx.strokeStyle = '#d88aff';
+    for (const rr of [40, 30]) { ctx.beginPath(); ctx.arc(0, 0, rr, 0, Math.PI * 2); ctx.stroke(); }
     ctx.beginPath();
-    ctx.ellipse(cx, cy, 7 * s, 3.5 * s, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Rune symbols at cardinal points
-    const runeColor = utils.rgb(0xaa3344, 0.6);
-    ctx.fillStyle = runeColor;
-    const runePoints: [number, number][] = [
-      [cx, cy - 4.5 * s],
-      [cx + 9 * s, cy],
-      [cx, cy + 4.5 * s],
-      [cx - 9 * s, cy],
-    ];
-    for (const [rx, ry] of runePoints) {
-      // Small diamond rune
-      ctx.beginPath();
-      ctx.moveTo(rx, ry - 1.2 * s);
-      ctx.lineTo(rx + 0.8 * s, ry);
-      ctx.lineTo(rx, ry + 1.2 * s);
-      ctx.lineTo(rx - 0.8 * s, ry);
-      ctx.closePath();
-      ctx.fill();
+    for (let i = 0; i <= 5; i++) {
+      const a = -Math.PI / 2 + i * (Math.PI * 4) / 5;
+      const x = Math.cos(a) * 30, y = Math.sin(a) * 30;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
-
-    // Connecting lines (pentagram-like)
-    ctx.strokeStyle = utils.rgb(0x661122, 0.35);
-    ctx.lineWidth = 0.5 * s;
-    ctx.beginPath();
-    ctx.moveTo(runePoints[0][0], runePoints[0][1]);
-    ctx.lineTo(runePoints[2][0], runePoints[2][1]);
-    ctx.moveTo(runePoints[1][0], runePoints[1][1]);
-    ctx.lineTo(runePoints[3][0], runePoints[3][1]);
     ctx.stroke();
-
-    // Faint residual glow at center
-    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 4 * s);
-    glow.addColorStop(0, 'rgba(150,30,50,0.2)');
-    glow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = glow;
-    utils.fillCircle(ctx, cx, cy, 4 * s);
+    // Runes on the ring.
+    ctx.fillStyle = '#f0c8ff';
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      ctx.fillRect(Math.cos(a) * 35 - 1, Math.sin(a) * 35 - 1.5, 2, 3);
+    }
+    ctx.restore();
+    // Candles at five points (upright, not squashed).
+    const wax = tone(0xe8dcc0);
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i / 5) * Math.PI * 2;
+      const x = cx + Math.cos(a) * 42;
+      const y = cy + Math.sin(a) * 21;
+      shade(ctx, () => ctx.rect(x - 1.6, y - 7, 3.2, 7), wax, { band: 1, hi: 0, stroke: 0.5 });
+      glow(ctx, { x, y: y - 9 }, 6, 0xffa040, 0.6);
+      flat(ctx, ellipseP(ctx, x, y - 9, 1, 1.8), '#ffe08a');
+    }
+    glow(ctx, { x: cx, y: cy }, 18, 0xb04aff, 0.3);
+    line(ctx, [[cx - 3, cy - 2], [cx + 3, cy + 2]], '#f0c8ff', 0.8);
   },
-};
+});

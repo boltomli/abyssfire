@@ -1,59 +1,32 @@
 // src/graphics/sprites/decorations/BrokenAltar.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, glow, line, flat, ellipseP } from './DecorKit';
+import { block, courses } from './Stonework';
+import { drawRock } from './Rock';
 
-export const BrokenAltarDrawer: EntityDrawer = {
+/** Cracked sacrificial altar with a smouldering rune. */
+export const BrokenAltarDrawer = defineDecor({
   key: 'decor_broken_altar',
-  frameW: 26,
-  frameH: 20,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 26;
-
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    utils.fillEllipse(ctx, w / 2, h - s, 11 * s, 2.5 * s);
-
-    // Altar base slab
-    ctx.fillStyle = utils.rgb(0x5a5050);
-    ctx.beginPath();
-    ctx.moveTo(w * 0.05, h * 0.85);
-    ctx.lineTo(w * 0.15, h * 0.55);
-    ctx.lineTo(w * 0.85, h * 0.55);
-    ctx.lineTo(w * 0.95, h * 0.85);
-    ctx.closePath();
-    ctx.fill();
-
-    // Altar top (cracked)
-    ctx.fillStyle = utils.rgb(0x6a6060);
-    ctx.fillRect(w * 0.1, h * 0.48, w * 0.8, h * 0.1);
-
-    // Broken piece fallen
-    ctx.fillStyle = utils.rgb(0x504848);
-    ctx.save();
-    ctx.translate(w * 0.78, h * 0.72);
-    ctx.rotate(0.4);
-    ctx.fillRect(-3 * s, -2 * s, 6 * s, 4 * s);
-    ctx.restore();
-
-    // Crack through middle
-    ctx.strokeStyle = utils.rgb(0x2a2425, 0.7);
-    ctx.lineWidth = 0.8 * s;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.45, h * 0.5);
-    ctx.lineTo(w * 0.5, h * 0.65);
-    ctx.lineTo(w * 0.44, h * 0.8);
-    ctx.stroke();
-
-    // Faded offering stain
-    ctx.fillStyle = 'rgba(80,20,20,0.2)';
-    utils.fillEllipse(ctx, w * 0.4, h * 0.52, 4 * s, 1.5 * s);
-
-    // Candle stubs
-    for (const xf of [0.25, 0.7]) {
-      ctx.fillStyle = utils.rgb(0xd8d0b0);
-      ctx.fillRect(w * xf - s, h * 0.38, 2 * s, h * 0.12);
-      ctx.fillStyle = 'rgba(0,0,0,0.2)';
-      utils.fillCircle(ctx, w * xf, h * 0.38, 0.8 * s);
-    }
+  w: 92,
+  h: 72,
+  ground: 64,
+  tall: true,
+  draw(ctx, { cx, gy, r }) {
+    const stone = 0x6e6674;
+    contactShadow(ctx, cx + 4, gy, 40, 11, 0.45);
+    block(ctx, cx - 30, gy + 2, 56, 10, 10, 0x5e5864, r, false);
+    block(ctx, cx - 22, gy - 8, 40, 22, 9, stone, r);
+    courses(ctx, cx - 22, gy - 8, 40, 22, 11, stone, r);
+    // Split slab on top.
+    block(ctx, cx - 26, gy - 30, 22, 6, 9, 0x847c8a, r);
+    block(ctx, cx - 1, gy - 29, 22, 6, 9, 0x847c8a, r);
+    drawRock(ctx, cx + 30, gy + 4, 12, 7, stone, r, 0);
+    drawRock(ctx, cx - 34, gy + 6, 9, 5, stone, r, 0);
+    // Rune glow (focal).
+    glow(ctx, { x: cx - 2, y: gy - 20 }, 16, 0xff5a3a, 0.45);
+    line(ctx, [[cx - 8, gy - 24], [cx - 2, gy - 14], [cx + 4, gy - 24]], '#ff6a3a', 1.4);
+    line(ctx, [[cx - 8, gy - 24], [cx - 2, gy - 14], [cx + 4, gy - 24]], '#ffd0a0', 0.5);
+    flat(ctx, ellipseP(ctx, cx - 2, gy - 27, 1.4, 1.4), '#ffb070');
+    // Blood/wax drips.
+    line(ctx, [[cx + 12, gy - 30], [cx + 12, gy - 24]], '#8a2a2a', 1.2);
   },
-};
+});

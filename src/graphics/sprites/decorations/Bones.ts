@@ -1,54 +1,45 @@
 // src/graphics/sprites/decorations/Bones.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, shade, tone, ellipseP, limbP, flat, polyP } from './DecorKit';
 
-export const BonesDrawer: EntityDrawer = {
+export function bone(ctx: CanvasRenderingContext2D, ax: number, ay: number, bx: number, by: number, w: number, col = 0xe6dcc0): void {
+  const t = tone(col, { shadow: 0.35, light: 0.3 });
+  shade(ctx, limbP(ctx, [ax, ay], [(ax + bx) / 2, (ay + by) / 2], [bx, by], w * 0.5, w * 0.5), t, { band: w * 0.4, hi: 0, stroke: 0.55 });
+  for (const [x, y] of [[ax, ay], [bx, by]] as const) {
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len * w * 0.55, ny = dx / len * w * 0.55;
+    shade(ctx, ellipseP(ctx, x + nx, y + ny, w * 0.62, w * 0.62), t, { band: w * 0.3, hi: 0, stroke: 0.5 });
+    shade(ctx, ellipseP(ctx, x - nx, y - ny, w * 0.62, w * 0.62), t, { band: w * 0.3, hi: 0, stroke: 0.5 });
+  }
+}
+
+export function skull(ctx: CanvasRenderingContext2D, x: number, gy: number, s: number, col = 0xe6dcc0): void {
+  const t = tone(col, { shadow: 0.35, light: 0.3 });
+  shade(ctx, () => {
+    ctx.moveTo(x - 5 * s, gy - 3 * s);
+    ctx.bezierCurveTo(x - 6.5 * s, gy - 12 * s, x + 6.5 * s, gy - 12 * s, x + 5 * s, gy - 3 * s);
+    ctx.lineTo(x + 3 * s, gy - 2.5 * s);
+    ctx.lineTo(x + 3 * s, gy);
+    ctx.lineTo(x - 3 * s, gy);
+    ctx.lineTo(x - 3 * s, gy - 2.5 * s);
+    ctx.closePath();
+  }, t, { band: 1.6 * s, hi: 0.6 * s, stroke: 0.6 });
+  flat(ctx, ellipseP(ctx, x - 2.2 * s, gy - 5.5 * s, 1.5 * s, 1.7 * s), '#2a1e24');
+  flat(ctx, ellipseP(ctx, x + 2.2 * s, gy - 5.5 * s, 1.5 * s, 1.7 * s), '#2a1e24');
+  flat(ctx, polyP(ctx, [[x, gy - 4 * s], [x - 0.8 * s, gy - 2.6 * s], [x + 0.8 * s, gy - 2.6 * s]]), '#2a1e24');
+}
+
+/** Scattered bones + skull (flat ground litter). */
+export const BonesDrawer = defineDecor({
   key: 'decor_bones',
-  frameW: 16,
-  frameH: 10,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 16;
-    const BONE_COLOR = 0xd4c8a0; // aged yellow-brown instead of near-white
-
-    // Ground shadow (increased)
-    ctx.fillStyle = 'rgba(0,0,0,0.26)';
-    utils.fillEllipse(ctx, w / 2, h - 0.6 * s, 7 * s, 1.2 * s);
-
-
-    // Blood stain underneath (dark red-brown ellipse)
-    ctx.fillStyle = 'rgba(80,10,5,0.20)';
-    utils.fillEllipse(ctx, w * 0.48, h * 0.72, 4 * s, 1.8 * s);
-
-    // Partially buried long bone (horizontal, slightly angled)
-    utils.drawBoneSegment(ctx, w * 0.08, h * 0.62, w * 0.68, h * 0.50, 2.2 * s, BONE_COLOR);
-
-    // Second scattered bone (diagonal)
-    utils.drawBoneSegment(ctx, w * 0.55, h * 0.75, w * 0.92, h * 0.38, 1.8 * s, BONE_COLOR);
-
-    // Small rib fragment
-    utils.drawBoneSegment(ctx, w * 0.20, h * 0.30, w * 0.40, h * 0.22, 1.2 * s, BONE_COLOR);
-
-    // Cracked skull fragment (partially buried — only partial circle visible)
-    const skullX = w * 0.72, skullY = h * 0.68;
-    ctx.fillStyle = utils.rgb(utils.darken(BONE_COLOR, 5));
-    ctx.beginPath();
-    ctx.arc(skullX, skullY, 2.8 * s, Math.PI, Math.PI * 2);
-    ctx.fill();
-    // Skull crack
-    ctx.strokeStyle = utils.rgb(utils.darken(BONE_COLOR, 35), 0.7);
-    ctx.lineWidth = 0.5 * s;
-    ctx.beginPath();
-    ctx.moveTo(skullX, skullY - 2.8 * s);
-    ctx.quadraticCurveTo(skullX + 0.8 * s, skullY - 1.5 * s, skullX + 1.5 * s, skullY - 0.5 * s);
-    ctx.stroke();
-    // Skull eye socket hint
-    ctx.fillStyle = utils.rgb(0x30282a, 0.55);
-    utils.fillEllipse(ctx, skullX - 0.8 * s, skullY - 1.2 * s, 0.9 * s, 0.7 * s);
-
-
-    // Dirt/burial overlay at bottom (partially buried effect)
-    ctx.fillStyle = 'rgba(60,45,25,0.22)';
-    ctx.fillRect(0, h * 0.80, w, h * 0.20);
+  w: 44,
+  h: 26,
+  ground: 21,
+  flat: true,
+  draw(ctx, { cx, gy }) {
+    contactShadow(ctx, cx, gy, 18, 4.5, 0.3);
+    bone(ctx, cx - 16, gy - 1, cx - 2, gy - 5, 2.4);
+    bone(ctx, cx + 2, gy + 1, cx + 16, gy - 2, 2.2);
+    skull(ctx, cx + 3, gy - 3, 0.95);
   },
-};
+});

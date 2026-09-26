@@ -1,64 +1,48 @@
 // src/graphics/sprites/decorations/AncientStatue.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, shade, tone, ellipseP, limbP, line, glow, polyP } from './DecorKit';
+import { block, ivy } from './Stonework';
 
-export const AncientStatueDrawer: EntityDrawer = {
+/** Weathered robed guardian on a plinth, holding a sword — ~1.9× player. */
+export const AncientStatueDrawer = defineDecor({
   key: 'decor_ancient_statue',
-  frameW: 20,
-  frameH: 32,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 20;
-
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    utils.fillEllipse(ctx, w / 2, h - s, 8 * s, 2 * s);
-
-    // Stone pedestal
-    ctx.fillStyle = utils.rgb(0x555560);
-    ctx.fillRect(w * 0.2, h * 0.82, w * 0.6, h * 0.12);
-    ctx.fillStyle = utils.rgb(0x4a4a55);
-    ctx.fillRect(w * 0.15, h * 0.78, w * 0.7, h * 0.06);
-
-    // Body (robed figure)
-    const bodyGrad = ctx.createLinearGradient(w * 0.3, h * 0.25, w * 0.7, h * 0.8);
-    bodyGrad.addColorStop(0, utils.rgb(0x7a7a88));
-    bodyGrad.addColorStop(0.5, utils.rgb(0x606068));
-    bodyGrad.addColorStop(1, utils.rgb(0x484850));
-    ctx.fillStyle = bodyGrad;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.35, h * 0.28);
-    ctx.lineTo(w * 0.65, h * 0.28);
-    ctx.lineTo(w * 0.72, h * 0.78);
-    ctx.lineTo(w * 0.28, h * 0.78);
-    ctx.closePath();
-    ctx.fill();
-
-    // Head
-    ctx.fillStyle = utils.rgb(0x6a6a75);
-    utils.fillEllipse(ctx, w / 2, h * 0.2, 4 * s, 4.5 * s);
-
-    // Broken arm stub
-    ctx.fillStyle = utils.rgb(0x5a5a65);
-    ctx.beginPath();
-    ctx.moveTo(w * 0.65, h * 0.35);
-    ctx.lineTo(w * 0.78, h * 0.45);
-    ctx.lineTo(w * 0.75, h * 0.48);
-    ctx.lineTo(w * 0.63, h * 0.4);
-    ctx.closePath();
-    ctx.fill();
-
-    // Weathering cracks
-    ctx.strokeStyle = utils.rgb(0x3a3a40, 0.5);
-    ctx.lineWidth = 0.5 * s;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.45, h * 0.35);
-    ctx.lineTo(w * 0.5, h * 0.5);
-    ctx.lineTo(w * 0.42, h * 0.65);
-    ctx.stroke();
-
-    // Moss at base
-    ctx.fillStyle = 'rgba(50,70,35,0.3)';
-    utils.fillEllipse(ctx, w * 0.35, h * 0.8, 3 * s, 1.5 * s);
-    utils.fillEllipse(ctx, w * 0.65, h * 0.82, 2.5 * s, 1 * s);
+  w: 80,
+  h: 140,
+  ground: 134,
+  tall: true,
+  draw(ctx, { cx, gy, r }) {
+    const stone = 0x8e98a0;
+    const t = tone(stone, { shadow: 0.45, light: 0.4 });
+    contactShadow(ctx, cx + 6, gy, 32, 9, 0.45);
+    block(ctx, cx - 22, gy, 40, 18, 10, 0x7e8490, r);
+    const base = gy - 18;
+    // Robe.
+    shade(ctx, polyP(ctx, [[cx - 14, base], [cx - 10, base - 58], [cx + 10, base - 58], [cx + 15, base]]), t, { band: 7, hi: 1.4 });
+    for (const f of [-5, 1, 7]) line(ctx, [[cx + f * 0.8, base - 50], [cx + f, base - 2]], t.shade, 0.7);
+    // Shoulders + head.
+    shade(ctx, ellipseP(ctx, cx, base - 60, 13, 7), t, { band: 3, hi: 1 });
+    shade(ctx, ellipseP(ctx, cx, base - 73, 6.5, 7.5), t, { band: 3, hi: 1 });
+    // Hood.
+    shade(ctx, () => {
+      ctx.moveTo(cx - 8, base - 66);
+      ctx.quadraticCurveTo(cx - 9, base - 84, cx, base - 84);
+      ctx.quadraticCurveTo(cx + 9, base - 84, cx + 8, base - 66);
+      ctx.quadraticCurveTo(cx, base - 72, cx - 8, base - 66);
+      ctx.closePath();
+    }, t, { band: 3, hi: 1 });
+    // Sword held point-down in front.
+    const blade = tone(0xa8b0b8, { light: 0.45 });
+    shade(ctx, polyP(ctx, [[cx - 2, base - 44], [cx + 2, base - 44], [cx + 1.5, base - 6], [cx, base - 2], [cx - 1.5, base - 6]]), blade, { band: 1.2, hi: 0.6 });
+    shade(ctx, polyP(ctx, [[cx - 8, base - 46], [cx + 8, base - 46], [cx + 8, base - 43], [cx - 8, base - 43]]), t, { band: 1, hi: 0.5 });
+    shade(ctx, limbP(ctx, [cx - 9, base - 58], [cx - 8, base - 52], [cx - 2, base - 49], 3.5, 3), t, { band: 2, hi: 0 });
+    shade(ctx, limbP(ctx, [cx + 9, base - 58], [cx + 8, base - 52], [cx + 2, base - 49], 3.5, 3), t, { band: 2, hi: 0 });
+    shade(ctx, polyP(ctx, [[cx - 1.5, base - 58], [cx + 1.5, base - 58], [cx + 1.5, base - 46], [cx - 1.5, base - 46]]), t, { band: 0.8, hi: 0 });
+    // Faintly glowing eyes (focal).
+    glow(ctx, { x: cx, y: base - 73 }, 7, 0x7fe0ff, 0.5);
+    ctx.fillStyle = '#c8f6ff';
+    ctx.fillRect(cx - 3, base - 74, 1.6, 1);
+    ctx.fillRect(cx + 1.4, base - 74, 1.6, 1);
+    // Cracks + moss.
+    line(ctx, [[cx + 6, base - 40], [cx + 3, base - 32], [cx + 7, base - 24]], t.line, 0.6);
+    ivy(ctx, cx + 11, base - 58, 8, 0x4f8a3a, r);
   },
-};
+});

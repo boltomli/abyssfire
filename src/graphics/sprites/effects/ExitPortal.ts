@@ -1,103 +1,97 @@
 // src/graphics/sprites/effects/ExitPortal.ts
-import type { EntityDrawer } from '../types';
+// Displayed centred at (tile, y-8), so the ground line sits at h/2 + 8.
+import { defineDecor, shade, tone, glow, rgbaHex, flat, ellipseP } from '../decorations/DecorKit';
+import { drawRock } from '../decorations/Rock';
 
-export const ExitPortalDrawer: EntityDrawer = {
+export const ExitPortalDrawer = defineDecor({
   key: 'exit_portal',
-  frameW: 32,
-  frameH: 32,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 32;
-    const cx = w / 2, cy = h / 2;
-    const baseGreen = 0x00dc64;
-
-    // Ground shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    utils.fillEllipse(ctx, cx, h - 2 * s, 12 * s, 3 * s);
-
-    // Soft outline glow (bright green — portal)
-    utils.softOutline(ctx, 'rgba(0,200,80,0.25)', 6);
-
-    // Outer vortex rings — concentric arc strokes with subtle rotation offsets
-    const ringDefs: [number, number, number, string][] = [
-      // radius, lineWidth, rotationOffset, color
-      [13 * s, 1.2 * s, 0.0,  'rgba(0,220,100,0.18)'],
-      [11 * s, 1.5 * s, 0.4,  'rgba(0,220,100,0.28)'],
-      [9 * s,  1.8 * s, 0.8,  'rgba(0,200,90,0.38)'],
-      [7 * s,  2.0 * s, 1.2,  'rgba(0,180,80,0.50)'],
-      [5 * s,  2.2 * s, 1.6,  'rgba(0,160,70,0.60)'],
-    ];
-    for (const [r, lw, rot, color] of ringDefs) {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lw;
-      ctx.lineCap = 'round';
-      // Each ring is a near-complete arc with a small gap, rotated to suggest swirl
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, rot, rot + Math.PI * 1.75);
-      ctx.stroke();
-      // Second arc segment for denser swirl feel
-      ctx.globalAlpha = 0.5;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 0.92, rot + Math.PI, rot + Math.PI * 1.9);
-      ctx.stroke();
-      ctx.globalAlpha = 1.0;
-    }
-
-    // Swirl arms — curved strokes emanating inward
-    ctx.strokeStyle = utils.rgb(baseGreen, 0.30);
-    ctx.lineWidth = 1.0 * s;
-    for (let i = 0; i < 4; i++) {
-      const startAngle = (i / 4) * Math.PI * 2;
-      const sx = cx + Math.cos(startAngle) * 12 * s;
-      const sy = cy + Math.sin(startAngle) * 12 * s;
-      const cpAngle = startAngle + 0.8;
-      const cpx = cx + Math.cos(cpAngle) * 6 * s;
-      const cpy = cy + Math.sin(cpAngle) * 6 * s;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.quadraticCurveTo(cpx, cpy, cx + Math.cos(startAngle + 1.6) * 2 * s, cy + Math.sin(startAngle + 1.6) * 2 * s);
-      ctx.stroke();
-    }
-
-    // Inner glow gradient: white → green → transparent
-    const innerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 9 * s);
-    innerGlow.addColorStop(0,   'rgba(255,255,255,0.55)');
-    innerGlow.addColorStop(0.15, 'rgba(180,255,210,0.45)');
-    innerGlow.addColorStop(0.40, 'rgba(0,220,100,0.30)');
-    innerGlow.addColorStop(0.70, 'rgba(0,160,70,0.12)');
-    innerGlow.addColorStop(1,   'rgba(0,100,40,0)');
-    ctx.fillStyle = innerGlow;
-    utils.fillCircle(ctx, cx, cy, 9 * s);
-
-    // Core bright spot
-    const coreGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 3 * s);
-    coreGlow.addColorStop(0, 'rgba(255,255,255,0.80)');
-    coreGlow.addColorStop(0.5, 'rgba(150,255,190,0.50)');
-    coreGlow.addColorStop(1, 'rgba(0,200,80,0)');
-    ctx.fillStyle = coreGlow;
-    utils.fillCircle(ctx, cx, cy, 3 * s);
-
-    // End soft outline
-    utils.softOutlineEnd(ctx);
-
-    // Edge sparkle hints — small bright dots at perimeter
-    const sparkleAngles = [0, 0.65, 1.30, 1.95, 2.60, 3.25, 3.90, 4.55, 5.20, 5.85];
-    for (let i = 0; i < sparkleAngles.length; i++) {
-      const ang = sparkleAngles[i];
-      const dist = (i % 3 === 0 ? 13 : i % 3 === 1 ? 12 : 11) * s;
-      const sx = cx + Math.cos(ang) * dist;
-      const sy = cy + Math.sin(ang) * dist;
-      const brightness = i % 2 === 0 ? 0.80 : 0.50;
-      ctx.fillStyle = `rgba(180,255,210,${brightness})`;
-      utils.fillCircle(ctx, sx, sy, (i % 2 === 0 ? 0.9 : 0.55) * s);
-    }
-
-    // Outer dim ring outline
-    ctx.strokeStyle = utils.rgb(baseGreen, 0.20);
-    ctx.lineWidth = 0.8 * s;
+  w: 80,
+  h: 88,
+  ground: 52,
+  draw(ctx, { cx, gy, r }) {
+    const core = 0x3fe0a0;
+    const deep = 0x1a6a8a;
+    // Ground rune ring.
+    ctx.save();
+    ctx.translate(cx, gy);
+    ctx.scale(1, 0.45);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 34);
+    g.addColorStop(0, rgbaHex(core, 0.55));
+    g.addColorStop(0.7, rgbaHex(deep, 0.25));
+    g.addColorStop(1, rgbaHex(deep, 0));
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(cx, cy, 14 * s, 0, Math.PI * 2);
+    ctx.arc(0, 0, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = rgbaHex(0xb0ffe0, 0.8);
+    ctx.beginPath();
+    ctx.arc(0, 0, 26, 0, Math.PI * 2);
     ctx.stroke();
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      ctx.fillStyle = '#d8fff0';
+      ctx.fillRect(Math.cos(a) * 30 - 1, Math.sin(a) * 30 - 1.5, 2, 3);
+    }
+    ctx.restore();
+    // Standing vortex: nested swirl arcs in an upright oval.
+    const oy = gy - 26;
+    glow(ctx, { x: cx, y: oy }, 34, core, 0.5);
+    ctx.save();
+    ctx.translate(cx, oy);
+    ctx.scale(0.62, 1);
+    const vg = ctx.createRadialGradient(0, 0, 0, 0, 0, 24);
+    vg.addColorStop(0, '#f0fff8');
+    vg.addColorStop(0.3, rgbaHex(core, 0.95));
+    vg.addColorStop(0.8, rgbaHex(deep, 0.9));
+    vg.addColorStop(1, rgbaHex(0x10304a, 0.95));
+    ctx.fillStyle = vg;
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+      const a0 = i * (Math.PI / 2);
+      ctx.beginPath();
+      for (let k = 0; k <= 24; k++) {
+        const t = k / 24;
+        const rr = 22 * (1 - t * 0.85);
+        const a = a0 + t * Math.PI * 1.6;
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr;
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = i % 2 ? 'rgba(220,255,240,0.85)' : rgbaHex(0x80f0ff, 0.8);
+      ctx.lineWidth = 2.2 - i * 0.3;
+      ctx.stroke();
+    }
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = rgbaHex(0x0a2a3a, 0.9);
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    // Flanking standing stones with glowing runes.
+    for (const s of [-1, 1]) {
+      const x = cx + s * 22;
+      const t = tone(0x6a7a8a, { light: 0.35 });
+      shade(ctx, () => {
+        ctx.moveTo(x - 5, gy + 2);
+        ctx.lineTo(x - 4.5, gy - 30);
+        ctx.lineTo(x + s * 1, gy - 36);
+        ctx.lineTo(x + 4.5, gy - 29);
+        ctx.lineTo(x + 5, gy + 2);
+        ctx.closePath();
+      }, t, { band: 3, hi: 1 });
+      glow(ctx, { x, y: gy - 18 }, 7, core, 0.6);
+      flat(ctx, ellipseP(ctx, x, gy - 18, 1.4, 3), '#c8fff0');
+    }
+    drawRock(ctx, cx + 30, gy + 6, 8, 5, 0x6a7a8a, r, 0);
+    // Motes.
+    for (let i = 0; i < 6; i++) {
+      const a = r() * Math.PI * 2;
+      const d = 16 + r() * 12;
+      flat(ctx, ellipseP(ctx, cx + Math.cos(a) * d, oy + Math.sin(a) * d * 1.2, 0.9, 0.9), '#e8fff8');
+    }
   },
-};
+});

@@ -1,64 +1,36 @@
 // src/graphics/sprites/decorations/WarBanner.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, shade, tone, polyP, line, ellipseP, limbP } from './DecorKit';
+import { skull } from './Bones';
 
-export const WarBannerDrawer: EntityDrawer = {
+/** Goblin war totem: crooked pole, tattered red banner, skull and bones. */
+export const WarBannerDrawer = defineDecor({
   key: 'decor_war_banner',
-  frameW: 16,
-  frameH: 30,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 16;
-
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    utils.fillEllipse(ctx, w / 2, h - s, 5 * s, 1.5 * s);
-
-    // Pole
-    ctx.strokeStyle = utils.rgb(0x5a4a30);
-    ctx.lineWidth = 1.5 * s;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(w / 2, h * 0.92);
-    ctx.lineTo(w / 2, h * 0.06);
-    ctx.stroke();
-
-    // Pole top ornament
-    ctx.fillStyle = utils.rgb(0x8a7a50);
-    utils.fillCircle(ctx, w / 2, h * 0.06, 1.5 * s);
-
-    // Banner cloth (tattered)
-    const bannerGrad = ctx.createLinearGradient(w * 0.2, h * 0.12, w * 0.8, h * 0.5);
-    bannerGrad.addColorStop(0, utils.rgb(0x8a2222));
-    bannerGrad.addColorStop(0.5, utils.rgb(0x702020));
-    bannerGrad.addColorStop(1, utils.rgb(0x551818));
-    ctx.fillStyle = bannerGrad;
-    ctx.beginPath();
-    ctx.moveTo(w / 2, h * 0.1);
-    ctx.lineTo(w * 0.85, h * 0.15);
-    ctx.lineTo(w * 0.82, h * 0.38);
-    ctx.lineTo(w * 0.75, h * 0.5);
-    ctx.lineTo(w * 0.65, h * 0.45);
-    ctx.lineTo(w / 2, h * 0.48);
-    ctx.closePath();
-    ctx.fill();
-
-    // Tattered edge
-    ctx.strokeStyle = utils.rgb(0x441010, 0.5);
-    ctx.lineWidth = 0.5 * s;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.82, h * 0.38);
-    ctx.lineTo(w * 0.75, h * 0.5);
-    ctx.lineTo(w * 0.65, h * 0.45);
-    ctx.stroke();
-
-    // Symbol on banner (simple cross/sigil)
-    ctx.strokeStyle = utils.rgb(0xccaa44, 0.6);
-    ctx.lineWidth = 0.8 * s;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.62, h * 0.22);
-    ctx.lineTo(w * 0.62, h * 0.36);
-    ctx.moveTo(w * 0.55, h * 0.28);
-    ctx.lineTo(w * 0.7, h * 0.28);
-    ctx.stroke();
+  w: 64,
+  h: 116,
+  ground: 110,
+  tall: true,
+  draw(ctx, { cx, gy, r }) {
+    contactShadow(ctx, cx + 4, gy, 20, 6, 0.42);
+    const wood = tone(0x7a5238, { light: 0.3 });
+    shade(ctx, limbP(ctx, [cx, gy + 1], [cx - 1, gy - 50], [cx + 2, gy - 102], 3.2, 2.2), wood, { band: 2, hi: 0.6 });
+    shade(ctx, limbP(ctx, [cx - 16, gy - 92], [cx, gy - 94], [cx + 18, gy - 90], 1.8, 1.6), wood, { band: 1.2, hi: 0 });
+    // Tattered banner.
+    const cloth = tone(0xb8322e, { light: 0.35 });
+    const pts: [number, number][] = [[cx - 15, gy - 91], [cx + 17, gy - 89], [cx + 15, gy - 50], [cx + 9, gy - 56], [cx + 4, gy - 46], [cx - 2, gy - 55], [cx - 8, gy - 47], [cx - 13, gy - 57]];
+    shade(ctx, polyP(ctx, pts), cloth, { band: 4, hi: 1 });
+    // Crude emblem.
+    const paint = '#f0d8a0';
+    line(ctx, [[cx - 6, gy - 80], [cx + 1, gy - 68], [cx + 8, gy - 80]], paint, 1.6);
+    line(ctx, [[cx + 1, gy - 68], [cx + 1, gy - 60]], paint, 1.6);
+    skull(ctx, cx + 2, gy - 98, 1.1);
+    // Lashings + hanging bones.
+    for (const y of [gy - 36, gy - 40]) line(ctx, [[cx - 3, y], [cx + 3, y + 1]], '#c8a870', 0.9);
+    line(ctx, [[cx - 14, gy - 91], [cx - 16, gy - 80]], '#c8a870', 0.6);
+    shade(ctx, ellipseP(ctx, cx - 16, gy - 78, 1.6, 2.4), tone(0xe6dcc0), { band: 0.8, hi: 0, stroke: 0.5 });
+    // Stones at the base.
+    for (const [x, rr] of [[-6, 4], [5, 3.5], [0, 3]] as const) {
+      shade(ctx, ellipseP(ctx, cx + x, gy - 1, rr, rr * 0.7), tone(0x8a8e98), { band: 1.2, hi: 0.5, stroke: 0.5 });
+    }
+    void r;
   },
-};
+});

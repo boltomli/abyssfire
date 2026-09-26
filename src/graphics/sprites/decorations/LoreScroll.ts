@@ -1,52 +1,23 @@
-import type { EntityDrawer } from '../types';
+// src/graphics/sprites/decorations/LoreScroll.ts
+import { defineDecor, contactShadow, shade, tone, line, glow, ellipseP } from './DecorKit';
 
-export const LoreScrollDrawer: EntityDrawer = {
+export const LoreScrollDrawer = defineDecor({
   key: 'decor_lore_scroll',
-  frameW: 20,
-  frameH: 24,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 20;
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    utils.fillEllipse(ctx, w / 2, h - 1 * s, 8 * s, 2 * s);
-
-    // Scroll body (parchment)
-    const scrollGrad = ctx.createLinearGradient(w * 0.2, 0, w * 0.8, 0);
-    scrollGrad.addColorStop(0, utils.rgb(0xC4A972));
-    scrollGrad.addColorStop(0.3, utils.rgb(0xDEB887));
-    scrollGrad.addColorStop(0.7, utils.rgb(0xDEB887));
-    scrollGrad.addColorStop(1, utils.rgb(0xC4A972));
-    ctx.fillStyle = scrollGrad;
-    utils.roundRect(ctx, w * 0.22, h * 0.15, w * 0.56, h * 0.7, 1 * s);
-    ctx.fill();
-
-    // Top roll
-    ctx.fillStyle = utils.rgb(0xC4A972);
-    utils.fillEllipse(ctx, w / 2, h * 0.17, w * 0.35, 3 * s);
-    ctx.fillStyle = utils.rgb(0x8B7355);
-    utils.fillEllipse(ctx, w / 2, h * 0.17, w * 0.35, 1.5 * s);
-
-    // Bottom roll
-    ctx.fillStyle = utils.rgb(0xC4A972);
-    utils.fillEllipse(ctx, w / 2, h * 0.83, w * 0.35, 3 * s);
-    ctx.fillStyle = utils.rgb(0x8B7355);
-    utils.fillEllipse(ctx, w / 2, h * 0.83, w * 0.35, 1.5 * s);
-
-    // Text lines
-    ctx.fillStyle = utils.rgb(0x4a3a2a, 0.5);
-    for (let i = 0; i < 4; i++) {
-      const ly = h * 0.32 + i * 3.5 * s;
-      const lw = (5 + Math.random() * 4) * s;
-      ctx.fillRect(w / 2 - lw / 2, ly, lw, 0.8 * s);
+  w: 28,
+  h: 28,
+  ground: 26,
+  draw(ctx, { cx, gy }) {
+    contactShadow(ctx, cx + 1, gy, 10, 3, 0.4);
+    glow(ctx, { x: cx, y: gy - 10 }, 12, 0xffe08a, 0.35);
+    const paper = tone(0xf0dcaa, { light: 0.4 });
+    const rod = tone(0x8a4a2a);
+    shade(ctx, () => ctx.rect(cx - 8, gy - 19, 16, 13), paper, { band: 2, hi: 0.8 });
+    for (let i = 0; i < 3; i++) line(ctx, [[cx - 5, gy - 16 + i * 3.5], [cx + (i === 2 ? 1 : 5), gy - 16 + i * 3.5]], '#8a6a4a', 0.7);
+    for (const y of [gy - 20, gy - 5]) {
+      shade(ctx, ellipseP(ctx, cx, y, 10, 2.4), paper, { band: 1, hi: 0.5 });
+      shade(ctx, ellipseP(ctx, cx - 10.5, y, 1.8, 2.2), rod, { band: 0.8, hi: 0 });
+      shade(ctx, ellipseP(ctx, cx + 10.5, y, 1.8, 2.2), rod, { band: 0.8, hi: 0 });
     }
-
-    // Wax seal
-    ctx.fillStyle = utils.rgb(0x8B0000);
-    utils.fillCircle(ctx, w * 0.55, h * 0.72, 2 * s);
-    ctx.fillStyle = utils.rgb(0xAA2222, 0.6);
-    utils.fillCircle(ctx, w * 0.54, h * 0.71, 1 * s);
+    line(ctx, [[cx - 1, gy - 12], [cx + 1, gy - 8], [cx - 1, gy - 4]], '#c83a2a', 1.4);
   },
-};
+});

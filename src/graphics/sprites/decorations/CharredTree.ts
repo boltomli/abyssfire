@@ -1,66 +1,36 @@
 // src/graphics/sprites/decorations/CharredTree.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, trunk, shade, tone, limbP, glow, line } from './DecorKit';
 
-export const CharredTreeDrawer: EntityDrawer = {
+/** Abyss Rift — charred, twisted tree with glowing ember cracks. */
+export const CharredTreeDrawer = defineDecor({
   key: 'decor_charred_tree',
-  frameW: 22,
-  frameH: 34,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 22;
-
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    utils.fillEllipse(ctx, w / 2, h - s, 8 * s, 2 * s);
-
-    // Charred trunk
-    const trunkGrad = ctx.createLinearGradient(w * 0.35, h * 0.2, w * 0.65, h * 0.85);
-    trunkGrad.addColorStop(0, utils.rgb(0x1a1410));
-    trunkGrad.addColorStop(0.5, utils.rgb(0x2a2018));
-    trunkGrad.addColorStop(1, utils.rgb(0x1a1410));
-    ctx.fillStyle = trunkGrad;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.38, h * 0.88);
-    ctx.lineTo(w * 0.35, h * 0.2);
-    ctx.lineTo(w * 0.45, h * 0.12);
-    ctx.lineTo(w * 0.55, h * 0.12);
-    ctx.lineTo(w * 0.65, h * 0.2);
-    ctx.lineTo(w * 0.62, h * 0.88);
-    ctx.closePath();
-    ctx.fill();
-
-    // Broken branch stubs
-    ctx.strokeStyle = utils.rgb(0x201810);
-    ctx.lineWidth = 2 * s;
-    ctx.lineCap = 'round';
-    // Left branch
-    ctx.beginPath();
-    ctx.moveTo(w * 0.38, h * 0.35);
-    ctx.lineTo(w * 0.18, h * 0.22);
-    ctx.stroke();
-    // Right branch
-    ctx.beginPath();
-    ctx.moveTo(w * 0.62, h * 0.45);
-    ctx.lineTo(w * 0.82, h * 0.35);
-    ctx.stroke();
-    // Top broken
-    ctx.beginPath();
-    ctx.moveTo(w * 0.48, h * 0.12);
-    ctx.lineTo(w * 0.42, h * 0.04);
-    ctx.stroke();
-
-    // Charring detail (darker patches)
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    utils.fillEllipse(ctx, w * 0.45, h * 0.4, 2.5 * s, 4 * s);
-    utils.fillEllipse(ctx, w * 0.55, h * 0.6, 2 * s, 3 * s);
-
-    // Ember glow at base
-    ctx.fillStyle = 'rgba(180,60,10,0.15)';
-    utils.fillEllipse(ctx, w * 0.5, h * 0.85, 5 * s, 1.5 * s);
-
-    // Ash on ground
-    ctx.fillStyle = 'rgba(40,38,35,0.25)';
-    utils.fillEllipse(ctx, w * 0.3, h * 0.9, 4 * s, 1 * s);
-    utils.fillEllipse(ctx, w * 0.7, h * 0.88, 3 * s, 0.8 * s);
+  w: 104,
+  h: 156,
+  ground: 150,
+  tall: true,
+  draw(ctx, { cx, gy, r }) {
+    contactShadow(ctx, cx + 8, gy, 32, 10, 0.5);
+    const bark = 0x3a2a3e;
+    trunk(ctx, cx, gy, gy - 76, 20, 8, bark, r, -6);
+    const t = tone(bark, { shadow: 0.45, light: 0.25 });
+    const limbs: [number, number, number, number, number, number, number][] = [
+      [cx - 5, gy - 60, cx - 22, gy - 70, cx - 36, gy - 98, 4],
+      [cx - 6, gy - 74, cx + 12, gy - 88, cx + 30, gy - 112, 3.6],
+      [cx - 6, gy - 74, cx - 8, gy - 110, cx - 2, gy - 140, 3.2],
+      [cx - 28, gy - 86, cx - 40, gy - 92, cx - 46, gy - 88, 1.8],
+      [cx + 20, gy - 98, cx + 34, gy - 100, cx + 40, gy - 92, 1.6],
+      [cx - 4, gy - 118, cx + 8, gy - 124, cx + 14, gy - 132, 1.5],
+    ];
+    for (const [ax, ay, mx, my, bx, by, w] of limbs) {
+      shade(ctx, limbP(ctx, [ax, ay], [mx, my], [bx, by], w, w * 0.3), t, { band: w * 0.8, hi: 0, stroke: 0.7 });
+    }
+    // Ember fissures (focal accent).
+    const crack: [number, number][] = [[cx - 2, gy - 4], [cx + 2, gy - 18], [cx - 3, gy - 30], [cx - 1, gy - 44], [cx - 5, gy - 58]];
+    glow(ctx, { x: cx - 1, y: gy - 28 }, 20, 0xff3a4a, 0.4);
+    line(ctx, crack, '#ff3a4a', 2);
+    line(ctx, crack, '#ffc080', 0.7);
+    line(ctx, [[cx + 5, gy - 8], [cx + 7, gy - 16]], '#ff5a3a', 1.2);
+    glow(ctx, { x: cx - 36, y: gy - 98 }, 6, 0xff5a3a, 0.6);
+    glow(ctx, { x: cx + 30, y: gy - 112 }, 6, 0xff5a3a, 0.6);
   },
-};
+});

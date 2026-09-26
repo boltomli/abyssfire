@@ -1,64 +1,34 @@
 // src/graphics/sprites/decorations/Flower.ts
-import type { EntityDrawer } from '../types';
+import { defineDecor, contactShadow, tuft, shade, tone, ellipseP, flat } from './DecorKit';
 
-export const FlowerDrawer: EntityDrawer = {
+/** Emerald Plains — a small patch of wildflowers (flat ground cover). */
+export const FlowerDrawer = defineDecor({
   key: 'decor_flower',
-  frameW: 8,
-  frameH: 10,
-  totalFrames: 1,
-
-  drawFrame(ctx, _frame, _action, w, h, utils) {
-    const s = w / 8;
-    const cx = w / 2;
-
-    // Ground shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    utils.fillEllipse(ctx, cx, h - 0.5 * s, 3 * s, 0.8 * s);
-
-
-    // Stem (darkened 30%)
-    ctx.strokeStyle = '#153310';
-    ctx.lineWidth = 0.9 * s;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(cx, h * 0.92);
-    ctx.quadraticCurveTo(cx + 0.8 * s, h * 0.70, cx, h * 0.55);
-    ctx.stroke();
-
-    // Small leaves on stem (darkened 30%)
-    ctx.fillStyle = '#122c0e';
-    // Left leaf
-    ctx.beginPath();
-    ctx.ellipse(cx - 1.5 * s, h * 0.72, 1.5 * s, 0.7 * s, -0.5, 0, Math.PI * 2);
-    ctx.fill();
-    // Right leaf
-    ctx.beginPath();
-    ctx.ellipse(cx + 1.4 * s, h * 0.64, 1.3 * s, 0.6 * s, 0.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 5 petals arranged radially around center (darkened 15-20%)
-    const petalColor = 0x641f72; // purple-ish default, darkened ~18%
-    const petalCount = 5;
-    for (let i = 0; i < petalCount; i++) {
-      const angle = (i / petalCount) * Math.PI * 2 - Math.PI / 2;
-      const px = cx + Math.cos(angle) * 2.2 * s;
-      const py = h * 0.30 + Math.sin(angle) * 2.0 * s;
-      const pGrad = ctx.createRadialGradient(px - 0.2 * s, py - 0.2 * s, 0, px, py, 1.6 * s);
-      pGrad.addColorStop(0, utils.rgb(utils.lighten(petalColor, 25)));
-      pGrad.addColorStop(1, utils.rgb(utils.darken(petalColor, 10)));
-      ctx.fillStyle = pGrad;
-      ctx.save();
-      ctx.translate(px, py);
-      ctx.rotate(angle);
-      utils.fillEllipse(ctx, 0, 0, 1.5 * s, 1.1 * s);
-      ctx.restore();
+  w: 40,
+  h: 28,
+  ground: 24,
+  flat: true,
+  draw(ctx, { cx, gy, r }) {
+    contactShadow(ctx, cx, gy, 15, 4, 0.22);
+    tuft(ctx, cx - 5, gy, 10, 5, '#3f7a33', '#7fb84a', r);
+    tuft(ctx, cx + 8, gy + 1, 8, 4, '#3f7a33', '#7fb84a', r);
+    const blooms: [number, number, number][] = [
+      [-9, -11, 0xf2d24a], [-2, -14, 0xffffff], [6, -10, 0xe86a8a], [12, -7, 0xf2d24a], [-13, -6, 0xb48cff], [2, -6, 0xffffff],
+    ];
+    for (const [bx, by, col] of blooms) {
+      const x = cx + bx, y = gy + by;
+      const t = tone(col, { light: 0.3 });
+      ctx.strokeStyle = '#3f7a33';
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (r() - 0.5) * 2, gy);
+      ctx.stroke();
+      for (let p = 0; p < 5; p++) {
+        const a = (p / 5) * Math.PI * 2;
+        shade(ctx, ellipseP(ctx, x + Math.cos(a) * 1.7, y + Math.sin(a) * 1.3, 1.5, 1.2, a), t, { band: 0.5, hi: 0, stroke: 0.35 });
+      }
+      flat(ctx, ellipseP(ctx, x, y, 1, 0.9), '#f4a93a');
     }
-
-
-    // Center dot (stem/leaf color family, darkened 30%)
-    ctx.fillStyle = '#947e16';
-    utils.fillCircle(ctx, cx, h * 0.30, 1.2 * s);
-    ctx.fillStyle = 'rgba(200,175,50,0.5)';
-    utils.fillCircle(ctx, cx - 0.3 * s, h * 0.28, 0.45 * s);
   },
-};
+});
