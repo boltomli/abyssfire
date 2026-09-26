@@ -77,7 +77,7 @@ export class LightingSystem {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) throw new Error('Canvas2D is required to initialize the lighting falloff texture');
     const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
     gradient.addColorStop(0, 'rgba(255,255,255,1)');
@@ -105,7 +105,7 @@ export class LightingSystem {
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return LIGHT_TEXTURE;
     const r = (color >> 16) & 255, g = (color >> 8) & 255, b = color & 255;
     ctx.save();

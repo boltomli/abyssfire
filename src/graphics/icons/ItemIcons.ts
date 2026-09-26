@@ -64,7 +64,7 @@ export function ensureItemIcon(scene: Phaser.Scene, iconId: string, variant?: st
   const canvas = document.createElement('canvas');
   canvas.width = ITEM_ICON_SIZE;
   canvas.height = ITEM_ICON_SIZE;
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   drawItemIcon(ctx, iconId, ITEM_ICON_SIZE, v);
   scene.textures.addCanvas(key, canvas);
   return key;

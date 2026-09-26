@@ -530,7 +530,9 @@ export class SpriteGenerator {
       }
     }
 
-    this.utils.applyNoiseToRegion(ctx, 0, 0, canvas.width, canvas.height, 4);
+    // Surface grain only suits legacy art; cel-shaded rigs stay clean (and
+    // the per-pixel fbm pass costs ~50 ms per sheet).
+    if (legacy) this.utils.applyNoiseToRegion(ctx, 0, 0, canvas.width, canvas.height, 4);
 
     const key = drawer.key;
     if (this.scene.textures.exists(key)) this.scene.textures.remove(key);
@@ -575,7 +577,7 @@ export class SpriteGenerator {
       }
     }
 
-    this.utils.applyNoiseToRegion(ctx, 0, 0, canvas.width, canvas.height, 3);
+    if (legacy) this.utils.applyNoiseToRegion(ctx, 0, 0, canvas.width, canvas.height, 3);
 
     const key = drawer.key;
     if (this.scene.textures.exists(key)) this.scene.textures.remove(key);

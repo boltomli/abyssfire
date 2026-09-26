@@ -76,6 +76,19 @@ const CLASS_IMPACT_COLORS: Record<string, number> = {
   mage: 0xc7a6ff,
   rogue: 0x9dffc8,
 };
+/** AoE skills that drop onto the enemy instead of centring on the caster. */
+const GROUND_AOE_SKILLS = new Set(['meteor', 'blizzard', 'fire_wall', 'arcane_torrent', 'arrow_rain', 'poison_cloud']);
+
+/** Element tint for a skill's per-target impact burst. */
+function skillImpactColor(skillId: string, damageType: string): number {
+  if (skillId.includes('fire') || skillId === 'meteor' || skillId === 'combustion') return 0xff6600;
+  if (skillId.includes('ice') || skillId === 'blizzard' || skillId === 'freeze') return 0x4488ff;
+  if (skillId.includes('lightning')) return 0x5dade2;
+  if (skillId.includes('poison')) return 0x7ed957;
+  if (skillId === 'arcane_torrent') return 0xb07cff;
+  return damageType === 'physical' ? 0xf1c40f : 0xf39c12;
+}
+
 const ZONE_SCREEN_UI_DEPTH = 5000;
 
 function fs(basePx: number): string {
@@ -980,12 +993,13 @@ export class ZoneScene extends Phaser.Scene {
     this.checkStoryDecorationProximity();
     this.checkSubDungeonEntranceProximity();
 
+    this.collectOcclusionTargets();
     this.updateDecorOcclusion(delta);
     if (this.terrain) {
       if (this.terrain.hasPending()) {
         this.terrain.flush(4, (c, r) => !!this.tileSprites[r]?.[c], (c, r, key) => { this.tileSprites[r]?.[c]?.setTexture(key); });
       }
-      this.terrain.updateOcclusion(this.player.sprite.x, this.player.sprite.y, delta);
+      this.terrain.updateOcclusion(this.occlusionTargets, delta);
     }
 
     // Throttled viewport tile update
@@ -1279,24 +1293,30 @@ export class ZoneScene extends Phaser.Scene {
   /** Reused scratch list of occlusion targets (player + nearby living monsters). */
   private occlusionTargets: number[] = [];
 
-  /**
-   * Fade tall props that hide the player, or a living monster near the player,
-   * standing behind them; restore smoothly when clear.
-   */
-  private updateDecorOcclusion(delta: number): void {
-    if (this.occluderDecor.size === 0 || !this.player?.sprite) return;
-    const px = this.player.sprite.x;
-    const py = this.player.sprite.y;
+  /** Refresh `occlusionTargets`: the player plus living monsters within ~6 tiles. */
+  private collectOcclusionTargets(): void {
     const targets = this.occlusionTargets;
     targets.length = 0;
+    if (!this.player?.sprite) return;
+    const px = this.player.sprite.x;
+    const py = this.player.sprite.y;
     targets.push(px, py);
-    // Monsters within ~6 tiles of the player (iso: 6 tiles ≈ 384 × 192 px).
+    // iso: 6 tiles ≈ 384 × 192 px.
     for (const m of this.monsters) {
       if (!m.isAlive() || !m.sprite) continue;
       const mx = m.sprite.x;
       const my = m.sprite.y;
       if (Math.abs(mx - px) < 384 && Math.abs(my - py) < 192) targets.push(mx, my);
     }
+  }
+
+  /**
+   * Fade tall props that hide the player, or a living monster near the player,
+   * standing behind them; restore smoothly when clear.
+   */
+  private updateDecorOcclusion(delta: number): void {
+    if (this.occluderDecor.size === 0) return;
+    const targets = this.occlusionTargets;
     const k = Math.min(1, delta / 110);
     for (const sprite of this.occluderDecor) {
       const halfW = sprite.displayWidth * 0.42;
@@ -1361,7 +1381,7 @@ export class ZoneScene extends Phaser.Scene {
     if (!this.textures.exists(dustKey)) {
       const c = document.createElement('canvas');
       c.width = 8; c.height = 8;
-      const ctx = c.getContext('2d')!;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
       const grad = ctx.createRadialGradient(4, 4, 0, 4, 4, 4);
       grad.addColorStop(0, 'rgba(200,190,170,0.3)');
       grad.addColorStop(1, 'rgba(200,190,170,0)');
@@ -1733,6 +1753,37 @@ export class ZoneScene extends Phaser.Scene {
     if (buffered) this.tryUseSkill(buffered.actionId, time);
   }
 
+  /** Where a ground-targeted AoE lands: the chosen target if in reach, else the nearest enemy in range. */
+  private findGroundAoeAnchor(target: Monster | null, range: number): Monster | null {
+    const reach = (range + 1) * (range + 1);
+    const inReach = (m: Monster): boolean =>
+      distanceSq(this.player.tileCol, this.player.tileRow, m.tileCol, m.tileRow) <= reach;
+    if (target && target.isAlive() && inReach(target)) return target;
+    let best: Monster | null = null;
+    let bestD = Infinity;
+    for (const m of this.monsterGrid.queryRadius(this.player.tileCol, this.player.tileRow, range + 1)) {
+      if (!m.isAlive()) continue;
+      const d = distanceSq(this.player.tileCol, this.player.tileRow, m.tileCol, m.tileRow);
+      if (d <= reach && d < bestD) { best = m; bestD = d; }
+    }
+    return best;
+  }
+
+  /** Living monsters within `halfWidth` tiles of the player→target ray, out to `range` tiles. */
+  private monstersAlongLine(target: Monster, range: number, halfWidth: number): Monster[] {
+    const ox = this.player.tileCol, oy = this.player.tileRow;
+    let dx = target.tileCol - ox, dy = target.tileRow - oy;
+    const len = Math.hypot(dx, dy);
+    if (len < 0.001) return target.isAlive() ? [target] : [];
+    dx /= len; dy /= len;
+    return this.monsterGrid.queryRadius(ox, oy, range + halfWidth).filter(m => {
+      if (!m.isAlive()) return false;
+      const rx = m.tileCol - ox, ry = m.tileRow - oy;
+      const along = rx * dx + ry * dy;
+      return along >= 0 && along <= range && Math.abs(rx * dy - ry * dx) <= halfWidth;
+    });
+  }
+
   private findPreferredSkillTarget(): Monster | null {
     if (this.player.attackTarget) {
       const selected = this.monsters.find(
@@ -2089,53 +2140,72 @@ export class ZoneScene extends Phaser.Scene {
 
     const scaledAoeRadius = getSkillAoeRadius(skill, level);
     if (skill.aoe && scaledAoeRadius > 0) {
-      const aoeTargets = this.monsterGrid.queryRadius(this.player.tileCol, this.player.tileRow, scaledAoeRadius)
-        .filter(m => m.isAlive());
-      if (skillId === 'chain_lightning') {
-        this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
-          undefined, undefined,
-          aoeTargets.map(t => ({ x: t.sprite.x, y: t.sprite.y })));
+      const px = this.player.sprite.x, py = this.player.sprite.y;
+      // Ground-targeted spells land on the enemy (within cast range) rather
+      // than at the caster's feet; everything else stays caster-centred.
+      const anchor = GROUND_AOE_SKILLS.has(skillId) ? this.findGroundAoeAnchor(target, skill.range) : null;
+      const cx = anchor ? anchor.sprite.x : px;
+      const cy = anchor ? anchor.sprite.y : py;
+      const aoeTargets = skillId === 'piercing_arrow' && target
+        ? this.monstersAlongLine(target, skill.range, scaledAoeRadius * 0.6)
+        : this.monsterGrid.queryRadius(anchor ? anchor.tileCol : this.player.tileCol, anchor ? anchor.tileRow : this.player.tileRow, scaledAoeRadius)
+          .filter(m => m.isAlive());
+      const targetPoints = aoeTargets.map(t => ({ x: t.sprite.x, y: t.sprite.y }));
+      if (skillId === 'chain_lightning' || skillId === 'multishot') {
+        this.skillEffects.play(skillId, px, py, undefined, undefined, targetPoints);
+      } else if (skillId === 'piercing_arrow') {
+        this.skillEffects.play(skillId, px, py, target?.sprite.x, target?.sprite.y,
+          target ? [{ x: target.sprite.x, y: target.sprite.y }] : undefined);
       } else {
-        this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
-          this.player.sprite.x, this.player.sprite.y);
+        this.skillEffects.play(skillId, px, py, cx, cy);
       }
-      // Effects with a fall/travel time (meteor) land their damage on impact.
-      const aoeDelay = this.skillEffects.getProjectileTravelMs(skillId, this.player.sprite.x, this.player.sprite.y, this.player.sprite.x, this.player.sprite.y);
-      const applyAoe = (): void => {
-        for (const t of aoeTargets) {
-          // Something else may have killed it during the fall delay.
-          if (!t.isAlive()) continue;
-          const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), t.toCombatEntity(), skill, level, this.player.skillLevels);
-          // Combustion: +50% damage on burning targets
-          let finalDmg = result.damage;
-          if (skillId === 'combustion' && this.statusEffects.hasEffect(t.id, 'burn')) {
-            finalDmg = Math.floor(finalDmg * 1.5);
-          }
-          t.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
-          this.applySteal(result);
-          this.showDamageText(t.sprite.x, t.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
-          // Apply status effects from skill damage type
-          this.applySkillStatusEffect(t, skill, finalDmg, this.time.now);
-          if (!t.isAlive()) this.onMonsterKilled(t);
-          if (this.vfx && skill.damageType !== 'physical') {
-            const impactColor = skillId.includes('fire') || skillId === 'meteor' ? 0xff6600
-              : skillId.includes('ice') || skillId === 'blizzard' ? 0x4488ff
-              : skillId.includes('lightning') || skillId === 'chain_lightning' ? 0x5dade2
-              : 0xf39c12;
-            this.vfx.skillImpactBloom(t.sprite.x, t.sprite.y - 16, impactColor);
-          }
-        }
-        if (this.vfx && aoeTargets.length > 0) {
-          this.vfx.cameraShake(100, 0.004 + aoeTargets.length * 0.001);
-        }
+      // Effects with a fall/travel time (meteor) land their damage on impact;
+      // arrows hit each target as they reach it.
+      const aoeDelay = this.skillEffects.getProjectileTravelMs(skillId, px, py, cx, cy);
+      const hitDelay = (t: Monster): number => {
+        if (skillId !== 'piercing_arrow' && skillId !== 'multishot') return aoeDelay;
+        const d = Phaser.Math.Distance.Between(px, py, t.sprite.x, t.sprite.y);
+        return Math.min(260, d * 1.1);
       };
+      const impactColor = skillImpactColor(skillId, skill.damageType);
+      // Blast skills push outward from their centre; arrows from the archer.
+      const blastFrom = anchor && skillId !== 'multishot' && skillId !== 'piercing_arrow';
+      const applyHit = (t: Monster): number => {
+        // Something else may have killed it during the fall/flight.
+        if (!t.isAlive()) return 0;
+        const fromX = blastFrom && Math.abs(t.sprite.x - cx) + Math.abs(t.sprite.y - cy) > 4 ? cx : px;
+        const fromY = blastFrom && Math.abs(t.sprite.x - cx) + Math.abs(t.sprite.y - cy) > 4 ? cy : py;
+        const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), t.toCombatEntity(), skill, level, this.player.skillLevels);
+        // Combustion: +50% damage on burning targets
+        let finalDmg = result.damage;
+        if (skillId === 'combustion' && this.statusEffects.hasEffect(t.id, 'burn')) {
+          finalDmg = Math.floor(finalDmg * 1.5);
+        }
+        const weight = t.takeDamage(finalDmg, fromX, fromY, { isCrit: result.isCrit });
+        this.applySteal(result);
+        this.showDamageText(t.sprite.x, t.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
+        // Apply status effects from skill damage type
+        this.applySkillStatusEffect(t, skill, finalDmg, this.time.now);
+        if (!t.isAlive()) this.onMonsterKilled(t);
+        this.vfx?.impactBurst(t.sprite.x, t.sprite.y - 18, Math.atan2(t.sprite.y - fromY, t.sprite.x - fromX), weight, impactColor);
+        return 1;
+      };
+      const stillCasting = (): boolean => this.player.hp > 0 && !this.isTransitioning;
       if (aoeDelay > 0) {
         this.time.delayedCall(aoeDelay, () => {
-          if (this.player.hp <= 0 || this.isTransitioning) return;
-          applyAoe();
+          if (!stillCasting()) return;
+          let hits = 0;
+          for (const t of aoeTargets) hits += applyHit(t);
+          if (this.vfx && hits > 0) this.vfx.cameraShake(100, 0.004 + hits * 0.001);
         });
       } else {
-        applyAoe();
+        let immediate = 0;
+        for (const t of aoeTargets) {
+          const delay = hitDelay(t);
+          if (delay > 0) this.time.delayedCall(delay, () => { if (stillCasting()) applyHit(t); });
+          else immediate += applyHit(t);
+        }
+        if (this.vfx && immediate > 0) this.vfx.cameraShake(100, 0.004 + immediate * 0.001);
       }
     } else if (target) {
       const fromX = this.player.sprite.x;
@@ -2148,16 +2218,14 @@ export class ZoneScene extends Phaser.Scene {
         if (skillId === 'combustion' && this.statusEffects.hasEffect(target.id, 'burn')) {
           finalDmg = Math.floor(finalDmg * 1.5);
         }
-        target.takeDamage(finalDmg, fromX, fromY, { isCrit: result.isCrit });
+        const weight = target.takeDamage(finalDmg, fromX, fromY, { isCrit: result.isCrit });
         this.applySteal(result);
         this.showDamageText(target.sprite.x, target.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
         // Apply status effects from skill damage type
         this.applySkillStatusEffect(target, skill, finalDmg, this.time.now);
         if (!target.isAlive()) this.onMonsterKilled(target);
-        if (this.vfx) {
-          const impactColor = skill.damageType !== 'physical' ? 0xff6600 : 0xf1c40f;
-          this.vfx.skillImpactBloom(target.sprite.x, target.sprite.y - 16, impactColor);
-        }
+        this.vfx?.impactBurst(target.sprite.x, target.sprite.y - 18,
+          Math.atan2(target.sprite.y - fromY, target.sprite.x - fromX), weight, skillImpactColor(skillId, skill.damageType));
         if (this.trails && (skill.damageType !== 'physical' || skill.damageMultiplier > 1.5)) {
           const scorchType = skillId.includes('fire') || skillId === 'meteor' ? 'fire'
             : skillId.includes('ice') || skillId === 'blizzard' ? 'ice'

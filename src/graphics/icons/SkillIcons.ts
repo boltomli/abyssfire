@@ -66,7 +66,7 @@ export function ensureSkillIcon(scene: Phaser.Scene, skill: Pick<SkillDefinition
   const canvas = document.createElement('canvas');
   canvas.width = SKILL_ICON_SIZE;
   canvas.height = SKILL_ICON_SIZE;
-  drawSkillIcon(canvas.getContext('2d')!, skill, SKILL_ICON_SIZE);
+  drawSkillIcon(canvas.getContext('2d', { willReadFrequently: true })!, skill, SKILL_ICON_SIZE);
   scene.textures.addCanvas(key, canvas);
   return key;
 }

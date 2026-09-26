@@ -7,7 +7,8 @@ import { emptyEquipStats, type EquipStats } from './CombatSystem';
 import { t } from '../i18n';
 
 const MAX_INVENTORY = 100;
-const MAX_STASH = 80;
+/** Base stash slots; the homestead warehouse adds more (`stashSlots`). */
+export const BASE_STASH_SLOTS = 80;
 
 function randomHex(bytes: number): string {
   return Array.from(globalThis.crypto.getRandomValues(new Uint8Array(bytes)))
@@ -229,8 +230,8 @@ export class InventorySystem {
     return count;
   }
 
-  moveToStash(uid: string): boolean {
-    if (this.stash.length >= MAX_STASH) {
+  moveToStash(uid: string, capacity = BASE_STASH_SLOTS): boolean {
+    if (this.stash.length >= capacity) {
       EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('sys.inventory.stashFull'), type: 'system' });
       return false;
     }
@@ -436,19 +437,11 @@ export class InventorySystem {
   }
 
   sortInventory(): void {
-    const qualityOrder: Record<string, number> = { legendary: 0, set: 1, rare: 2, magic: 3, normal: 4 };
-    const typeOrder: Record<string, number> = { weapon: 0, armor: 1, accessory: 2, consumable: 3, gem: 4, material: 5, scroll: 6 };
-    this.inventory.sort((a, b) => {
-      const qa = qualityOrder[a.quality] ?? 5;
-      const qb = qualityOrder[b.quality] ?? 5;
-      if (qa !== qb) return qa - qb;
-      const baseA = getItemBase(a.baseId);
-      const baseB = getItemBase(b.baseId);
-      const ta = typeOrder[baseA?.type ?? ''] ?? 7;
-      const tb = typeOrder[baseB?.type ?? ''] ?? 7;
-      if (ta !== tb) return ta - tb;
-      return a.name.localeCompare(b.name);
-    });
+    this.inventory.sort(compareItems);
+  }
+
+  sortStash(): void {
+    this.stash.sort(compareItems);
   }
 
   discardItem(uid: string): boolean {
@@ -499,4 +492,18 @@ export class InventorySystem {
       default: return '';
     }
   }
+}
+
+const QUALITY_ORDER: Record<string, number> = { legendary: 0, set: 1, rare: 2, magic: 3, normal: 4 };
+const TYPE_ORDER: Record<string, number> = { weapon: 0, armor: 1, accessory: 2, consumable: 3, gem: 4, material: 5, scroll: 6 };
+
+/** Best quality first, then by item type, then name. */
+function compareItems(a: ItemInstance, b: ItemInstance): number {
+  const qa = QUALITY_ORDER[a.quality] ?? 5;
+  const qb = QUALITY_ORDER[b.quality] ?? 5;
+  if (qa !== qb) return qa - qb;
+  const ta = TYPE_ORDER[getItemBase(a.baseId)?.type ?? ''] ?? 7;
+  const tb = TYPE_ORDER[getItemBase(b.baseId)?.type ?? ''] ?? 7;
+  if (ta !== tb) return ta - tb;
+  return a.name.localeCompare(b.name);
 }
