@@ -1470,6 +1470,11 @@ const en: LocaleData = {
   'ui.inventory.pageLabel': 'Page {current}/{total}',
   'ui.inventory.equipBonus': 'Equipment Bonus: {stats}',
   'ui.inventory.equipBonusNone': 'Equipment Bonus: None',
+  'ui.inventory.equipment': 'Equipment',
+  'ui.inventory.bag': 'Backpack',
+  'ui.inventory.bonusHeader': 'Equipment Bonus',
+  'ui.inventory.bonusNone': 'No bonuses',
+  'ui.inventory.equipHint': 'Click an equipped item to unequip it or socket gems',
 
   // ═══════════════════════════════════════════════════════════════════════
   // UI — Shop Panel
@@ -1512,6 +1517,7 @@ const en: LocaleData = {
   'ui.character.computed.critRate': 'Crit Rate',
   'ui.character.computed.critDamage': 'Crit Damage',
   'ui.character.computed.gold': 'Gold',
+  'ui.character.derivedHeader': 'Combat Stats',
 
   // ═══════════════════════════════════════════════════════════════════════
   // UI — Item Tooltip

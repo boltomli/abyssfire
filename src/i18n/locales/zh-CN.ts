@@ -1415,6 +1415,11 @@ const zhCN: LocaleData = {
   'ui.inventory.pageLabel': '第{current}/{total}页',
   'ui.inventory.equipBonus': '装备加成: {stats}',
   'ui.inventory.equipBonusNone': '装备加成: 无',
+  'ui.inventory.equipment': '装备',
+  'ui.inventory.bag': '行囊',
+  'ui.inventory.bonusHeader': '装备加成',
+  'ui.inventory.bonusNone': '暂无加成',
+  'ui.inventory.equipHint': '点击已装备的物品可卸下或镶嵌宝石',
 
   // ═══════════════════════════════════════════════════════════════════════
   // UI — Shop Panel
@@ -1457,6 +1462,7 @@ const zhCN: LocaleData = {
   'ui.character.computed.critRate': '暴击率',
   'ui.character.computed.critDamage': '暴击伤害',
   'ui.character.computed.gold': '金币',
+  'ui.character.derivedHeader': '战斗属性',
 
   // ═══════════════════════════════════════════════════════════════════════
   // UI — Item Tooltip
