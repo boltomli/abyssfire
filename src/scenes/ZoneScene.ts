@@ -93,6 +93,8 @@ function skillImpactColor(skillId: string, damageType: string): number {
 }
 
 const ZONE_SCREEN_UI_DEPTH = 5000;
+/** An escort left this far behind (tiles) catches up next to the player. */
+const ESCORT_CATCH_UP_TILES = 14;
 
 function fs(basePx: number): string {
   return `${Math.round(basePx * DPR)}px`;
@@ -243,6 +245,10 @@ export class ZoneScene extends Phaser.Scene {
   private escortQuestId: string | null = null;
   private escortDestCol = 0;
   private escortDestRow = 0;
+  private escortPath: { col: number; row: number }[] = [];
+  /** The charge waits where the quest says until the hero comes to fetch them. */
+  private escortJoined = false;
+  private escortRepathAt = 0;
 
   /** Defend target sprite + state for active defend quests. */
   private defendTargetSprite: Phaser.GameObjects.Container | null = null;
@@ -451,6 +457,7 @@ export class ZoneScene extends Phaser.Scene {
         player: () => this.player,
         monsters: () => this.monsters,
         npcs: () => this.npcs,
+        escortTile: () => this.getEscortTile(),
       });
       if (this.session) {
         this.storyDirector = new StoryDirector({
@@ -599,6 +606,7 @@ export class ZoneScene extends Phaser.Scene {
     this.subscriptions.on(EventBus, GameEvents.SKILL_LEVEL_CHANGED, this.handleSkillLevelChanged, this);
     // Update NPC quest indicators immediately when quest state changes
     this.subscriptions.on(EventBus, GameEvents.QUEST_ACCEPTED, this.updateNPCQuestMarkers, this);
+    this.subscriptions.on(EventBus, GameEvents.QUEST_ACCEPTED, this.handleQuestAcceptedWorld, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_TURNED_IN, this.updateNPCQuestMarkers, this);
     // React to locale changes for persistent UI elements
     this.subscriptions.on(EventBus, GameEvents.LOCALE_CHANGED, this.handleLocaleChanged, this);
@@ -6110,6 +6118,37 @@ export class ZoneScene extends Phaser.Scene {
   // ─── Escort Quest Runtime ─────────────────────────────────────────────────
   // ---------------------------------------------------------------------------
 
+  /**
+   * Escort NPCs and defend targets used to spawn only on zone entry, so a
+   * quest accepted in camp had nothing to escort/defend until the player left
+   * and came back — the quests could not be finished. Spawn them on accept.
+   */
+  private handleQuestAcceptedWorld(data: { questId: string }): void {
+    if (this.isInDungeon) return;
+    const quest = this.questSystem.quests.get(data.questId);
+    if (!quest || quest.zone !== this.currentMapId) return;
+    if (quest.type === 'escort' && !this.escortQuestId) this.spawnEscortNpc();
+    if (quest.type === 'defend' && !this.defendQuestId) this.spawnDefendTarget();
+  }
+
+  /** Nearest walkable tile within `radius` rings of (col, row), skipping the tile itself. */
+  private findWalkableNear(col: number, row: number, radius: number): { col: number; row: number } | null {
+    for (let r = 1; r <= radius; r++) {
+      for (let dr = -r; dr <= r; dr++) {
+        for (let dc = -r; dc <= r; dc++) {
+          if (Math.max(Math.abs(dc), Math.abs(dr)) !== r) continue;
+          if (this.mapData.collisions[row + dr]?.[col + dc]) return { col: col + dc, row: row + dr };
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Tile the escort NPC stands on (for the quest guide), or null. */
+  getEscortTile(): { col: number; row: number } | null {
+    return this.escortQuestId ? { col: this.escortNpcTileCol, row: this.escortNpcTileRow } : null;
+  }
+
   /** Spawn escort NPC if any escort quest is active in this zone. */
   private spawnEscortNpc(): void {
     this.destroyEscortNpc();
@@ -6125,6 +6164,8 @@ export class ZoneScene extends Phaser.Scene {
       this.escortDestCol = en.destCol;
       this.escortDestRow = en.destRow;
       this.escortQuestId = quest.id;
+      this.escortJoined = false;
+      this.escortPath = [];
 
       // HP scales with zone level
       const baseHp = quest.level * 20 + 100;
@@ -6175,34 +6216,64 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   /** Update escort NPC: follow player, take damage from nearby monsters, check arrival. */
-  private updateEscortNpc(time: number, _delta: number): void {
+  private updateEscortNpc(time: number, delta: number): void {
     if (!this.escortNpcSprite || !this.escortQuestId) return;
 
-    // Follow player (stay 1-2 tiles behind)
+    // Follow the player along a real path (a straight line got stuck on
+    // walls, water and rocks). Re-plan a few times a second.
     const dx = this.player.tileCol - this.escortNpcTileCol;
     const dy = this.player.tileRow - this.escortNpcTileRow;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist > 2) {
-      const speed = 0.05; // tiles per frame (slightly slower than player)
-      const nx = dx / dist;
-      const ny = dy / dist;
-      let newCol = this.escortNpcTileCol + nx * speed;
-      let newRow = this.escortNpcTileRow + ny * speed;
-      newCol = Math.max(1, Math.min(this.mapData.cols - 2, newCol));
-      newRow = Math.max(1, Math.min(this.mapData.rows - 2, newRow));
-      const checkCol = Math.round(newCol);
-      const checkRow = Math.round(newRow);
-      if (this.mapData.collisions[checkRow]?.[checkCol]) {
-        this.escortNpcTileCol = newCol;
-        this.escortNpcTileRow = newRow;
+    if (!this.escortJoined) {
+      if (dist > 5) {
+        this.syncEscortSprite();
+        return;
       }
+      this.escortJoined = true;
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.escort.joined', { npcName: this.questSystem.quests.get(this.escortQuestId)?.escortNpc?.name ?? '' }), type: 'system' });
+    }
+    if (dist > ESCORT_CATCH_UP_TILES) {
+      // Left far behind (player ran off, got blocked): catch up out of sight.
+      const spot = this.findWalkableNear(Math.round(this.player.tileCol), Math.round(this.player.tileRow), 2);
+      if (spot) { this.escortNpcTileCol = spot.col; this.escortNpcTileRow = spot.row; this.escortPath = []; }
+    } else if (dist > 2) {
+      if (time >= this.escortRepathAt || this.escortPath.length === 0) {
+        this.escortRepathAt = time + 400;
+        const path = this.pathfinding.findPath(
+          Math.round(this.escortNpcTileCol), Math.round(this.escortNpcTileRow),
+          Math.round(this.player.tileCol), Math.round(this.player.tileRow),
+        );
+        // Stop a tile or two short of the player.
+        this.escortPath = path.slice(1, Math.max(1, path.length - 1));
+      }
+      // Tiles per second, a touch slower than the hero.
+      let budget = (this.player.moveSpeed / 38) * 0.9 * (delta / 1000);
+      while (budget > 0 && this.escortPath.length > 0) {
+        const next = this.escortPath[0];
+        const sx = next.col - this.escortNpcTileCol;
+        const sy = next.row - this.escortNpcTileRow;
+        const sd = Math.sqrt(sx * sx + sy * sy);
+        if (sd <= budget) {
+          this.escortNpcTileCol = next.col;
+          this.escortNpcTileRow = next.row;
+          this.escortPath.shift();
+          budget -= sd;
+        } else {
+          this.escortNpcTileCol += (sx / sd) * budget;
+          this.escortNpcTileRow += (sy / sd) * budget;
+          budget = 0;
+        }
+      }
+    } else {
+      this.escortPath = [];
     }
 
     // Nearby monsters attack escort NPC (aggro if within 4 tiles)
     for (const monster of this.monsters) {
       if (!monster.isAlive()) continue;
       const md = distanceSq(monster.tileCol, monster.tileRow, this.escortNpcTileCol, this.escortNpcTileRow);
-      if (md < 16 && monster.isAggro() && time - (monster as unknown as { lastEscortAttack?: number }).lastEscortAttack! > 2000) {
+      // (lastEscortAttack starts undefined: `time - undefined` is NaN and never passed, so escorts were invulnerable.)
+      if (md < 16 && monster.isAggro() && time - ((monster as unknown as { lastEscortAttack?: number }).lastEscortAttack ?? -Infinity) > 2000) {
         const dmg = Math.max(1, Math.floor(monster.definition.damage * 0.3));
         this.escortNpcHp -= dmg;
         (monster as unknown as { lastEscortAttack?: number }).lastEscortAttack = time;
@@ -6214,10 +6285,7 @@ export class ZoneScene extends Phaser.Scene {
       }
     }
 
-    // Update sprite position
-    const worldPos = cartToIso(this.escortNpcTileCol, this.escortNpcTileRow);
-    this.escortNpcSprite.setPosition(worldPos.x, worldPos.y);
-    this.escortNpcSprite.setDepth(worldPos.y + 60);
+    this.syncEscortSprite();
 
     // Update HP bar
     if (this.escortNpcHpBar) {
@@ -6247,6 +6315,13 @@ export class ZoneScene extends Phaser.Scene {
         this.destroyEscortNpc();
       }
     }
+  }
+
+  private syncEscortSprite(): void {
+    if (!this.escortNpcSprite) return;
+    const worldPos = cartToIso(this.escortNpcTileCol, this.escortNpcTileRow);
+    this.escortNpcSprite.setPosition(worldPos.x, worldPos.y);
+    this.escortNpcSprite.setDepth(worldPos.y + 60);
   }
 
   /** Handle escort NPC death — fail the associated quest. */

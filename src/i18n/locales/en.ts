@@ -1950,6 +1950,7 @@ const en: LocaleData = {
 
   // ─── Escort Quest ───
   'zone.escort.npcAppeared': '{npcName} appeared! Escort target marked.',
+  'zone.escort.joined': '{npcName} is following you.',
   'zone.escort.complete': 'Escort complete! {npcName} arrived safely.',
   'zone.escort.npcDied': 'Escort target has died! Quest failed.',
 

@@ -26,6 +26,8 @@ export interface QuestWorldDeps {
   player: () => WorldEntity & { sprite: Phaser.GameObjects.Components.Transform & Phaser.GameObjects.Components.Depth };
   monsters: () => readonly WorldMonster[];
   npcs: () => readonly WorldNpc[];
+  /** Tile of the escorted NPC, if one is out. */
+  escortTile?: () => TilePoint | null;
 }
 
 interface GatherNode {
@@ -219,6 +221,7 @@ export class QuestWorld {
         .filter(n => n.questId === questId && n.objectiveIndex === i)
         .map(n => ({ col: n.col, row: n.row })),
       giverOf: questGiverOf,
+      escortTile: () => this.d.escortTile?.() ?? null,
     };
   }
 

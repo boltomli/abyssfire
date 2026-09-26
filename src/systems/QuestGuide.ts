@@ -21,6 +21,8 @@ export interface GuideWorld {
   gatherSpots(questId: string, objectiveIndex: number): TilePoint[];
   /** NPC who gave this quest. */
   giverOf(questId: string): string | null;
+  /** Where the escorted NPC is (null when none is out). */
+  escortTile?(): TilePoint | null;
 }
 
 export type GuideReason = 'turn_in' | 'objective';
@@ -54,6 +56,11 @@ function objectiveTarget(
   index: number,
   world: GuideWorld,
 ): TilePoint | null {
+  if (obj.type === 'escort') {
+    // Fetch the charge first; once they're following, lead to the destination.
+    const e = world.escortTile?.();
+    if (e && Math.hypot(e.col - world.player.col, e.row - world.player.row) > 4) return e;
+  }
   if (obj.location) return { col: obj.location.col, row: obj.location.row };
   switch (obj.type) {
     case 'talk':

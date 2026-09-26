@@ -1895,6 +1895,7 @@ const zhCN: LocaleData = {
 
   // ─── Escort Quest ───
   'zone.escort.npcAppeared': '{npcName} 出现了！护送目标已标记。',
+  'zone.escort.joined': '{npcName} 跟上了你。',
   'zone.escort.complete': '护送完成! {npcName}安全到达目的地。',
   'zone.escort.npcDied': '护送目标已死亡! 任务失败。',
 
