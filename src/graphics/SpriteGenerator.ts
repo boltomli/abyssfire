@@ -253,6 +253,15 @@ const CAMP_DRAWER_META = new Map<string, EntityDrawer>([
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class SpriteGenerator {
+  /**
+   * Character sheets are the bulk of zone-load time, so they outlive the zone
+   * that drew them: a sheet is released only after this many zone changes
+   * without being used (1 on touch devices to keep memory low).
+   */
+  static sheetKeepZones = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 ? 1 : 2;
+  private static zoneEpoch = 0;
+  private static sheetLastUsed = new Map<string, number>();
+
   private scene: Phaser.Scene;
   private utils: DrawUtils;
 
@@ -389,16 +398,23 @@ export class SpriteGenerator {
         key === 'exit_portal';
       if (!shouldRelease) continue;
       if (this.isExternalTexture(scene, key)) continue;
+      if (key.startsWith('monster_') || key.startsWith('npc_')) {
+        const used = this.sheetLastUsed.get(key) ?? -Infinity;
+        if (this.zoneEpoch - used < this.sheetKeepZones) continue;
+        this.sheetLastUsed.delete(key);
+      }
       if (key.startsWith('monster_')) this.clearEntityAnimations(scene, key, false);
       if (key.startsWith('npc_')) this.clearNPCAnimations(scene, key);
       if (key.startsWith('decor_') && scene.anims.exists(`${key}_anim`)) scene.anims.remove(`${key}_anim`);
       scene.textures.remove(key);
     }
+    this.zoneEpoch++;
   }
 
   private static ensureEntitySheet(scene: Phaser.Scene, key: string): void {
     const drawer = ENTITY_DRAWER_BY_KEY.get(key);
     if (!drawer) return;
+    this.sheetLastUsed.set(key, this.zoneEpoch);
     const generator = new SpriteGenerator(scene);
     const generatedNow = !scene.textures.exists(key);
     if (generatedNow) {
@@ -414,6 +430,7 @@ export class SpriteGenerator {
   private static ensureNPCKey(scene: Phaser.Scene, key: string): void {
     const drawer = NPC_DRAWER_BY_KEY.get(key);
     if (!drawer) return;
+    this.sheetLastUsed.set(key, this.zoneEpoch);
     const generator = new SpriteGenerator(scene);
     const generatedNow = !scene.textures.exists(key);
     if (generatedNow) {

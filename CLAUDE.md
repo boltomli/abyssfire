@@ -140,8 +140,10 @@ Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4)
 - **Random dungeons**: Zone 6 (endgame roguelike) not started
 - **Death penalty**: Corpse run / gold loss not implemented
 - **Crafting**: Blacksmith crafting beyond buy/sell
-- **Performance**: Monster/NPC sheets are regenerated on every zone entry (~1 s on a software
-  renderer); consider caching or lazy per-action generation if zone load grows
+- **Performance**: first entry to a zone draws its monster/NPC sheets (~1 s on a software
+  renderer). Sheets are drawn at `TEXTURE_SCALE` 2 (camera zoom is 1.8, so that is ≥ 1 texel per
+  screen pixel) and survive `SpriteGenerator.sheetKeepZones` zone changes (2 on desktop, 1 on
+  touch), so walking back to a recent zone is ~0.15 s
 
 ## Parallel Agent Guidelines
 

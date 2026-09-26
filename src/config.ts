@@ -10,7 +10,7 @@ export const GAME_HEIGHT = 720;
 /** Phaser world/UI coordinates are always expressed in logical pixels. */
 export const DPR = 1;
 
-export const TEXTURE_SCALE = 3;
+export const TEXTURE_SCALE = 2;
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
