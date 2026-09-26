@@ -2002,6 +2002,11 @@ const zhCN: LocaleData = {
   'zone.lore.discovered': '发现传说: {loreName}',
 
   // ─── Quest Explore / Investigate ───
+  'zone.soulEcho.left': '你的魂影留在了倒下的地方，带走了 {gold} 金币。回去取回它——再倒下一次，它就会消散。',
+  'zone.soulEcho.faded': '上一个魂影消散了，{gold} 金币永远失去。',
+  'zone.soulEcho.claimed': '你取回了魂影：+{gold} 金币。',
+  'zone.soulEcho.label': '魂影 · {gold} 金',
+  'zone.soulEcho.lostInDungeon': '你在地牢中倒下，失去了 {gold} 金币。',
   'zone.quest.exploreFound': '发现: {targetName}',
   'zone.quest.rewardItem': '获得任务奖励：{name}',
   'zone.quest.returnTo': '返回 {npc} 交付任务',

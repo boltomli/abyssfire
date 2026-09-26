@@ -540,6 +540,15 @@ export interface SpiritSaveState {
   resonanceRemainingMs: number;
 }
 
+/** What a death left behind (see SoulEcho). */
+export interface SoulEchoData {
+  mapId: string;
+  col: number;
+  row: number;
+  gold: number;
+  exp: number;
+}
+
 export interface SaveData {
   id: string;
   version: number;
@@ -593,4 +602,6 @@ export interface SaveData {
   discoveredHiddenAreas?: string[];
   /** Story beats already played (prologue, chapters, cutscenes, boss intros, ending). */
   storySeen?: string[];
+  /** Gold/exp dropped at the hero's last death, waiting to be reclaimed. */
+  soulEcho?: SoulEchoData | null;
 }

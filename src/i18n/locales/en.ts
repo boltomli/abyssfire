@@ -2057,6 +2057,11 @@ const en: LocaleData = {
   'zone.lore.discovered': 'Discovered lore: {loreName}',
 
   // ─── Quest Explore / Investigate ───
+  'zone.soulEcho.left': 'Your soul echo lingers where you fell, holding {gold} gold. Go back for it; fall again and it fades.',
+  'zone.soulEcho.faded': 'Your previous soul echo faded. {gold} gold is lost for good.',
+  'zone.soulEcho.claimed': 'You reclaim your soul echo: +{gold} gold.',
+  'zone.soulEcho.label': 'Soul Echo · {gold}g',
+  'zone.soulEcho.lostInDungeon': 'You fell in the dungeon and lost {gold} gold.',
   'zone.quest.exploreFound': 'Discovered: {targetName}',
   'zone.quest.rewardItem': 'Quest reward: {name}',
   'zone.quest.returnTo': 'Return to {npc} to turn it in',
