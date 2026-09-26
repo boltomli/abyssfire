@@ -1105,8 +1105,7 @@ export class SkillEffectSystem {
       case 'fireball': return Math.max(300, Math.min(600, dist * 1.5));
       case 'ice_arrow':
       case 'poison_arrow': return Math.max(250, Math.min(500, dist * 1.5));
-      // AoE drop: the meteor lands this long after the cast. (ZoneScene's AoE
-      // path currently applies damage immediately; see effectMeteor.)
+      // AoE drop: the meteor lands (and deals its damage) this long after the cast.
       case 'meteor': return METEOR_FALL_MS;
       default: return 0;
     }
@@ -1145,7 +1144,7 @@ export class SkillEffectSystem {
       case 'fireball': this.effectFireball(casterX, casterY, tx, ty); break;
       case 'blizzard': this.effectBlizzard(tx, ty); break;
       case 'mana_shield': this.effectManaShield(casterX, casterY); break;
-      case 'meteor': this.effectMeteor(tx, ty); break;
+      case 'meteor': this.effectMeteor(tx, ty, tx === casterX && ty === casterY); break;
       case 'ice_armor': this.effectIceArmor(casterX, casterY); break;
       case 'chain_lightning': this.effectChainLightning(casterX, casterY, targets ?? []); break;
       case 'fire_wall': this.effectFireWall(tx, ty); break;
@@ -1616,14 +1615,16 @@ export class SkillEffectSystem {
     }
   }
 
-  private effectMeteor(cx: number, cy: number): void {
+  private effectMeteor(cx: number, cy: number, onCaster = false): void {
     const R = this.aoePx('meteor');
     const P = PAL.fire;
     const fall = METEOR_FALL_MS;
-    // ZoneScene centres the AoE on the caster: land a little ahead of them so
+    // With no enemy to aim at it drops on the caster: land a little ahead so
     // the mage stays readable while the blast still covers the damage area.
-    cx += Math.cos(this.lastAim) * R * 0.4;
-    cy += Math.sin(this.lastAim) * R * 0.4 * FLAT;
+    if (onCaster) {
+      cx += Math.cos(this.lastAim) * R * 0.4;
+      cy += Math.sin(this.lastAim) * R * 0.4 * FLAT;
+    }
     // warning rune + growing shadow
     this.fx.decal(cx, cy, 'fx_rune', P.rim, R * 0.7, fall + 200, { add: true, alpha: 0.9, spin: 1.2, fadeIn: 0.3, pow: 6 });
     this.e.spawn('fx_glow', cx, cy, fall).normal().ground(40).color(0x000000).scaleXY(0.3, 0.15, 1.2, 0.6).fade(0, 0.6);
@@ -1722,7 +1723,7 @@ export class SkillEffectSystem {
     const P = PAL.fire;
     this.fx.decal(cx, cy, 'fx_scorch', 0xffffff, R * 1.15, 1700, { alpha: 0.6, fadeIn: 0.1 });
     this.fx.shock(cx, cy, P.rim, R * 0.3, R, 360, 0.7);
-    // ring of flame pillars sweeping around the caster
+    // ring of flame pillars sweeping around the target point
     const n = 14;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;

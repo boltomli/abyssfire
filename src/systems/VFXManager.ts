@@ -276,14 +276,6 @@ export class VFXManager {
     });
   }
 
-  // ── Skill Impact Effects ────────────────────────────────
-
-  skillImpactBloom(x: number, y: number, color: number = 0xff6600, duration: number = 300): void {
-    // Soft coloured bloom on the struck target (per-skill effects carry the detail).
-    this.fx.glow(x, y, color, 44, duration, 1.25, 0.55);
-    this.fx.e.spawn('fx_core', x, y, duration * 0.5).scale(0.4, 0.8, 2).fade(0.8, 0);
-  }
-
   // ── Melee Impact ─────────────────────────────────────────
 
   /**
