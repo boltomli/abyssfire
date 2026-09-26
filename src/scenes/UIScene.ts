@@ -673,6 +673,7 @@ export class UIScene extends Phaser.Scene {
     this.subscriptions.on(EventBus, GameEvents.QUEST_COMPLETED, this.handleQuestTrackerDirty, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_PROGRESS, this.handleQuestTrackerDirty, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_TRACKED_CHANGED, this.handleQuestTrackerDirty, this);
+    this.subscriptions.on(EventBus, GameEvents.BOSS_BAR, this.handleBossBar, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_TURNED_IN, this.handleQuestTrackerDirty, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_FAILED, this.handleQuestTrackerDirty, this);
   }
@@ -1234,6 +1235,66 @@ export class UIScene extends Phaser.Scene {
       this.reopenShop(shopData);
     }, { variant: 'primary', fontSize: 13 }));
     this.contextPopup.add(this.makeButton(popW / 2 + px(62), popH - px(26), px(100), px(28), btnLabel(t('ui.shop.cancel')), () => this.hideContextPopup(), { fontSize: 13 }));
+  }
+
+  // --- Boss bar ---
+
+  private bossBar: Phaser.GameObjects.Container | null = null;
+  private bossBarFill: Phaser.GameObjects.Rectangle | null = null;
+  private bossBarShine: Phaser.GameObjects.Rectangle | null = null;
+  private bossBarHp: (() => { hp: number; maxHp: number } | null) | null = null;
+  private bossBarShown = -1;
+
+  /** Big named health bar across the top while a story boss is near. */
+  private handleBossBar(state: { name: string; epithet: string; hp: () => { hp: number; maxHp: number } | null } | null): void {
+    this.bossBar?.destroy(true);
+    this.bossBar = null;
+    this.bossBarFill = null;
+    this.bossBarShine = null;
+    this.bossBarHp = null;
+    if (!state) return;
+    const bw = px(560), bh = px(14);
+    // Sits below the target frame at the top of the screen.
+    const c = this.add.container(W / 2, px(88)).setDepth(2900).setAlpha(0);
+    const frame = this.add.graphics();
+    frame.fillStyle(0x0a0604, 0.9);
+    frame.fillRoundedRect(-bw / 2 - px(6), -px(4), bw + px(12), bh + px(8), px(4));
+    frame.lineStyle(px(2), 0xc9a45a, 1);
+    frame.strokeRoundedRect(-bw / 2 - px(6), -px(4), bw + px(12), bh + px(8), px(4));
+    // Diamond end caps
+    for (const sx of [-1, 1]) {
+      frame.fillStyle(0xc9a45a, 1);
+      frame.fillTriangle(sx * (bw / 2 + px(6)), bh / 2 - px(8), sx * (bw / 2 + px(16)), bh / 2, sx * (bw / 2 + px(6)), bh / 2 + px(8));
+    }
+    const back = this.add.rectangle(-bw / 2, 0, bw, bh, 0x2a0606).setOrigin(0, 0);
+    const fill = this.add.rectangle(-bw / 2, 0, bw, bh, 0xb3121e).setOrigin(0, 0);
+    const shine = this.add.rectangle(-bw / 2, 0, bw, bh / 3, 0xff6a5a, 0.35).setOrigin(0, 0);
+    const name = this.add.text(0, -px(20), state.name, {
+      fontSize: fs(18), color: '#ffe2a8', fontFamily: '"Noto Serif SC", "Noto Sans SC", serif', fontStyle: 'bold',
+      stroke: '#1a0802', strokeThickness: Math.round(4 * DPR),
+    }).setOrigin(0.5);
+    const epithet = this.add.text(0, bh + px(12), state.epithet, {
+      fontSize: fs(12), color: '#d9b98a', fontFamily: '"Noto Serif SC", "Noto Sans SC", serif',
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5);
+    c.add([frame, back, fill, shine, name, epithet]);
+    this.tweens.add({ targets: c, alpha: 1, duration: 400 });
+    this.bossBar = c;
+    this.bossBarFill = fill;
+    this.bossBarHp = state.hp;
+    this.bossBarShine = shine;
+    this.bossBarShown = -1;
+  }
+
+  private updateBossBar(): void {
+    if (!this.bossBar || !this.bossBarFill || !this.bossBarHp) return;
+    const s = this.bossBarHp();
+    const frac = s ? Math.max(0, Math.min(1, s.hp / Math.max(1, s.maxHp))) : 0;
+    if (Math.abs(frac - this.bossBarShown) < 0.001) return;
+    this.bossBarShown = frac;
+    const full = px(560);
+    this.bossBarFill.width = full * frac;
+    if (this.bossBarShine) this.bossBarShine.width = full * frac;
   }
 
   // --- Stash ---
@@ -2834,8 +2895,21 @@ export class UIScene extends Phaser.Scene {
         const npcQuestIds = NPCDefinitions[rawData.npcId]?.quests ?? [];
         const next = gatherNpcQuests(npcQuestIds, questSystem.quests, questSystem.progress, this.player.level);
         if (next.length > 0) {
-          this.time.delayedCall(450, () => {
+          const offer = (): void => {
             if (!this.questCardPanel && !this.dialoguePanel) this.openQuestCard(next, npcName, hasDialogueTree, rawData);
+          };
+          // If the turn-in starts a cutscene, offer the next chapter once it ends.
+          this.time.delayedCall(900, () => {
+            if (this.zone?.storyDirector?.busy) {
+              const onStory = (d: { active: boolean }): void => {
+                if (d.active) return;
+                EventBus.off(GameEvents.STORY_STATE, onStory);
+                this.time.delayedCall(300, offer);
+              };
+              EventBus.on(GameEvents.STORY_STATE, onStory);
+            } else {
+              offer();
+            }
           });
         }
       });
@@ -5168,6 +5242,10 @@ export class UIScene extends Phaser.Scene {
 
   /** Per-frame HUD sync: only cheap property updates (no static redraws). */
   update(time: number, delta: number = 16): void {
+    // The HUD steps aside while a story beat plays.
+    const cinematic = !!this.zone?.storyDirector?.cinematic;
+    if (this.cameras.main.visible === cinematic) this.cameras.main.setVisible(!cinematic);
+    this.updateBossBar();
     if (!this.player) return;
     const orbBottom = HUD.orbY + GLOBE_R;
     const orbSpan = GLOBE_R * 2;

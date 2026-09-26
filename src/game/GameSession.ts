@@ -9,6 +9,7 @@ import { QuestSystem } from '../systems/QuestSystem';
 import { RandomEventSystem } from '../systems/RandomEventSystem';
 import { SaveSystem } from '../systems/SaveSystem';
 import { StatusEffectSystem } from '../systems/StatusEffectSystem';
+import { StoryProgress } from '../systems/StoryProgress';
 import { AllQuests } from '../data/quests/all_quests';
 
 export interface ZoneRuntime {
@@ -26,6 +27,7 @@ export class GameSession {
   readonly achievements = new AchievementSystem();
   readonly saves = new SaveSystem();
   readonly mercenaries = new MercenarySystem();
+  readonly story = new StoryProgress();
 
   constructor() {
     this.quests.registerQuests(AllQuests);

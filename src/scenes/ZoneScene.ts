@@ -64,6 +64,7 @@ import type { UIScene } from './UIScene';
 import { GameSession } from '../game/GameSession';
 import { ZoneTerrain } from '../graphics/terrain/ZoneTerrain';
 import { QuestWorld, questGiverOf } from '../systems/QuestWorld';
+import { StoryDirector } from '../systems/StoryDirector';
 import { generateRewardChoices, isCollectObjective, questDropChance, FALLBACK_COLLECT_CHANCE } from '../systems/QuestRewards';
 
 const TILE_KEYS = ['tile_grass', 'tile_dirt', 'tile_stone', 'tile_water', 'tile_wall', 'tile_camp', 'tile_camp_wall'];
@@ -120,6 +121,9 @@ export class ZoneScene extends Phaser.Scene {
   questSystem!: QuestSystem;
   /** Gather nodes, quest pickups and the guide arrow (null in dungeons). */
   questWorld: QuestWorld | null = null;
+  /** Story beats: prologue, chapter cards, cutscenes, boss intros (null in dungeons). */
+  storyDirector: StoryDirector | null = null;
+  private chapterCardPending = false;
   homesteadSystem!: HomesteadSystem;
   achievementSystem!: AchievementSystem;
   saveSystem!: SaveSystem;
@@ -448,6 +452,18 @@ export class ZoneScene extends Phaser.Scene {
         monsters: () => this.monsters,
         npcs: () => this.npcs,
       });
+      if (this.session) {
+        this.storyDirector = new StoryDirector({
+          scene: this,
+          story: this.session.story,
+          mapId: this.currentMapId,
+          player: () => this.player,
+          npcs: () => this.npcs,
+          monsters: () => this.monsters,
+          setCinematic: (on) => this.setCinematic(on),
+          save: () => this.autoSave(),
+        });
+      }
     }
     this.spawnPetSprite();
     this.spawnEscortNpc();
@@ -596,8 +612,21 @@ export class ZoneScene extends Phaser.Scene {
       type: 'system',
     });
 
-    this.showZoneBanner();
+    // A first visit opens with the chapter card instead of the plain banner.
+    this.chapterCardPending = this.storyDirector?.start() ?? false;
+    if (!this.chapterCardPending) this.showZoneBanner();
     this.autoSave();
+  }
+
+  /**
+   * Freeze the world for a story beat: update() stops input, AI and incoming
+   * hits while `storyDirector.cinematic` is set, and UIScene hides the HUD.
+   */
+  private setCinematic(on: boolean): void {
+    if (on) {
+      this.player.path = [];
+      this.player.attackTarget = null;
+    }
   }
 
   /** Update persistent text labels when locale changes. */
@@ -668,6 +697,7 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
+    if (this.storyDirector?.cinematic) return;
     if (pointer.rightButtonDown()) {
       this.useTownPortal();
       return;
@@ -865,6 +895,7 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
+    if (this.storyDirector?.cinematic) return;
     const recovery = this.getPlayerRecoveryModifiers();
     this.handleKeyboardMovement(delta);
     this.handleSkillInput(time);
@@ -1045,6 +1076,7 @@ export class ZoneScene extends Phaser.Scene {
     this.collectOcclusionTargets();
     this.updateDecorOcclusion(delta);
     this.questWorld?.update(delta);
+    this.storyDirector?.update(delta);
     if (this.terrain) {
       if (this.terrain.hasPending()) {
         this.terrain.flush(4, (c, r) => !!this.tileSprites[r]?.[c], (c, r, key) => { this.tileSprites[r]?.[c]?.setTexture(key); });
@@ -2432,6 +2464,7 @@ export class ZoneScene extends Phaser.Scene {
   /** Launch a monster's attack; its damage resolves when the blow (or projectile) lands. */
   private resolveMonsterStrike(monster: Monster): void {
     if (!monster.isAlive() || this.player.hp <= 0 || this.isTransitioning) return;
+    if (this.storyDirector?.cinematic) return;
     // Stunned/rooted mid-swing: the attack is interrupted.
     if (this.statusEffects.isImmobilized(monster.id)) return;
     const ranged = monster.definition.attackRange > 2.5;
@@ -3299,6 +3332,7 @@ export class ZoneScene extends Phaser.Scene {
     this.achievementSystem.checkLevel(this.player.level);
 
     this.questSystem.updateProgress('kill', monster.definition.id);
+    this.storyDirector?.onMonsterKilled(monster.definition.id);
 
     // Difficulty completion check: killing demon_lord in Abyss Rift completes current difficulty
     if (!this.isInDungeon && DifficultySystem.shouldMarkCompleted(
@@ -3750,6 +3784,7 @@ export class ZoneScene extends Phaser.Scene {
         miniBossDialogueSeen: [...this.miniBossDialogueSeen],
         loreCollected: [...this.loreCollected],
         discoveredHiddenAreas: [...this.discoveredHiddenAreas],
+        storySeen: this.session?.story.toSave(),
       });
     } catch (_e) { /* silent fail */ }
   }
@@ -3803,6 +3838,8 @@ export class ZoneScene extends Phaser.Scene {
 
     // 3. Quests
     if (save.quests) this.questSystem.loadProgress(save.quests);
+    // Saves from before the story existed: don't replay the prologue for veterans.
+    this.session?.story.load(save.storySeen ?? ['prologue']);
 
     // 4. Homestead
     if (save.homestead) {
@@ -6687,6 +6724,8 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    this.storyDirector?.destroy();
+    this.storyDirector = null;
     this.questWorld?.destroy();
     this.questWorld = null;
     this.isTransitioning = false;

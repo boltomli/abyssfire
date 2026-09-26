@@ -562,4 +562,6 @@ export interface SaveData {
   loreCollected?: string[];
   /** Hidden area IDs that have been discovered and had rewards collected. */
   discoveredHiddenAreas?: string[];
+  /** Story beats already played (prologue, chapters, cutscenes, boss intros, ending). */
+  storySeen?: string[];
 }
