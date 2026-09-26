@@ -20,7 +20,7 @@ import { tileToWorld } from '../utils/IsometricUtils';
 import { audioManager } from './audio/AudioManager';
 import type { StoryProgress } from './StoryProgress';
 
-interface HostMonster { definition: { id: string; name: string; spriteKey: string }; tileCol: number; tileRow: number; sprite: { x: number; y: number }; isAlive(): boolean; hp: number; maxHp: number }
+interface HostMonster { definition: { id: string; name: string; spriteKey: string }; tileCol: number; tileRow: number; sprite: { x: number; y: number }; isAlive(): boolean; hp: number; maxHp: number; nameLabel?: Phaser.GameObjects.Text }
 interface HostNpc { definition: { id: string; name: string; type: string }; sprite: { x: number; y: number } }
 
 export interface StoryHost {
@@ -55,6 +55,8 @@ export class StoryDirector {
   private running = false;
   private scanTimer = 0;
   private bossBarFor: string | null = null;
+  /** Story bosses whose nameplate already shows their proper name. */
+  private readonly named = new WeakSet<object>();
   private readonly onTurnedIn = (d: { questId: string }): void => this.fire('quest_turned_in', d.questId);
   private readonly onAccepted = (d: { questId: string }): void => this.fire('quest_accepted', d.questId);
 
@@ -293,6 +295,11 @@ export class StoryDirector {
       if (!m) continue;
       const d = Math.hypot(m.tileCol - p.tileCol, m.tileRow - p.tileRow);
       if (!near || d < near.d) near = { intro, m, d };
+    }
+    // Story bosses wear their proper name, not the generic monster name.
+    if (near && near.d <= BOSS_BAR_RANGE && !this.named.has(near.m) && near.m.nameLabel) {
+      this.named.add(near.m);
+      near.m.nameLabel.setText(t(near.intro.name)).setColor('#ffcf6a').setAlpha(1);
     }
     if (near && near.d <= BOSS_SIGHT && !this.h.story.has(`boss_${near.intro.monsterId}`)) {
       const intro = near.intro;
