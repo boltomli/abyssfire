@@ -41,6 +41,8 @@ import { audioManager } from '../systems/audio/AudioManager';
 import { applyColorGrading } from '../graphics/ColorGradePipeline';
 import { profileForQuality, resolveRenderQuality } from '../rendering/RenderQuality';
 import { SpriteGenerator } from '../graphics/SpriteGenerator';
+import { CHEST_OPEN_FRAME } from '../graphics/sprites/decorations/TreasureChest';
+import { subDungeonGateKey } from '../graphics/sprites/effects/DungeonGates';
 import { CAMP_THEMES } from '../data/camp-themes';
 import { setCurrentZonePalette } from '../graphics/ZonePalette';
 import { AllClasses } from '../data/classes/index';
@@ -2844,6 +2846,9 @@ export class ZoneScene extends Phaser.Scene {
     this.player.gold += gold;
     EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.event.treasureChest.goldReward', { gold }), type: 'info' });
 
+    // The cache itself: a chest that has just burst open, fading once looted.
+    this.spawnOpenedCacheChest(event.col, event.row);
+
     // Drop items near the event position
     for (const item of items) {
       this.dropLootAtPosition(item, event.col, event.row);
@@ -3177,6 +3182,20 @@ export class ZoneScene extends Phaser.Scene {
     });
   }
 
+  /** Opened treasure-cache chest prop; purely visual, fades after a while. */
+  private spawnOpenedCacheChest(col: number, row: number): void {
+    const { x, y } = cartToIso(col, row);
+    SpriteGenerator.ensureDecoration(this, 'decor_treasure_chest');
+    if (!this.textures.exists('decor_treasure_chest')) return;
+    const meta = SpriteGenerator.getDecorMeta('decor_treasure_chest');
+    const chest = this.add.image(x, y, 'decor_treasure_chest', CHEST_OPEN_FRAME)
+      .setOrigin(0.5, meta?.anchorY ?? 0.85)
+      .setScale(1 / TEXTURE_SCALE)
+      .setDepth(y + 20);
+    this.tweens.add({ targets: chest, alpha: 0, delay: 8000, duration: 1200, onComplete: () => chest.destroy() });
+    EventBus.once(GameEvents.ZONE_EXIT, () => { if (chest.scene) chest.destroy(); });
+  }
+
   /** Helper: drop a loot item at a specific tile position (used by treasure cache events). */
   private dropLootAtPosition(item: ItemInstance, col: number, row: number): void {
     const { x: wx, y: wy } = cartToIso(col, row);
@@ -3188,11 +3207,19 @@ export class ZoneScene extends Phaser.Scene {
     const container = this.add.container(finalX, finalY - 30 * DPR);
     container.setDepth(wy + 50);
 
-    const colors: Record<string, number> = { normal: 0xffffff, magic: 0x4488ff, rare: 0xffff00, legendary: 0xff8800, set: 0x44ff44 };
-    const color = colors[item.quality] ?? 0xffffff;
-
-    const bag = this.add.rectangle(0, 0, 12 * DPR, 12 * DPR, color);
+    // Same cel-shaded loot bag (quality tint + name) as monster drops.
+    SpriteGenerator.ensureEffect(this, 'loot_bag');
+    const bag = this.add.image(0, 0, 'loot_bag').setScale(1 / TEXTURE_SCALE);
+    if (item.quality !== 'normal') bag.setTint(this.getQualityColor(item.quality));
     container.add(bag);
+    if (this.vfx && item.quality !== 'normal') this.vfx.applyLootGlow(container, item.quality);
+    const qualityColors: Record<string, string> = {
+      normal: '#cccccc', magic: '#6888ff', rare: '#f1c40f', legendary: '#ff8800', set: '#2ecc71',
+    };
+    container.add(this.add.text(0, -18, item.name, {
+      fontSize: fs(12), color: qualityColors[item.quality] || '#cccccc',
+      fontFamily: '"Cinzel", serif', stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+    }).setOrigin(0.5));
 
     // Drop animation
     this.tweens.add({
@@ -3491,21 +3518,13 @@ export class ZoneScene extends Phaser.Scene {
     const container = this.add.container(worldPos.x, worldPos.y);
     container.setDepth(worldPos.y + 30);
 
-    const color = type === 'hp' ? 0xcc2222 : 0x2244cc;
-    const glowColor = type === 'hp' ? 0xff4444 : 0x4466ff;
-
-    // Glow
-    const glow = this.add.circle(0, 0, 12, glowColor, 0.25);
-    container.add(glow);
-
-    // Bottle body
-    const body = this.add.rectangle(0, 1, 8, 10, color);
-    body.setStrokeStyle(1, 0xffffff, 0.5);
-    container.add(body);
-    // Bottle cap
-    const cap = this.add.circle(0, -5, 3, color);
-    cap.setStrokeStyle(1, 0xffffff, 0.3);
-    container.add(cap);
+    // Cel-shaded potion flask standing on the ground point.
+    const potionKey = type === 'hp' ? 'potion_drop_hp' : 'potion_drop_mp';
+    SpriteGenerator.ensureEffect(this, potionKey);
+    const flask = this.add.image(0, 4, potionKey)
+      .setOrigin(0.5, SpriteGenerator.getEffectAnchorY(potionKey) ?? 0.5)
+      .setScale(1 / TEXTURE_SCALE);
+    container.add(flask);
 
     // Bobbing animation
     this.tweens.add({
@@ -4001,16 +4020,21 @@ export class ZoneScene extends Phaser.Scene {
       const container = this.add.container(worldX, worldY);
       container.setDepth(worldY + 100);
 
-      // Glow circle indicator
-      const glow = this.add.ellipse(0, 0, 28 * DPR, 14 * DPR, 0xaa44ff, 0.5);
+      // Soft violet pool of light on the ground
+      const glow = this.add.image(0, 0, 'fx_glow').setTint(0xaa44ff).setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(0.6, 0.28).setAlpha(0.5);
       container.add(glow);
 
-      // Pulsing butterfly icon (small colored rectangle as a procedural sprite)
-      const wing = this.add.rectangle(0, -10 * DPR, 12 * DPR, 8 * DPR, 0xcc66ff);
+      // The rare pet itself (same cel-shaded art as the follower), hovering
+      const petKey = `decor_pet_${spawn.petId}`;
+      SpriteGenerator.ensureDecoration(this, petKey);
+      const wing = this.add.image(0, -4 * DPR, petKey)
+        .setOrigin(0.5, SpriteGenerator.getDecorMeta(petKey)?.anchorY ?? 0.9)
+        .setScale(1 / TEXTURE_SCALE);
       container.add(wing);
 
       // Floating label
-      const label = this.add.text(0, -22 * DPR, t('zone.pet.voidButterfly.label'), {
+      const label = this.add.text(0, -40 * DPR, t('zone.pet.voidButterfly.label'), {
         fontFamily: 'serif',
         fontSize: fs(10),
         color: '#cc88ff',
@@ -4023,8 +4047,8 @@ export class ZoneScene extends Phaser.Scene {
       this.tweens.add({
         targets: glow,
         alpha: { from: 0.3, to: 0.7 },
-        scaleX: { from: 0.9, to: 1.1 },
-        scaleY: { from: 0.9, to: 1.1 },
+        scaleX: { from: 0.54, to: 0.66 },
+        scaleY: { from: 0.25, to: 0.31 },
         duration: 1200,
         yoyo: true,
         repeat: -1,
@@ -4033,7 +4057,7 @@ export class ZoneScene extends Phaser.Scene {
       // Gentle float on the wing
       this.tweens.add({
         targets: wing,
-        y: -14 * DPR,
+        y: -10 * DPR,
         duration: 800,
         yoyo: true,
         repeat: -1,
@@ -4186,7 +4210,7 @@ export class ZoneScene extends Phaser.Scene {
       container.add(visual.elements);
 
       // Floating label
-      const label = this.add.text(0, -28 * DPR, `✦ ${entry.name}`, {
+      const label = this.add.text(0, -46 * DPR, `✦ ${entry.name}`, {
         fontFamily: '"Noto Sans SC", sans-serif',
         fontSize: fs(9),
         color: this.getLoreSpriteColor(entry.spriteType),
@@ -4215,81 +4239,19 @@ export class ZoneScene extends Phaser.Scene {
 
   /** Create distinct visual elements for a lore sprite type. */
   private createLoreVisual(spriteType: string): { elements: Phaser.GameObjects.GameObject[]; glow: Phaser.GameObjects.GameObject | null } {
-    const elements: Phaser.GameObjects.GameObject[] = [];
-    let glow: Phaser.GameObjects.GameObject | null = null;
-
-    switch (spriteType) {
-      case 'ancient_tablet': {
-        const base = this.add.rectangle(0, -6 * DPR, 16 * DPR, 20 * DPR, 0x8B7355);
-        base.setStrokeStyle(1, 0x5C4033);
-        elements.push(base);
-        const rune = this.add.rectangle(0, -8 * DPR, 8 * DPR, 3 * DPR, 0xDAA520);
-        elements.push(rune);
-        glow = this.add.ellipse(0, 0, 24 * DPR, 12 * DPR, 0xDAA520, 0.4);
-        elements.push(glow);
-        break;
-      }
-      case 'old_scroll': {
-        const scroll = this.add.rectangle(0, -6 * DPR, 18 * DPR, 12 * DPR, 0xF5DEB3);
-        scroll.setStrokeStyle(1, 0xA0522D);
-        elements.push(scroll);
-        const rod1 = this.add.rectangle(-8 * DPR, -6 * DPR, 3 * DPR, 14 * DPR, 0x8B4513);
-        elements.push(rod1);
-        const rod2 = this.add.rectangle(8 * DPR, -6 * DPR, 3 * DPR, 14 * DPR, 0x8B4513);
-        elements.push(rod2);
-        glow = this.add.ellipse(0, 0, 24 * DPR, 12 * DPR, 0xF5DEB3, 0.3);
-        elements.push(glow);
-        break;
-      }
-      case 'crystal_shard': {
-        const crystal = this.add.triangle(0, -10 * DPR, 0, 16 * DPR, 8 * DPR, 0, -8 * DPR, 0, 0x66CCFF);
-        elements.push(crystal);
-        glow = this.add.ellipse(0, 0, 22 * DPR, 11 * DPR, 0x66CCFF, 0.5);
-        elements.push(glow);
-        break;
-      }
-      case 'carved_stone': {
-        const stone = this.add.rectangle(0, -4 * DPR, 20 * DPR, 14 * DPR, 0x808080);
-        stone.setStrokeStyle(1, 0x505050);
-        elements.push(stone);
-        const carving = this.add.rectangle(0, -5 * DPR, 12 * DPR, 6 * DPR, 0xA9A9A9);
-        elements.push(carving);
-        glow = this.add.ellipse(0, 0, 26 * DPR, 13 * DPR, 0xB0C4DE, 0.3);
-        elements.push(glow);
-        break;
-      }
-      case 'torn_journal': {
-        const book = this.add.rectangle(0, -6 * DPR, 14 * DPR, 16 * DPR, 0xDEB887);
-        book.setStrokeStyle(1, 0x8B4513);
-        elements.push(book);
-        const spine = this.add.rectangle(-6 * DPR, -6 * DPR, 3 * DPR, 16 * DPR, 0x654321);
-        elements.push(spine);
-        glow = this.add.ellipse(0, 0, 20 * DPR, 10 * DPR, 0xDEB887, 0.3);
-        elements.push(glow);
-        break;
-      }
-      case 'rune_pillar': {
-        const pillar = this.add.rectangle(0, -10 * DPR, 10 * DPR, 24 * DPR, 0x4B0082);
-        pillar.setStrokeStyle(1, 0x2F0060);
-        elements.push(pillar);
-        const rune1 = this.add.rectangle(0, -14 * DPR, 6 * DPR, 3 * DPR, 0x9370DB);
-        elements.push(rune1);
-        const rune2 = this.add.rectangle(0, -6 * DPR, 6 * DPR, 3 * DPR, 0x9370DB);
-        elements.push(rune2);
-        glow = this.add.ellipse(0, 0, 20 * DPR, 10 * DPR, 0x9370DB, 0.5);
-        elements.push(glow);
-        break;
-      }
-      default: {
-        const defaultObj = this.add.rectangle(0, -6 * DPR, 14 * DPR, 14 * DPR, 0xCCCCCC);
-        elements.push(defaultObj);
-        glow = this.add.ellipse(0, 0, 20 * DPR, 10 * DPR, 0xCCCCCC, 0.3);
-        elements.push(glow);
-        break;
-      }
-    }
-
-    return { elements, glow };
+    // Cel-shaded prop per lore type (src/graphics/sprites/decorations/LoreProps.ts),
+    // standing on the tile's ground point, over a soft pulsing pool of light.
+    const glowTint = Phaser.Display.Color.HexStringToColor(this.getLoreSpriteColor(spriteType)).color;
+    const pool = this.add.image(0, 0, 'fx_glow').setTint(glowTint).setBlendMode(Phaser.BlendModes.ADD)
+      .setScale(0.55, 0.26).setAlpha(0.8);
+    const glow = this.add.container(0, 0, [pool]);
+    let key = `decor_lore_${spriteType}`;
+    if (!SpriteGenerator.hasDecoration(key)) key = 'decor_lore_scroll';
+    SpriteGenerator.ensureDecoration(this, key);
+    const prop = this.add.image(0, 0, key)
+      .setOrigin(0.5, SpriteGenerator.getDecorMeta(key)?.anchorY ?? 0.9)
+      .setScale(1 / TEXTURE_SCALE);
+    return { elements: [glow, prop], glow };
   }
 
   /** Get display color for a lore sprite type label. */
@@ -4464,9 +4426,16 @@ export class ZoneScene extends Phaser.Scene {
         ? 'decor_gold_pile'
         : 'decor_lore_scroll';
     SpriteGenerator.ensureDecoration(this, rewardSpriteKey);
+    let propTop = -30 * DPR;
     if (this.textures.exists(rewardSpriteKey)) {
-      const rewardVisual = this.add.image(0, -12, rewardSpriteKey).setScale(1 / TEXTURE_SCALE);
+      // Stand the prop on its ground-contact point; chests loop their glint.
+      const rewardVisual = this.add.sprite(0, 0, rewardSpriteKey, 0)
+        .setOrigin(0.5, SpriteGenerator.getDecorMeta(rewardSpriteKey)?.anchorY ?? 0.5)
+        .setScale(1 / TEXTURE_SCALE);
+      const loopAnim = SpriteGenerator.getLoopAnimKey(this, rewardSpriteKey);
+      if (loopAnim) rewardVisual.play({ key: loopAnim, startFrame: rewardIndex % 8 });
       container.add(rewardVisual);
+      propTop = Math.min(propTop, -rewardVisual.displayHeight * rewardVisual.originY - 8);
     } else if (reward.type === 'chest') {
       // Keep a minimal resilience fallback for a failed texture context.
       const chest = this.add.rectangle(0, -12, Math.round(20 * DPR), Math.round(14 * DPR), 0xDAA520);
@@ -4483,14 +4452,16 @@ export class ZoneScene extends Phaser.Scene {
     }
 
     if (reward.type === 'chest') {
-      // Glow effect
-      const glow = this.add.ellipse(0, 0, Math.round(36 * DPR), Math.round(18 * DPR), 0xFFD700, 0.3);
+      // Warm pool of light under the chest
+      const glow = this.add.image(0, 0, 'fx_glow').setTint(0xffd060).setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(0.7, 0.3).setAlpha(0.6);
       container.add(glow);
-      this.tweens.add({ targets: glow, alpha: 0.1, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      container.sendToBack(glow);
+      this.tweens.add({ targets: glow, alpha: 0.2, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }
 
     // Interactable label
-    const label = this.add.text(0, -30 * DPR, reward.type === 'chest' ? t('zone.hiddenArea.rewardChest') : reward.type === 'gold_pile' ? t('zone.hiddenArea.rewardGoldPile') : t('zone.hiddenArea.rewardScroll'), {
+    const label = this.add.text(0, propTop, reward.type === 'chest' ? t('zone.hiddenArea.rewardChest') : reward.type === 'gold_pile' ? t('zone.hiddenArea.rewardGoldPile') : t('zone.hiddenArea.rewardScroll'), {
       fontSize: fs(9),
       color: '#FFD700',
       fontFamily: '"Noto Sans SC", sans-serif',
@@ -4547,10 +4518,24 @@ export class ZoneScene extends Phaser.Scene {
       });
     }
 
+    // Chests pop open before fading; other rewards fade straight away.
+    let fadeDelay = 0;
+    if (reward.type === 'chest') {
+      for (const child of entry.sprite.list) {
+        if (child instanceof Phaser.GameObjects.Sprite && child.texture.key === 'decor_treasure_chest'
+          && child.texture.has(String(CHEST_OPEN_FRAME))) {
+          child.stop();
+          child.setFrame(CHEST_OPEN_FRAME);
+          fadeDelay = 700;
+        }
+      }
+    }
+
     // Animate and destroy
     this.tweens.add({
       targets: entry.sprite,
       alpha: 0, scaleX: 1.3, scaleY: 1.3,
+      delay: fadeDelay,
       duration: 400,
       onComplete: () => { entry.sprite.destroy(); },
     });
@@ -4560,6 +4545,26 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   // ─── Random Dungeon Portal & Floor Transitions ───────────────────────
+
+  /**
+   * Add an animated gate sprite (dungeon / sub-dungeon entrance) standing on
+   * the container's ground point. Returns the label Y just above its top.
+   */
+  private addGateVisual(container: Phaser.GameObjects.Container, key: string, glowTint: number): number {
+    const pool = this.add.image(0, 0, 'fx_glow').setTint(glowTint).setBlendMode(Phaser.BlendModes.ADD)
+      .setScale(1.1, 0.45).setAlpha(0.45);
+    container.add(pool);
+    this.tweens.add({ targets: pool, alpha: 0.2, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    SpriteGenerator.ensureEffect(this, key);
+    if (!this.textures.exists(key)) return -46 * DPR;
+    const gate = this.add.sprite(0, 0, key, 0)
+      .setOrigin(0.5, SpriteGenerator.getEffectAnchorY(key) ?? 0.8)
+      .setScale(1 / TEXTURE_SCALE);
+    const anim = SpriteGenerator.getLoopAnimKey(this, key);
+    if (anim) gate.play(anim);
+    container.add(gate);
+    return -gate.displayHeight * gate.originY - 8;
+  }
 
   /** Spawn the dungeon portal in Abyss Rift zone. */
   private spawnDungeonPortal(): void {
@@ -4587,31 +4592,11 @@ export class ZoneScene extends Phaser.Scene {
     const container = this.add.container(worldX, worldY);
     container.setDepth(worldY + 100);
 
-    // Portal base — larger and visually distinct from exit/sub-dungeon portals
-    const portalBase = this.add.ellipse(0, 0, Math.round(40 * DPR), Math.round(20 * DPR), 0x440000, 0.8);
-    container.add(portalBase);
-
-    // Outer ring — crimson/dark-red glow (distinct from purple sub-dungeon portals)
-    const outerRing = this.add.ellipse(0, -20 * DPR, Math.round(36 * DPR), Math.round(44 * DPR));
-    outerRing.setStrokeStyle(Math.round(4 * DPR), 0xFF3300);
-    outerRing.setFillStyle(0x880000, 0.35);
-    container.add(outerRing);
-
-    // Inner glow — fiery red-orange
-    const innerGlow = this.add.ellipse(0, -20 * DPR, Math.round(22 * DPR), Math.round(30 * DPR), 0xFF6600, 0.5);
-    container.add(innerGlow);
-
-    // Core — bright center
-    const core = this.add.ellipse(0, -20 * DPR, Math.round(10 * DPR), Math.round(14 * DPR), 0xFFAA00, 0.6);
-    container.add(core);
-
-    // Pulsing animations
-    this.tweens.add({ targets: innerGlow, alpha: 0.2, scaleX: 0.8, scaleY: 0.8, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    this.tweens.add({ targets: outerRing, alpha: 0.5, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    this.tweens.add({ targets: core, alpha: 0.3, scaleX: 0.6, scaleY: 0.6, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    // Crimson basalt gate with a swirling vortex (effects/DungeonGates.ts)
+    const gateTop = this.addGateVisual(container, 'dungeon_portal', 0xff5a2a);
 
     // Label
-    const label = this.add.text(0, -46 * DPR, DungeonSystem.getDungeonPortalLabel(), {
+    const label = this.add.text(0, gateTop, DungeonSystem.getDungeonPortalLabel(), {
       fontSize: fs(11),
       color: '#FF6633',
       fontFamily: '"Noto Sans SC", sans-serif',
@@ -4747,26 +4732,11 @@ export class ZoneScene extends Phaser.Scene {
       const container = this.add.container(worldX, worldY);
       container.setDepth(worldY + 100);
 
-      // Portal base (dark ellipse)
-      const portalBase = this.add.ellipse(0, 0, Math.round(32 * DPR), Math.round(16 * DPR), 0x220044, 0.7);
-      container.add(portalBase);
-
-      // Portal ring (purple glowing ring)
-      const portalRing = this.add.ellipse(0, -16 * DPR, Math.round(28 * DPR), Math.round(36 * DPR));
-      portalRing.setStrokeStyle(Math.round(3 * DPR), 0x9933FF);
-      portalRing.setFillStyle(0x6600CC, 0.3);
-      container.add(portalRing);
-
-      // Inner glow
-      const innerGlow = this.add.ellipse(0, -16 * DPR, Math.round(18 * DPR), Math.round(24 * DPR), 0xCC66FF, 0.4);
-      container.add(innerGlow);
-
-      // Pulsing animation
-      this.tweens.add({ targets: innerGlow, alpha: 0.15, scaleX: 0.8, scaleY: 0.8, duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-      this.tweens.add({ targets: portalRing, alpha: 0.6, duration: 1500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      // Themed entrance (mine shaft / demon ring gate) from effects/DungeonGates.ts
+      const gateTop = this.addGateVisual(container, subDungeonGateKey(entrance.targetSubDungeon), 0xb070ff);
 
       // Label
-      const label = this.add.text(0, -40 * DPR, getSubDungeonEntranceName(entrance.id, entrance.name), {
+      const label = this.add.text(0, gateTop, getSubDungeonEntranceName(entrance.id, entrance.name), {
         fontSize: fs(10),
         color: '#CC88FF',
         fontFamily: '"Noto Sans SC", sans-serif',

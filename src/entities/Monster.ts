@@ -130,7 +130,10 @@ export class Monster {
 
     // Elite crown indicator
     if (definition.elite) {
-      const crown = scene.add.rectangle(0, -size - 16, 12, 5, 0xf1c40f);
+      SpriteGenerator.ensureEffect(scene, 'elite_crown');
+      const crown = scene.textures.exists('elite_crown')
+        ? scene.add.image(0, -size - 30, 'elite_crown').setScale(1 / TEXTURE_SCALE)
+        : scene.add.rectangle(0, -size - 16, 12, 5, 0xf1c40f);
       this.sprite.add(crown);
     }
 

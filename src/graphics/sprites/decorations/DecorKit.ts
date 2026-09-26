@@ -21,6 +21,12 @@ export interface DecorDrawer extends EntityDrawer {
   readonly tall?: boolean;
   /** Flat ground cover (grass, flowers, bones) — always drawn under entities. */
   readonly flat?: boolean;
+  /**
+   * Idle loop over the first `frames` frames, registered by SpriteGenerator
+   * as `<key>_anim` (e.g. a chest's glint, a portal's swirl). Frames after
+   * the loop are extra states (an opened chest) addressed by index.
+   */
+  readonly loop?: { readonly frames: number; readonly fps: number };
 }
 
 export type Rand = () => number;
@@ -65,6 +71,8 @@ export interface DecorSpec {
   tall?: boolean;
   flat?: boolean;
   frames?: number;
+  /** Idle loop over the first N frames (see DecorDrawer.loop). */
+  loop?: { frames: number; fps: number };
   draw(ctx: CanvasRenderingContext2D, k: DecorCtx, frame: number): void;
 }
 
@@ -78,6 +86,7 @@ export function defineDecor(spec: DecorSpec): DecorDrawer {
     anchorY: ground / spec.h,
     tall: spec.tall,
     flat: spec.flat,
+    loop: spec.loop,
     // Decorations carry their own thin line art; no shared ink pass.
     inked: true,
     drawFrame(ctx, frame, _action, W) {

@@ -89,6 +89,9 @@ import { EVENT_PROP_DRAWERS } from './sprites/decorations/EventProps';
 import { PetSpriteDrawers } from './sprites/decorations/Pets';
 import { LootBagDrawer } from './sprites/effects/LootBag';
 import { ExitPortalDrawer } from './sprites/effects/ExitPortal';
+import { LORE_PROP_DRAWERS } from './sprites/decorations/LoreProps';
+import { DUNGEON_GATE_DRAWERS } from './sprites/effects/DungeonGates';
+import { PICKUP_DRAWERS } from './sprites/effects/Pickups';
 
 // ── Frame Layout Constants ──────────────────────────────────────────────────
 const IDLE_START = 0, IDLE_COUNT = 4;
@@ -232,9 +235,12 @@ const NPC_DRAWER_BY_KEY = new Map<string, EntityDrawer>(
   [...NPC_DRAWERS, ...EVENT_NPC_DRAWERS].map(drawer => [drawer.key, drawer]),
 );
 const DECOR_DRAWER_BY_KEY = new Map<string, EntityDrawer>(
-  [...DECOR_DRAWERS, ...EVENT_PROP_DRAWERS, ...PetSpriteDrawers].map(drawer => [drawer.key, drawer]),
+  [...DECOR_DRAWERS, ...EVENT_PROP_DRAWERS, ...PetSpriteDrawers, ...LORE_PROP_DRAWERS].map(drawer => [drawer.key, drawer]),
 );
-const EFFECT_DRAWER_BY_KEY = new Map<string, EntityDrawer>(EFFECT_DRAWERS.map(drawer => [drawer.key, drawer]));
+// Gates and pickups are generated lazily (ensureEffect) the first time a zone needs them.
+const EFFECT_DRAWER_BY_KEY = new Map<string, EntityDrawer>(
+  [...EFFECT_DRAWERS, ...DUNGEON_GATE_DRAWERS, ...PICKUP_DRAWERS].map(drawer => [drawer.key, drawer]),
+);
 const CAMP_DRAWER_META = new Map<string, EntityDrawer>([
   ...STATIC_CAMP_DRAWERS,
   makeTentDrawer('camp_tent', CAMP_THEMES.plains.tentColor),
@@ -317,8 +323,33 @@ export class SpriteGenerator {
   static ensureDecoration(scene: Phaser.Scene, decorType: string): void {
     const key = decorType.startsWith('decor_') ? decorType : `decor_${decorType}`;
     const drawer = DECOR_DRAWER_BY_KEY.get(key);
-    if (!drawer || scene.textures.exists(key)) return;
-    new SpriteGenerator(scene).generateFromStaticDrawer(drawer);
+    if (!drawer) return;
+    if (!scene.textures.exists(key)) new SpriteGenerator(scene).generateFromStaticDrawer(drawer);
+    this.ensureLoopAnimation(scene, drawer);
+  }
+
+  /**
+   * Register `<key>_anim` for a static prop that declares an idle loop
+   * (chest glint, portal swirl). Returns the animation key, or null.
+   */
+  static getLoopAnimKey(scene: Phaser.Scene, key: string): string | null {
+    const animKey = `${key}_anim`;
+    return scene.anims.exists(animKey) ? animKey : null;
+  }
+
+  private static ensureLoopAnimation(scene: Phaser.Scene, drawer: EntityDrawer): void {
+    const loop = (drawer as DecorDrawer).loop;
+    if (!loop || !scene.textures.exists(drawer.key)) return;
+    const animKey = `${drawer.key}_anim`;
+    if (scene.anims.exists(animKey)) return;
+    // Externally supplied single-image textures have no numbered frames.
+    if (!scene.textures.get(drawer.key).has(String(loop.frames - 1))) return;
+    scene.anims.create({
+      key: animKey,
+      frames: scene.anims.generateFrameNumbers(drawer.key, { start: 0, end: loop.frames - 1 }),
+      frameRate: loop.fps,
+      repeat: -1,
+    });
   }
 
   /** Frame size (pre-TEXTURE_SCALE) of a generated character sheet, if known. */
@@ -337,8 +368,15 @@ export class SpriteGenerator {
 
   static ensureEffect(scene: Phaser.Scene, effectKey: string): void {
     const drawer = EFFECT_DRAWER_BY_KEY.get(effectKey);
-    if (!drawer || scene.textures.exists(effectKey)) return;
-    new SpriteGenerator(scene).generateFromStaticDrawer(drawer);
+    if (!drawer) return;
+    if (!scene.textures.exists(effectKey)) new SpriteGenerator(scene).generateFromStaticDrawer(drawer);
+    this.ensureLoopAnimation(scene, drawer);
+  }
+
+  /** Placement metadata (ground-contact origin Y) for an effect / pickup texture. */
+  static getEffectAnchorY(key: string): number | null {
+    const drawer = EFFECT_DRAWER_BY_KEY.get(key) as DecorDrawer | undefined;
+    return drawer && typeof drawer.anchorY === 'number' ? drawer.anchorY : null;
   }
 
   static clearZoneTransientTextures(scene: Phaser.Scene): void {
@@ -353,6 +391,7 @@ export class SpriteGenerator {
       if (this.isExternalTexture(scene, key)) continue;
       if (key.startsWith('monster_')) this.clearEntityAnimations(scene, key, false);
       if (key.startsWith('npc_')) this.clearNPCAnimations(scene, key);
+      if (key.startsWith('decor_') && scene.anims.exists(`${key}_anim`)) scene.anims.remove(`${key}_anim`);
       scene.textures.remove(key);
     }
   }
