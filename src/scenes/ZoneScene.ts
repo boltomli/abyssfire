@@ -2091,30 +2091,6 @@ export class ZoneScene extends Phaser.Scene {
     if (skill.aoe && scaledAoeRadius > 0) {
       const aoeTargets = this.monsterGrid.queryRadius(this.player.tileCol, this.player.tileRow, scaledAoeRadius)
         .filter(m => m.isAlive());
-      for (const t of aoeTargets) {
-        const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), t.toCombatEntity(), skill, level, this.player.skillLevels);
-        // Combustion: +50% damage on burning targets
-        let finalDmg = result.damage;
-        if (skillId === 'combustion' && this.statusEffects.hasEffect(t.id, 'burn')) {
-          finalDmg = Math.floor(finalDmg * 1.5);
-        }
-        t.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
-        this.applySteal(result);
-        this.showDamageText(t.sprite.x, t.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
-        // Apply status effects from skill damage type
-        this.applySkillStatusEffect(t, skill, finalDmg, time);
-        if (!t.isAlive()) this.onMonsterKilled(t);
-        if (this.vfx && skill.damageType !== 'physical') {
-          const impactColor = skillId.includes('fire') || skillId === 'meteor' ? 0xff6600
-            : skillId.includes('ice') || skillId === 'blizzard' ? 0x4488ff
-            : skillId.includes('lightning') || skillId === 'chain_lightning' ? 0x5dade2
-            : 0xf39c12;
-          this.vfx.skillImpactBloom(t.sprite.x, t.sprite.y - 16, impactColor);
-        }
-      }
-      if (this.vfx && aoeTargets.length > 0) {
-        this.vfx.cameraShake(100, 0.004 + aoeTargets.length * 0.001);
-      }
       if (skillId === 'chain_lightning') {
         this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
           undefined, undefined,
@@ -2122,6 +2098,44 @@ export class ZoneScene extends Phaser.Scene {
       } else {
         this.skillEffects.play(skillId, this.player.sprite.x, this.player.sprite.y,
           this.player.sprite.x, this.player.sprite.y);
+      }
+      // Effects with a fall/travel time (meteor) land their damage on impact.
+      const aoeDelay = this.skillEffects.getProjectileTravelMs(skillId, this.player.sprite.x, this.player.sprite.y, this.player.sprite.x, this.player.sprite.y);
+      const applyAoe = (): void => {
+        for (const t of aoeTargets) {
+          // Something else may have killed it during the fall delay.
+          if (!t.isAlive()) continue;
+          const result = this.combatSystem.calculateDamage(this.player.toCombatEntity(this.getEquipStats()), t.toCombatEntity(), skill, level, this.player.skillLevels);
+          // Combustion: +50% damage on burning targets
+          let finalDmg = result.damage;
+          if (skillId === 'combustion' && this.statusEffects.hasEffect(t.id, 'burn')) {
+            finalDmg = Math.floor(finalDmg * 1.5);
+          }
+          t.takeDamage(finalDmg, this.player.sprite.x, this.player.sprite.y, { isCrit: result.isCrit });
+          this.applySteal(result);
+          this.showDamageText(t.sprite.x, t.sprite.y, finalDmg, result.isCrit, false, false, skill.damageType);
+          // Apply status effects from skill damage type
+          this.applySkillStatusEffect(t, skill, finalDmg, this.time.now);
+          if (!t.isAlive()) this.onMonsterKilled(t);
+          if (this.vfx && skill.damageType !== 'physical') {
+            const impactColor = skillId.includes('fire') || skillId === 'meteor' ? 0xff6600
+              : skillId.includes('ice') || skillId === 'blizzard' ? 0x4488ff
+              : skillId.includes('lightning') || skillId === 'chain_lightning' ? 0x5dade2
+              : 0xf39c12;
+            this.vfx.skillImpactBloom(t.sprite.x, t.sprite.y - 16, impactColor);
+          }
+        }
+        if (this.vfx && aoeTargets.length > 0) {
+          this.vfx.cameraShake(100, 0.004 + aoeTargets.length * 0.001);
+        }
+      };
+      if (aoeDelay > 0) {
+        this.time.delayedCall(aoeDelay, () => {
+          if (this.player.hp <= 0 || this.isTransitioning) return;
+          applyAoe();
+        });
+      } else {
+        applyAoe();
       }
     } else if (target) {
       const fromX = this.player.sprite.x;
