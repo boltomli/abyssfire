@@ -151,6 +151,8 @@ export class ZoneScene extends Phaser.Scene {
   private campPositions: { col: number; row: number }[] = [];
   private lootDrops: { sprite: Phaser.GameObjects.Container; item: ItemInstance; col: number; row: number }[] = [];
   private potionDrops: { sprite: Phaser.GameObjects.Container; type: 'hp' | 'mp'; amount: number; col: number; row: number }[] = [];
+  /** Random-event characters (wandering merchant, rescue NPC) that respond to clicks. */
+  private eventInteractables: { container: Phaser.GameObjects.Container; col: number; row: number; interact: () => void }[] = [];
   private difficulty: 'normal' | 'nightmare' | 'hell' = 'normal';
   private completedDifficulties: string[] = [];
   private cachedEquipStats: EquipStats | null = null;
@@ -339,6 +341,7 @@ export class ZoneScene extends Phaser.Scene {
     this.npcs = [];
     this.lootDrops = [];
     this.potionDrops = [];
+    this.eventInteractables = [];
     this.statusTintApplied.clear();
     // Clean up zone content wiring fields
     this.hiddenAreaSprites = [];
@@ -665,6 +668,25 @@ export class ZoneScene extends Phaser.Scene {
     const npc = this.findNPCAt(tile.col, tile.row);
     if (npc && npc.isNearPlayer(this.player.tileCol, this.player.tileRow, 3)) {
       this.interactNPC(npc);
+      return;
+    }
+
+    // Random-event characters (wandering merchant, rescue NPC)
+    const eventTarget = this.findEventInteractableAt(tile.col, tile.row);
+    if (eventTarget) {
+      if (distanceSq(this.player.tileCol, this.player.tileRow, eventTarget.col, eventTarget.row) <= 9) {
+        eventTarget.interact();
+      } else {
+        const path = this.pathfinding.findPath(
+          Math.round(this.player.tileCol), Math.round(this.player.tileRow),
+          Math.round(eventTarget.col), Math.round(eventTarget.row),
+        );
+        if (path.length > 0) {
+          this.player.setPath(path);
+          this.player.attackTarget = null;
+          EventBus.emit(GameEvents.TARGET_CHANGED, { targetId: null, targetName: null });
+        }
+      }
       return;
     }
 
@@ -2755,7 +2777,7 @@ export class ZoneScene extends Phaser.Scene {
 
     // Drop items near the event position
     for (const item of items) {
-      this.dropLootAtPosition(item, event.col, event.row);
+      this.dropLoot(item, event.col, event.row);
     }
 
     this.randomEventSystem.resolveActiveEvent();
@@ -2808,14 +2830,10 @@ export class ZoneScene extends Phaser.Scene {
     }).setOrigin(0.5, 0);
     merchantContainer.add(nameLabel);
 
-    // Emit a shop event so UIScene can show the shop panel
-    // The wandering merchant uses the correct SHOP_OPEN payload contract: {npcId, shopItems, type}
+    // The merchant shop opens on click instead of auto-opening, so the character
+    // always responds to the player (payload contract: {npcId, shopItems, type}).
     const merchantItems = (event.context.merchantItems as string[]) ?? [];
-    EventBus.emit(GameEvents.SHOP_OPEN, {
-      npcId: 'wandering_merchant',
-      shopItems: merchantItems,
-      type: 'merchant',
-    });
+    let shopOpen = false;
     EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.event.merchant.announce'), type: 'info' });
 
     // Despawn the merchant sprite when the shop closes
@@ -2833,6 +2851,7 @@ export class ZoneScene extends Phaser.Scene {
     // Only despawn when the wandering merchant's own shop panel closes
     const filteredDespawn = (data?: { npcId?: string }) => {
       if (data?.npcId === 'wandering_merchant') {
+        shopOpen = false;
         despawnMerchant();
         EventBus.off(GameEvents.SHOP_CLOSE, filteredDespawn);
       }
@@ -2842,6 +2861,21 @@ export class ZoneScene extends Phaser.Scene {
     EventBus.once(GameEvents.ZONE_EXIT, () => {
       EventBus.off(GameEvents.SHOP_CLOSE, filteredDespawn);
       if (merchantContainer.scene) merchantContainer.destroy();
+    });
+
+    this.eventInteractables.push({
+      container: merchantContainer,
+      col: spawnCol,
+      row: spawnRow,
+      interact: () => {
+        if (shopOpen) return;
+        shopOpen = true;
+        EventBus.emit(GameEvents.SHOP_OPEN, {
+          npcId: 'wandering_merchant',
+          shopItems: merchantItems,
+          type: 'merchant',
+        });
+      },
     });
 
     this.randomEventSystem.resolveActiveEvent();
@@ -2911,30 +2945,43 @@ export class ZoneScene extends Phaser.Scene {
 
     // Track rescue event: store monsters to track and check completion each frame
     // We do NOT resolve the event yet — only when all hostiles are defeated
-    const monsterIds2 = new Set(rescueMonsters.map(m => m.id));
-    event.context.rescueMonsterIds = Array.from(monsterIds2);
+    event.context.rescueMonsterIds = rescueMonsters.map(m => m.id);
     event.context.rescueNpcSpriteRef = rescueNpcSprite;
     event.context.rescueNpcCol = npcCol;
     event.context.rescueNpcRow = npcRow;
     event.context.rescueNpcName = rescueNpcName;
     event.context.reward = reward;
 
-    // Set up a periodic check for when all rescue hostiles are defeated
-    this.time.addEvent({
+    // Clicking the stranded NPC reports progress, or finishes the rescue at once
+    this.eventInteractables.push({
+      container: rescueNpcSprite,
+      col: npcCol,
+      row: npcRow,
+      interact: () => {
+        if (event.resolved) return;
+        if (rescueMonsters.some(m => m.isAlive())) {
+          EventBus.emit(GameEvents.LOG_MESSAGE, {
+            text: t('zone.event.rescue.hint', { npcName: rescueNpcName }),
+            type: 'info',
+          });
+        } else {
+          this.completeRescueEvent(event);
+        }
+      },
+    });
+
+    // Set up a periodic check for when all rescue hostiles are defeated.
+    // Killed monsters stay in this.monsters until they respawn, so membership
+    // checks lag by ~15s — inspect the spawned instances' alive state instead.
+    const checkTimer = this.time.addEvent({
       delay: 500,
       loop: true,
       callback: () => {
-        if (event.resolved) return;
-        const trackedIds = event.context.rescueMonsterIds as string[];
-        if (!trackedIds || trackedIds.length === 0) {
-          // No monsters spawned — auto-complete
-          this.completeRescueEvent(event);
+        if (event.resolved) {
+          checkTimer.remove();
           return;
         }
-        // Check if all tracked monsters are dead (no longer in this.monsters)
-        const aliveIds = new Set(this.monsters.map(m => m.id));
-        const allDefeated = trackedIds.every(id => !aliveIds.has(id));
-        if (allDefeated) {
+        if (rescueMonsters.every(m => !m.isAlive())) {
           this.completeRescueEvent(event);
         }
       },
@@ -3084,34 +3131,6 @@ export class ZoneScene extends Phaser.Scene {
       EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.event.puzzle.left'), type: 'info' });
       popup.destroy();
     });
-  }
-
-  /** Helper: drop a loot item at a specific tile position (used by treasure cache events). */
-  private dropLootAtPosition(item: ItemInstance, col: number, row: number): void {
-    const { x: wx, y: wy } = cartToIso(col, row);
-    const offsetX = (Math.random() - 0.5) * 20 * DPR;
-    const offsetY = (Math.random() - 0.5) * 10 * DPR;
-    const finalX = wx + offsetX;
-    const finalY = wy + offsetY;
-
-    const container = this.add.container(finalX, finalY - 30 * DPR);
-    container.setDepth(wy + 50);
-
-    const colors: Record<string, number> = { normal: 0xffffff, magic: 0x4488ff, rare: 0xffff00, legendary: 0xff8800, set: 0x44ff44 };
-    const color = colors[item.quality] ?? 0xffffff;
-
-    const bag = this.add.rectangle(0, 0, 12 * DPR, 12 * DPR, color);
-    container.add(bag);
-
-    // Drop animation
-    this.tweens.add({
-      targets: container,
-      y: finalY,
-      duration: 400,
-      ease: 'Bounce.easeOut',
-    });
-
-    this.lootDrops.push({ sprite: container, item, col, row });
   }
 
   private handleAutoLoot(): void {
@@ -5119,6 +5138,23 @@ export class ZoneScene extends Phaser.Scene {
     return best;
   }
 
+  private findEventInteractableAt(
+    col: number,
+    row: number,
+  ): { container: Phaser.GameObjects.Container; col: number; row: number; interact: () => void } | null {
+    let best: { container: Phaser.GameObjects.Container; col: number; row: number; interact: () => void } | null = null;
+    let bestDist = Infinity;
+    for (const target of this.eventInteractables) {
+      if (!target.container.scene) continue;
+      const dSq = (target.col - col) ** 2 + (target.row - row) ** 2;
+      if (dSq < 3.24 && dSq < bestDist) {
+        bestDist = dSq;
+        best = target;
+      }
+    }
+    return best;
+  }
+
   private findLootAt(col: number, row: number): { sprite: Phaser.GameObjects.Container; item: ItemInstance; col: number; row: number } | null {
     for (const l of this.lootDrops) {
       if (Math.abs(l.col - col) < 1.5 && Math.abs(l.row - row) < 1.5) return l;
@@ -6697,6 +6733,8 @@ export class ZoneScene extends Phaser.Scene {
     this.lootDrops = [];
     for (const potion of this.potionDrops) potion.sprite.destroy();
     this.potionDrops = [];
+    for (const ev of this.eventInteractables) if (ev.container.scene) ev.container.destroy();
+    this.eventInteractables = [];
     // Clean up floating text pool
     for (const t of this.floatingTextPool) t.destroy();
     this.floatingTextPool = [];

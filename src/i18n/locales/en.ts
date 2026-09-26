@@ -1898,6 +1898,7 @@ const en: LocaleData = {
   'zone.event.merchant.announce': 'A wandering merchant appeared! Check out their goods.',
   'zone.event.ambush.announce': 'Ambush!',
   'zone.event.rescue.fallbackName': 'Stranded Traveler',
+  'zone.event.rescue.hint': 'Defeat the nearby monsters before you can rescue {npcName}.',
   'zone.event.rescue.complete': 'You rescued {npcName}! Gained {gold} gold and {exp} EXP',
   'zone.event.puzzle.prompt': 'Puzzle: {prompt}',
   'zone.event.puzzle.label': 'Puzzle Device',

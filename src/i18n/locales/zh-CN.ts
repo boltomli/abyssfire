@@ -1843,6 +1843,7 @@ const zhCN: LocaleData = {
   'zone.event.merchant.announce': '流浪商人出现了! 看看他的商品吧。',
   'zone.event.ambush.announce': '伏兵出现!',
   'zone.event.rescue.fallbackName': '被困的旅人',
+  'zone.event.rescue.hint': '先击败周围的怪物，才能解救{npcName}。',
   'zone.event.rescue.complete': '你救出了{npcName}! 获得 {gold} 金币和 {exp} 经验',
   'zone.event.puzzle.prompt': '谜题: {prompt}',
   'zone.event.puzzle.label': '谜题装置',
