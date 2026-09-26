@@ -1516,6 +1516,8 @@ const zhCN: LocaleData = {
   'ui.stat.defense': '防御',
   'ui.stat.defensePercent': '防御',
   'ui.stat.str': '力量',
+  'ui.stat.weaponDamageMin': '武器最小伤害',
+  'ui.stat.weaponDamageMax': '武器最大伤害',
   'ui.stat.dex': '敏捷',
   'ui.stat.int': '智力',
   'ui.stat.vit': '体力',

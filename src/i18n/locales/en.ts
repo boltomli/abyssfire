@@ -1571,6 +1571,8 @@ const en: LocaleData = {
   'ui.stat.defense': 'Defense',
   'ui.stat.defensePercent': 'Defense',
   'ui.stat.str': 'Strength',
+  'ui.stat.weaponDamageMin': 'Weapon Min Damage',
+  'ui.stat.weaponDamageMax': 'Weapon Max Damage',
   'ui.stat.dex': 'Dexterity',
   'ui.stat.int': 'Intelligence',
   'ui.stat.vit': 'Vitality',
