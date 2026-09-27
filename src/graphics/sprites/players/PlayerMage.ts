@@ -644,6 +644,26 @@ function magePose(act: PlayerAction, t: number): HumanPose {
   }
 }
 
+/**
+ * Front view: the cast raises the staff and then thrusts it toward the
+ * target, i.e. toward the camera, so it lands across the hood. Swing the
+ * staff hand out to the near side (screen left) over the cast so the
+ * crystal stays clear of the face; eased in and out with the cast.
+ */
+function viewPose(p: HumanPose, act: PlayerAction, t: number, view: HumanView): HumanPose {
+  if (view !== 'se' || act !== 'cast') return p;
+  const w = Math.sin(Math.min(1, t / 0.9) * Math.PI);
+  // Extra swing round the release beat (t ≈ 0.5), where the staff thrusts.
+  const r = Math.max(0, 1 - Math.abs(t - 0.55) / 0.3);
+  const release = r * r * (3 - 2 * r);
+  return {
+    ...p,
+    zN: (p.zN ?? 0) + 6 * w + 3 * release,
+    handN: vec(p.handN.x - 3 * w - 2 * release, p.handN.y + 1.5 * w - 2 * release),
+    wpn: p.wpn + (0.3 - p.wpn) * 0.6 * release,
+  };
+}
+
 function crystalOf(p: HumanPose, t: number, view: HumanView): V {
   const sk = solveViewSkeleton(p, MAGE_PROP, MAGE_VIEW_SKIN.build, view);
   return itemPoint(sk, p.wpn, STAFF_UP + 3.4 - Math.sin(t * Math.PI * 4) * 0.6);
@@ -730,7 +750,7 @@ export const PlayerMageDrawer: EntityDrawer = {
     const count = PLAYER_ACTION_FRAME_COUNTS[act];
     const loop = act === 'idle' || act === 'walk';
     const t = frameTime(frame % count, count, loop);
-    const p = magePose(act, t);
+    const p = viewPose(magePose(act, t), act, t, v);
     const palette = getCurrentZonePalette();
     const lift = Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y));
     let shadowX = p.root.x + 1;

@@ -583,3 +583,12 @@ export function ringAt(rings: readonly Ring[], h: number): Ring {
   }
   return { ...rings[rings.length - 1], h };
 }
+
+/**
+ * Whether a section currently shows its front (φ = 0) rather than its back
+ * to the camera. Unlike `rig.front` this follows the pose's spin, so parts
+ * picked with it swap between front and back art mid-roll or mid-fall.
+ */
+export function showsFront(section: Section): boolean {
+  return section.vis(0) >= section.vis(Math.PI);
+}

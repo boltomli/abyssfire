@@ -40,6 +40,7 @@ import {
   inItem,
   midpointPath,
   ringAt,
+  showsFront,
   solveViewSkeleton,
   strokeLine,
   v3,
@@ -191,8 +192,23 @@ function viewArm(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, near: boolean)
 
 function viewPauldron(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, near: boolean): void {
   const sh = near ? sk.shN : sk.shF;
-  // Lift the dome onto the top of the shoulder.
-  pauldron(ctx, vec(sh.x, sh.y - 1), sk.torsoAng + (near ? -0.25 : 0.25) * (sk.rig.front ? 1 : -1), !near);
+  const front = showsFront(sk.torso);
+  const tilt = sk.torsoAng + (near ? -0.25 : 0.25) * (front ? 1 : -1);
+  if (front) {
+    // Lift the dome onto the top of the shoulder.
+    pauldron(ctx, vec(sh.x, sh.y - 1), tilt, !near);
+    return;
+  }
+  // Back view: a smaller dome pushed out over the arm, so it caps the
+  // shoulder without hiding the cape's shoulder line.
+  const out = sk.rig.side;
+  const sgn = near ? 1 : -1;
+  const c = vec(sh.x + out.x * sgn * 2.4, sh.y + out.y * sgn * 2.4 - 0.2);
+  ctx.save();
+  ctx.translate(c.x, c.y);
+  ctx.scale(0.78, 0.78);
+  pauldron(ctx, vec(0, 0), tilt, !near);
+  ctx.restore();
 }
 
 function viewCuirass(ctx: CanvasRenderingContext2D, sk: ViewSkeleton): void {
@@ -370,7 +386,8 @@ function viewPlume(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose
 
 function viewHelm(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
   const H = sk.skull;
-  const plumeBehind = sk.rig.front;
+  // Follows the spin, so the plume swaps sides of the helm mid-roll.
+  const plumeBehind = showsFront(H);
   if (plumeBehind) viewPlume(ctx, sk, p, t);
   const shell = H.loft(HELM_RINGS);
   cel(ctx, () => midpointPath(ctx, shell), STEEL, { band: 1.9, hi: 0.9 });
@@ -516,13 +533,14 @@ const WARRIOR_VIEW_SKIN: HumanViewSkin = {
     const shieldZ = Math.max(armZ(false) + 0.05, rig.d(sk.j.handF) - d0 + (shield.faceUp ? 1.5 : -0.5));
     // Only the tabard panel on the camera side is drawn: the other one would
     // just peek past the legs as an edge-on sliver.
+    const front = showsFront(T);
     const parts: ViewPart[] = [
       { z: capeZ, draw: () => viewCape(ctx, sk, p, t) },
-      { z: T.depth(-4, Math.PI, 5, 5) - d0, draw: () => { if (!rig.front) viewTabard(ctx, sk, p, t, true); } },
+      { z: T.depth(-4, Math.PI, 5, 5) - d0, draw: () => { if (!front) viewTabard(ctx, sk, p, t, true); } },
       { z: legZ(true), draw: () => viewLeg(ctx, sk, true) },
       { z: legZ(false), draw: () => viewLeg(ctx, sk, false) },
       { z: 0, draw: () => viewCuirass(ctx, sk) },
-      { z: T.depth(-4, 0, 5, 5) - d0, draw: () => { if (rig.front) viewTabard(ctx, sk, p, t, false); } },
+      { z: T.depth(-4, 0, 5, 5) - d0, draw: () => { if (front) viewTabard(ctx, sk, p, t, false); } },
       { z: armZ(false), draw: () => viewArm(ctx, sk, false) },
       { z: Math.max(armZ(false), sk.d.shF - d0) + 0.01, draw: () => viewPauldron(ctx, sk, false) },
       { z: shieldZ, draw: () => viewShield(ctx, sk, p) },
@@ -711,6 +729,25 @@ function warriorPose(act: PlayerAction, t: number): HumanPose {
   }
 }
 
+/**
+ * Back view: the guard pose's sword points along the forward axis, which in
+ * ne projects to a flat bar jutting out to the right. Near rest, let it hang
+ * down and a little back beside the leg instead. Weighted by how close the
+ * pose is to the guard angle, so swings keep their keyframes and there's no
+ * pop going into or out of an attack.
+ */
+function viewPose(p: HumanPose, view: HumanView): HumanPose {
+  if (view !== 'ne') return p;
+  const w = Math.max(0, 1 - Math.abs(p.wpn - READY.wpn) / 0.7) * (1 - Math.min(1, p.fx * 2));
+  if (w <= 0) return p;
+  return {
+    ...p,
+    wpn: p.wpn + (3.3 - READY.wpn) * w,
+    handN: vec(p.handN.x - 2.5 * w, p.handN.y - 1.5 * w),
+    zN: (p.zN ?? 0) + 1.2 * w,
+  };
+}
+
 function swordTip(p: HumanPose, view: HumanView): { tip: V; base: V } {
   const sk = solveViewSkeleton(p, WARRIOR_PROP, WARRIOR_VIEW_SKIN.build, view);
   const { ang, k } = sk.rig.dir(p.wpn);
@@ -727,7 +764,7 @@ function drawFx(ctx: CanvasRenderingContext2D, act: PlayerAction, t: number, p: 
     const tips: V[] = [];
     const bases: V[] = [];
     for (let i = 6; i >= 0; i--) {
-      const sp = samplePoseTrack(track, Math.max(0, t - i * 0.022));
+      const sp = viewPose(samplePoseTrack(track, Math.max(0, t - i * 0.022)), view);
       const { tip, base } = swordTip(sp, view);
       tips.push(tip);
       bases.push(base);
@@ -769,7 +806,7 @@ export const PlayerWarriorDrawer: EntityDrawer = {
     const count = PLAYER_ACTION_FRAME_COUNTS[act];
     const loop = act === 'idle' || act === 'walk';
     const t = frameTime(frame % count, count, loop);
-    const p = warriorPose(act, t);
+    const p = viewPose(warriorPose(act, t), v);
     const palette = getCurrentZonePalette();
     const lift = Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y));
     let shadowX = p.root.x + 1;
