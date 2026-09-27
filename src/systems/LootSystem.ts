@@ -234,6 +234,21 @@ export class LootSystem {
     return item;
   }
 
+  /** Crafting hook: append min..max random level-appropriate affixes to an existing item. */
+  rollAffixes(item: ItemInstance, level: number, min: number, max: number): void {
+    this.addRandomAffixes(item, level, min, max);
+  }
+
+  /** Crafting hook: rebuild an item's name and stats after its affixes changed. */
+  refreshItem(item: ItemInstance): void {
+    if (item.quality === 'normal') {
+      const base = getItemBase(item.baseId);
+      if (base) item.name = base.name;
+    }
+    this.buildItemName(item);
+    this.computeStats(item);
+  }
+
   private addRandomAffixes(item: ItemInstance, level: number, min: number, max: number): void {
     const count = randomInt(min, max);
     const usedIds = new Set<string>();

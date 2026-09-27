@@ -5,8 +5,9 @@ import { DUNGEON_EXCLUSIVE_SETS } from '../data/dungeonData';
 import type { ItemInstance, EquipSlot, WeaponBase, ArmorBase, GemInstance } from '../data/types';
 import { emptyEquipStats, type EquipStats } from './CombatSystem';
 import { t } from '../i18n';
+import { itemSocketCapacity } from './CraftingSystem';
 
-const MAX_INVENTORY = 100;
+export const MAX_INVENTORY = 100;
 /** Base stash slots; the homestead warehouse adds more (`stashSlots`). */
 export const BASE_STASH_SLOTS = 80;
 
@@ -281,10 +282,8 @@ export class InventorySystem {
     const base = getItemBase(equipItem.baseId);
     if (!base) return false;
 
-    // Determine max sockets from base
-    const maxSockets = ('sockets' in base && typeof (base as WeaponBase | ArmorBase).sockets === 'number')
-      ? (base as WeaponBase | ArmorBase).sockets
-      : 0;
+    // Max sockets: the base's plus any the blacksmith punched
+    const maxSockets = itemSocketCapacity(equipItem);
 
     if (equipItem.sockets.length >= maxSockets) {
       EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('sys.inventory.gem.noSlots'), type: 'system' });
@@ -387,12 +386,8 @@ export class InventorySystem {
   getMaxSockets(equipSlot: EquipSlot): number {
     const equipItem = this.equipment[equipSlot];
     if (!equipItem) return 0;
-    const base = getItemBase(equipItem.baseId);
-    if (!base) return 0;
-    if ('sockets' in base && typeof (base as WeaponBase | ArmorBase).sockets === 'number') {
-      return (base as WeaponBase | ArmorBase).sockets;
-    }
-    return 0;
+    if (!getItemBase(equipItem.baseId)) return 0;
+    return itemSocketCapacity(equipItem);
   }
 
   /**

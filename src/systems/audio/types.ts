@@ -4,7 +4,8 @@ export type SFXType = 'hit' | 'hit_heavy' | 'crit' | 'miss' | 'block' | 'player_
   | 'skill_melee' | 'skill_fire' | 'skill_ice' | 'skill_lightning' | 'skill_heal' | 'skill_buff'
   | 'loot_common' | 'loot_magic' | 'loot_rare' | 'loot_legendary' | 'equip' | 'potion'
   | 'click' | 'panel_open' | 'panel_close' | 'error'
-  | 'zone_transition' | 'quest_complete' | 'quest_progress' | 'quest_objective' | 'levelup' | 'npc_interact';
+  | 'zone_transition' | 'quest_complete' | 'quest_progress' | 'quest_objective' | 'levelup' | 'npc_interact'
+  | 'anvil';
 
 export type MusicState = 'explore' | 'combat' | 'victory';
 

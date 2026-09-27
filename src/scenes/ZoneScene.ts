@@ -69,6 +69,8 @@ import { QuestWorld, questGiverOf } from '../systems/QuestWorld';
 import { StoryDirector } from '../systems/StoryDirector';
 import { generateRewardChoices, isCollectObjective, questDropChance, FALLBACK_COLLECT_CHANCE } from '../systems/QuestRewards';
 import { huntsToSpawn, makeHuntDefinition } from '../systems/QuestHunts';
+import { computeDeathPenalty } from '../systems/SoulEcho';
+import type { SoulEchoData } from '../data/types';
 
 const TILE_KEYS = ['tile_grass', 'tile_dirt', 'tile_stone', 'tile_water', 'tile_wall', 'tile_camp', 'tile_camp_wall'];
 const CAMPFIRE_RECOVERY_RADIUS = 5;
@@ -212,6 +214,8 @@ export class ZoneScene extends Phaser.Scene {
   private miniBossMonster: Monster | null = null;
   /** Named quest monsters alive in this zone, by hunt id. */
   private questHuntMonsters = new Map<string, Monster>();
+  /** The ghost left at the hero's last death, if it lies in this zone. */
+  private soulEchoVisual: Phaser.GameObjects.Container | null = null;
   /** Quest-spawned monsters (hunts and their packs) never respawn. */
   private questSpawned = new WeakSet<Monster>();
   /** Set of mini-boss IDs whose pre-fight dialogue has been seen (persisted in save). */
@@ -484,6 +488,8 @@ export class ZoneScene extends Phaser.Scene {
     this.spawnDefendTarget();
     this.questHuntMonsters.clear();
     this.spawnQuestHunts(false);
+    this.soulEchoVisual = null;
+    this.spawnSoulEchoVisual();
     this.buildCampDecorations();
     this.rebuildWorldCaches();
     for (const decor of this.campDecorPositions) {
@@ -802,6 +808,7 @@ export class ZoneScene extends Phaser.Scene {
     // Clear status effects on player death
     this.statusEffects.clearEntity('player');
     this.isPortaling = false;
+    this.applyDeathPenalty();
 
     if (this.vfx) {
       this.vfx.cameraFlash(80, 0.6, 0xffffff);
@@ -855,6 +862,80 @@ export class ZoneScene extends Phaser.Scene {
         this.cameras.main.fadeIn(300);
       }
     });
+  }
+
+  // ── Soul echo (death penalty) ──────────────────────────────
+
+  /** Take the death's toll and leave it where the hero fell. */
+  private applyDeathPenalty(): void {
+    const echoes = this.session?.soulEcho;
+    if (!echoes) return;
+    const p = this.player;
+    const toll = computeDeathPenalty({
+      level: p.level, gold: p.gold, exp: p.exp, expToNext: p.expToNextLevel(), difficulty: this.difficulty,
+    });
+    p.gold -= toll.gold;
+    p.exp -= toll.exp;
+    if (toll.exp > 0) EventBus.emit(GameEvents.PLAYER_EXP_CHANGED, { exp: p.exp, needed: p.expToNextLevel() });
+    // Dungeons are rebuilt on every run, so there is nowhere to come back to.
+    if (this.isInDungeon || this.isInSubDungeon) {
+      if (toll.gold > 0) EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.soulEcho.lostInDungeon', { gold: toll.gold }), type: 'system' });
+      return;
+    }
+    const lost = echoes.leave({
+      mapId: this.currentMapId, col: Math.round(p.tileCol), row: Math.round(p.tileRow), gold: toll.gold, exp: toll.exp,
+    });
+    if (lost) {
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.soulEcho.faded', { gold: lost.gold }), type: 'system' });
+    }
+    this.soulEchoVisual?.destroy();
+    this.soulEchoVisual = null;
+    if (echoes.echo) {
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.soulEcho.left', { gold: toll.gold }), type: 'system' });
+      this.spawnSoulEchoVisual();
+    }
+  }
+
+  /** The hero's pale double, kneeling where they fell. */
+  private spawnSoulEchoVisual(): void {
+    const e = this.session?.soulEcho.echo;
+    if (!e || e.mapId !== this.currentMapId || this.isInDungeon || this.isInSubDungeon || this.soulEchoVisual) return;
+    const w = cartToIso(e.col, e.row);
+    const ring = this.add.image(0, 2, 'fx_glow').setTint(0x7fd8ff).setBlendMode(Phaser.BlendModes.ADD).setScale(0.9, 0.4).setAlpha(0.6);
+    const key = `player_${this.player.classData.id}`;
+    const ghost = this.textures.exists(key)
+      ? this.add.image(0, -24, key, 0).setScale(1 / TEXTURE_SCALE).setTint(0x9fe6ff).setAlpha(0.55)
+      : this.add.ellipse(0, -24, 22, 40, 0x9fe6ff, 0.5);
+    const label = this.add.text(0, -70, t('zone.soulEcho.label', { gold: e.gold }), {
+      fontSize: fs(12), color: '#bfefff', fontFamily: '"Noto Sans SC", sans-serif',
+      stroke: '#08141c', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5);
+    const c = this.add.container(w.x, w.y, [ring, ghost, label]).setDepth(w.y + 60);
+    this.tweens.add({ targets: ghost, y: -30, alpha: 0.35, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    this.tweens.add({ targets: ring, alpha: 0.25, scaleX: 1.15, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    this.soulEchoVisual = c;
+  }
+
+  private checkSoulEchoClaim(): void {
+    // The fallen hero lies on the echo until respawning; only the living reclaim it.
+    if (this.player.hp <= 0) return;
+    const claimed = this.session?.soulEcho.tryClaim(this.currentMapId, this.player.tileCol, this.player.tileRow);
+    if (claimed) this.claimSoulEcho(claimed);
+  }
+
+  private claimSoulEcho(e: SoulEchoData): void {
+    const c = this.soulEchoVisual;
+    this.soulEchoVisual = null;
+    this.player.gold += e.gold;
+    if (e.exp > 0) this.player.addExp(e.exp);
+    EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.soulEcho.claimed', { gold: e.gold }), type: 'loot' });
+    audioManager.playSFX('resonance');
+    if (c) {
+      this.vfx?.deathBurst(c.x, c.y - 24, 0x7fd8ff);
+      this.tweens.killTweensOf(c.list);
+      this.tweens.add({ targets: c, alpha: 0, y: c.y - 30, duration: 500, onComplete: () => c.destroy() });
+    }
+    this.autoSave();
   }
 
   private handlePlayerLevelUp(data: { level: number }): void {
@@ -1096,6 +1177,7 @@ export class ZoneScene extends Phaser.Scene {
     this.collectOcclusionTargets();
     this.updateDecorOcclusion(delta);
     this.questWorld?.update(delta);
+    if (this.soulEchoVisual) this.checkSoulEchoClaim();
     this.storyDirector?.update(delta);
     if (this.terrain) {
       if (this.terrain.hasPending()) {
@@ -3821,6 +3903,7 @@ export class ZoneScene extends Phaser.Scene {
         loreCollected: [...this.loreCollected],
         discoveredHiddenAreas: [...this.discoveredHiddenAreas],
         storySeen: this.session?.story.toSave(),
+        soulEcho: this.session?.soulEcho.toSave() ?? null,
       });
     } catch (_e) { /* silent fail */ }
   }
@@ -3876,6 +3959,7 @@ export class ZoneScene extends Phaser.Scene {
     if (save.quests) this.questSystem.loadProgress(save.quests);
     // Saves from before the story existed: don't replay the prologue for veterans.
     this.session?.story.load(save.storySeen ?? ['prologue']);
+    this.session?.soulEcho.load(save.soulEcho);
 
     // 4. Homestead
     if (save.homestead) {
