@@ -53,6 +53,7 @@ import { MerchantDesertDrawer } from './sprites/npcs/MerchantDesert';
 import { StashDrawer } from './sprites/npcs/Stash';
 import { QuestElderDrawer } from './sprites/npcs/QuestElder';
 import { QuestScoutDrawer } from './sprites/npcs/QuestScout';
+import { FIELD_NPC_DRAWERS } from './sprites/npcs/FieldNPCs';
 import { ForestHermitDrawer } from './sprites/npcs/ForestHermit';
 import { QuestDwarfDrawer } from './sprites/npcs/QuestDwarf';
 import { QuestNomadDrawer } from './sprites/npcs/QuestNomad';
@@ -158,6 +159,7 @@ const NPC_DRAWERS: EntityDrawer[] = [
   QuestWardenDrawer,
   WanderingMerchantDrawer,
   RescueNPCDrawer,
+  ...FIELD_NPC_DRAWERS,
 ];
 
 const NPC_WORK_RATES = new Map<string, number>([
@@ -174,6 +176,7 @@ const NPC_WORK_RATES = new Map<string, number>([
   [QuestWardenDrawer.key, 5],
   [WanderingMerchantDrawer.key, 5],
   [RescueNPCDrawer.key, 3],
+  ...FIELD_NPC_DRAWERS.map(d => [d.key, 4] as [string, number]),
 ]);
 
 const DECOR_DRAWERS: EntityDrawer[] = [
