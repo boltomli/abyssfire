@@ -139,7 +139,7 @@ Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4)
 - Quest system with tracking; NPC shops, dialogue trees, quests
 - Fog of war, minimap, homestead (buildings, pets), achievements
 - Save/load via IndexedDB; audio (BGM + SFX); zh-CN / en localisation (`t()`)
-- Keyboard controls (WASD, 1-6 skills, I/K/M/H/C panels) and mobile touch controls
+- Keyboard controls (WASD, 1-6 skills, I/K/M/H/C panels), click or hold-to-move with the mouse (`ZoneScene.updateHoldMove`: the hero keeps walking toward the held pointer, re-pathing as it moves) and mobile touch controls
 - Art: all characters, monsters and NPCs are procedural cel-shaded rigs (`src/graphics/sprites/rig/`);
   zone-themed terrain (`src/graphics/terrain/`), props, pooled skill VFX (`src/graphics/vfx/`),
   item/skill icons (`src/graphics/icons/`) and the UI kit (`src/ui/UiKit.ts`) follow

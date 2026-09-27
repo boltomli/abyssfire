@@ -103,6 +103,8 @@ function skillImpactColor(skillId: string, damageType: string): number {
 const ZONE_SCREEN_UI_DEPTH = 5000;
 /** An escort left this far behind (tiles) catches up next to the player. */
 const ESCORT_CATCH_UP_TILES = 14;
+/** Hold-to-move re-plans its path at most this often while the pointer stays on one tile. */
+const HOLD_MOVE_REPATH_MS = 120;
 
 function fs(basePx: number): string {
   return `${Math.round(basePx * DPR)}px`;
@@ -219,6 +221,8 @@ export class ZoneScene extends Phaser.Scene {
   private questHuntMonsters = new Map<string, Monster>();
   /** The ghost left at the hero's last death, if it lies in this zone. */
   private soulEchoVisual: Phaser.GameObjects.Container | null = null;
+  /** Mouse / finger held on the ground: keep walking toward it (Diablo-style hold-to-move). */
+  private holdMove: { pointerId: number; col: number; row: number; repathAt: number } | null = null;
   /** Labyrinth floor: the exit opens once its seal keeper falls. */
   private dungeonSealOpen = false;
   /** Labyrinth: a boon choice is on screen (the world waits). */
@@ -332,6 +336,7 @@ export class ZoneScene extends Phaser.Scene {
     this.dungeonFloorConfig = data.dungeonFloor ?? null;
     this.dungeonSealOpen = false;
     this.dungeonChoosing = false;
+    this.holdMove = null;
     if (data.dungeonRun && data.dungeonFloor) {
       // For random dungeon floors, generate the floor map procedurally
       this.mapData = DungeonSystem.generateFloorMap(data.dungeonFloor);
@@ -811,7 +816,46 @@ export class ZoneScene extends Phaser.Scene {
         this.player.attackTarget = null;
         EventBus.emit(GameEvents.TARGET_CHANGED, { targetId: null, targetName: null });
       }
+      // Keep steering toward the pointer for as long as it stays pressed.
+      this.holdMove = { pointerId: pointer.id, col: tile.col, row: tile.row, repathAt: this.time.now + HOLD_MOVE_REPATH_MS };
     }
+  }
+
+  /**
+   * Hold-to-move: while the press that started on open ground is held, the
+   * hero keeps walking toward wherever it points now. The pointer's world
+   * position is recomputed every frame because the camera follows the hero
+   * (a still mouse over a moving view points at new ground).
+   */
+  private updateHoldMove(): void {
+    const hold = this.holdMove;
+    if (!hold) return;
+    const pointer = this.input.manager.pointers.find(p => p.id === hold.pointerId);
+    if (!pointer || !pointer.isDown || this.player.hp <= 0) {
+      this.holdMove = null; // released: the hero finishes the last path
+      return;
+    }
+    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const target = worldToTile(world.x, world.y);
+    const col = Math.max(0, Math.min(this.mapData.cols - 1, target.col));
+    const row = Math.max(0, Math.min(this.mapData.rows - 1, target.row));
+    // Close enough: stand still instead of jittering around the cursor.
+    if (Math.hypot(col - this.player.tileCol, row - this.player.tileRow) < 0.6) {
+      this.player.path = [];
+      return;
+    }
+    const moved = col !== hold.col || row !== hold.row;
+    if (!moved && this.time.now < hold.repathAt && this.player.path.length > 0) return;
+    hold.col = col;
+    hold.row = row;
+    hold.repathAt = this.time.now + HOLD_MOVE_REPATH_MS;
+    // Pointing into a wall or water: head for the nearest ground beside it.
+    const goal = this.mapData.collisions[row]?.[col] ? { col, row } : this.findWalkableNear(col, row, 3);
+    if (!goal) return;
+    const path = this.pathfinding.findPath(
+      Math.round(this.player.tileCol), Math.round(this.player.tileRow), goal.col, goal.row,
+    );
+    if (path.length > 0) this.player.setPath(path);
   }
 
   private handlePlayerDied(): void {
@@ -1266,10 +1310,14 @@ export class ZoneScene extends Phaser.Scene {
 
   update(time: number, delta: number): void {
     // A labyrinth panel (tier picker, boon cards) holds the world and its keys.
-    if (this.storyDirector?.cinematic || this.dungeonChoosing || this.abyssModalOpen()) return;
+    if (this.storyDirector?.cinematic || this.dungeonChoosing || this.abyssModalOpen()) {
+      this.holdMove = null;
+      return;
+    }
     if (this.isInDungeon) this.updateDungeonCurse(delta);
     const recovery = this.getPlayerRecoveryModifiers();
     this.handleKeyboardMovement(delta);
+    this.updateHoldMove();
     this.handleSkillInput(time);
     this.handleGamepadInput(time);
     this.consumeBufferedSkill(time);
@@ -2055,6 +2103,7 @@ export class ZoneScene extends Phaser.Scene {
     }
 
     if (dx !== 0 || dy !== 0) {
+      this.holdMove = null;
       this.player.path = [];
       const speed = this.player.moveSpeed * (delta / 1000) * 0.015;
       const len = Math.sqrt(dx * dx + dy * dy);
@@ -2735,8 +2784,8 @@ export class ZoneScene extends Phaser.Scene {
       }
     }
 
-    // Player auto-attack
-    const target = this.player.attackTarget
+    // Player auto-attack (paused while the player holds to move: they are walking away on purpose)
+    const target = this.holdMove ? undefined : this.player.attackTarget
       ? this.monsters.find(m => m.id === this.player.attackTarget && m.isAlive())
       : this.findNearestAggroMonster();
 
