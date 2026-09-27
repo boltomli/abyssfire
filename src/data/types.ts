@@ -604,4 +604,6 @@ export interface SaveData {
   storySeen?: string[];
   /** Gold/exp dropped at the hero's last death, waiting to be reclaimed. */
   soulEcho?: SoulEchoData | null;
+  /** Abyss Labyrinth tier ladder: highest tier unlocked / cleared, best clear time. */
+  abyss?: { unlockedTier: number; bestTier: number; bestTimeMs?: number };
 }

@@ -25,6 +25,7 @@ import {
   DUNGEON_EXCLUSIVE_LEGENDARIES,
 } from '../data/dungeonData';
 import { getMonsterDef } from '../data/monsters/index';
+import { FLOOR_THEMES } from '../data/abyssRun';
 
 describe('DungeonSystem — Run Creation', () => {
   it('creates a run with 5-10 floors', () => {
@@ -150,9 +151,10 @@ describe('DungeonSystem — Floor Configuration', () => {
       const config = DungeonSystem.getFloorConfig(run, f);
       expect(config.monsterIds.length).toBeGreaterThanOrEqual(2);
       expect(config.monsterIds.length).toBeLessThanOrEqual(3);
-      // All monster IDs should be in the pool or be boss/mid-boss
+      // Monsters come from the floor's theme (the rift floors use the demon pool)
+      const theme = FLOOR_THEMES.find(th => th.id === config.themeId)!;
       for (const mId of config.monsterIds) {
-        expect(DungeonMonsterPool).toContain(mId);
+        expect([...DungeonMonsterPool, ...theme.monsters]).toContain(mId);
       }
     }
   });
@@ -288,12 +290,15 @@ describe('DungeonSystem — Floor Map Generation', () => {
     const config = DungeonSystem.getFloorConfig(run, 1);
     const map = DungeonSystem.generateFloorMap(config);
 
-    expect(map.tiles.length).toBe(60);
-    expect(map.tiles[0].length).toBe(60);
-    expect(map.collisions.length).toBe(60);
-    expect(map.collisions[0].length).toBe(60);
-    expect(map.cols).toBe(60);
-    expect(map.rows).toBe(60);
+    // Floors vary in size (54-68 a side) but the grids always match the declared size.
+    expect(map.cols).toBeGreaterThanOrEqual(54);
+    expect(map.cols).toBeLessThanOrEqual(68);
+    expect(map.rows).toBeGreaterThanOrEqual(54);
+    expect(map.rows).toBeLessThanOrEqual(68);
+    expect(map.tiles.length).toBe(map.rows);
+    expect(map.tiles[0].length).toBe(map.cols);
+    expect(map.collisions.length).toBe(map.rows);
+    expect(map.collisions[0].length).toBe(map.cols);
   });
 
   it('floor layouts differ between runs (different seeds)', () => {
@@ -307,7 +312,7 @@ describe('DungeonSystem — Floor Map Generation', () => {
     let diffCount = 0;
     for (let r = 0; r < 60; r++) {
       for (let c = 0; c < 60; c++) {
-        if (map1.tiles[r][c] !== map2.tiles[r][c]) diffCount++;
+        if (map1.tiles[r]?.[c] !== map2.tiles[r]?.[c]) diffCount++;
       }
     }
     expect(diffCount).toBeGreaterThan(0);
@@ -323,7 +328,7 @@ describe('DungeonSystem — Floor Map Generation', () => {
     let diffCount = 0;
     for (let r = 0; r < 60; r++) {
       for (let c = 0; c < 60; c++) {
-        if (map1.tiles[r][c] !== map2.tiles[r][c]) diffCount++;
+        if (map1.tiles[r]?.[c] !== map2.tiles[r]?.[c]) diffCount++;
       }
     }
     expect(diffCount).toBeGreaterThan(0);
@@ -403,11 +408,14 @@ describe('DungeonSystem — Floor Map Generation', () => {
     expect(map.name).toContain('第3层');
   });
 
-  it('theme is abyss', () => {
+  it('paints each floor in its theme; the boss floor is always the rift', () => {
     const run = DungeonSystem.createRun('normal', 42);
-    const config = DungeonSystem.getFloorConfig(run, 1);
-    const map = DungeonSystem.generateFloorMap(config);
-    expect(map.theme).toBe('abyss');
+    for (let f = 1; f <= run.totalFloors; f++) {
+      const config = DungeonSystem.getFloorConfig(run, f);
+      const map = DungeonSystem.generateFloorMap(config);
+      expect(map.theme).toBe(FLOOR_THEMES.find(th => th.id === config.themeId)!.mapTheme);
+      if (config.isBossFloor) expect(map.theme).toBe('abyss');
+    }
   });
 });
 

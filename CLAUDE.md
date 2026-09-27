@@ -105,6 +105,12 @@ Each zone (`src/data/maps/`) defines: tile grid, spawn points, NPC positions, ex
 - `StoryDirector` (created by `ZoneScene`) queues beats — prologue on a new game, a chapter card on each zone's first visit, cutscenes on main-quest turn-ins / the final boss kill, boss intros when a named boss comes within 9 tiles, then epilogue + credits — and freezes the world while one plays (`cinematic`). `StoryScene` renders them (letterbox, portraits, whispers, title cards). Seen beats persist in the save (`storySeen`).
 - `StoryScript.test.ts` checks every key exists in zh-CN and en, every trigger/boss intro resolves, and cutscene speakers stand in the zone where the cutscene plays.
 
+### Abyss Labyrinth (Zone 6 endgame)
+- Portal in Abyss Rift → tier picker (`DUNGEON_TIER_PICK` / `DUNGEON_TIER_CHOSEN`). Tiers are an endless ladder: clearing tier N unlocks N+1; the record (`GameSession.abyss`, saved as `SaveData.abyss`) keeps the best tier and fastest clear.
+- `DungeonSystem` (pure) builds a run: 5–8 floors, each a `FLOOR_THEMES` memory (crypt/forge/tomb, boss floor always the rift) painted with that zone's terrain and monsters raised to the tier's level (`raiseToLevel`), random size and orientation (`floorLayout`), a curse from floor 2 (`CURSES`: stat multipliers, elites, gloom, regeneration, volatile corpses; each adds loot quality/MF).
+- Each floor's exit is sealed until its keeper dies (`sealKeeper`: a themed gatekeeper, the mid-boss, or 卡萨诺尔 on the boss floor). Stepping on the open exit offers 3 boons (`BOONS` in `src/data/abyssRun.ts`, `rollBoonOffer`); boons are `Partial<EquipStats>` merged in `ZoneScene.getEquipStats` for the run. Labyrinth monsters never respawn.
+- UI (`src/ui/AbyssRunUI.ts`) only talks through the EventBus contract at the end of `EventBus.ts` (tier picker, boon cards, run HUD, run summary). The summary is emitted after returning to the rift.
+
 ### Loot System (D2-style)
 Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4) -> Legendary (orange, fixed) -> Set (green). Affixes have tiers 1-5 scaling with zone difficulty.
 
@@ -127,6 +133,7 @@ Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4)
 - Elite monster affixes (`EliteAffixSystem`), difficulty modes (`DifficultySystem`)
 - Death penalty: a soul echo (`SoulEcho`) holds 10–20% of carried gold (and some exp on Nightmare/Hell) where the hero fell; walk back to reclaim, die again and it fades. Free below level 5.
 - Blacksmith forge (`CraftingSystem`): salvage, reforge, upgrade quality, punch sockets
+- Abyss Labyrinth endgame (Zone 6): tier ladder, themed floors, curses, sealed exits, run boons, 卡萨诺尔 boss intro (see Abyss Labyrinth)
 - D2-style loot with affixes, identify scrolls, gem sockets, buyback
 - Equipment (10 slots), inventory, stash panel (stash keeper NPC; homestead warehouse adds slots)
 - Quest system with tracking; NPC shops, dialogue trees, quests
@@ -139,7 +146,6 @@ Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4)
   `docs/art-direction.md`. External PNGs in `public/assets/` still override any texture key.
 
 ### Needs Work
-- **Random dungeons**: Zone 6 (endgame roguelike) not started
 - **Performance**: first entry to a zone draws its monster/NPC sheets (~1 s on a software
   renderer). Sheets are drawn at `TEXTURE_SCALE` 2 (camera zoom is 1.8, so that is ≥ 1 texel per
   screen pixel) and survive `SpriteGenerator.sheetKeepZones` zone changes (2 on desktop, 1 on

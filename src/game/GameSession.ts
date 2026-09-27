@@ -11,6 +11,7 @@ import { SaveSystem } from '../systems/SaveSystem';
 import { StatusEffectSystem } from '../systems/StatusEffectSystem';
 import { StoryProgress } from '../systems/StoryProgress';
 import { SoulEchoState } from '../systems/SoulEcho';
+import type { AbyssRecord } from '../systems/DungeonSystem';
 import { AllQuests } from '../data/quests/all_quests';
 
 export interface ZoneRuntime {
@@ -30,6 +31,8 @@ export class GameSession {
   readonly mercenaries = new MercenarySystem();
   readonly story = new StoryProgress();
   readonly soulEcho = new SoulEchoState();
+  /** Abyss Labyrinth tier ladder progress. */
+  abyss: AbyssRecord = { unlockedTier: 1, bestTier: 0 };
 
   constructor() {
     this.quests.registerQuests(AllQuests);

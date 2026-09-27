@@ -260,8 +260,19 @@ export class Monster {
    * Apply damage and play the matching hit reaction. Returns the hit weight
    * so callers can scale attacker-side feedback (hit-stop, shake, sparks).
    */
+  /** Scene time of the last hit (drives out-of-combat regeneration). */
+  lastDamagedAt = 0;
+
+  /** Restore HP (clamped to max) and refresh the bar. */
+  heal(amount: number): void {
+    if (this.state === 'dead' || amount <= 0 || this.hp >= this.maxHp) return;
+    this.hp = Math.min(this.maxHp, this.hp + amount);
+    this.updateHpBar();
+  }
+
   takeDamage(amount: number, sourceX?: number, sourceY?: number, options: MonsterDamageOptions = {}): HitWeight {
     if (this.state === 'dead') return 'tick';
+    this.lastDamagedAt = this.scene.time.now;
     const wasAlive = this.hp > 0;
     this.hp = Math.max(0, this.hp - amount);
     this.updateHpBar();

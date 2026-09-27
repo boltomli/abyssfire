@@ -67,6 +67,13 @@ export const STORY_ZH: LocaleData = {
   'story.boss.phoenix.epithet': '被缚的日冕圣鸟',
   'story.boss.demon_lord.name': '伊格纳罗斯',
   'story.boss.demon_lord.epithet': '焚誓者·渊火化身',
+  'story.boss.dungeon_abyss_lord.name': '卡萨诺尔',
+  'story.boss.dungeon_abyss_lord.epithet': '深渊之主·迷宫的囚王',
+  'story.cs_boss_kassanor.1': '迷宫最深处，碎裂的记忆沉成一片黑色的海。海面下，有什么睁开了眼。',
+  'story.cs_boss_kassanor.2': '伊格纳罗斯倒下了？好。那张王座空着，这座迷宫只剩一个主人。',
+  'story.cs_boss_kassanor.3': '你身上那团火，每一层记忆都在向它低语。把它交出来，我放你回到阳光下。',
+  'story.cs_boss_kassanor.4': '你守着的，只是别人的残梦。',
+  'story.cs_boss_kassanor.5': '那就在这残梦里，陪我一同沉没吧！',
 
   // ─── cs_ep_mark ───
   'story.cs_ep_mark.2': '别动，孩子。把手伸过来……让我看看你掌心那道烙印。',
@@ -309,6 +316,13 @@ export const STORY_EN: LocaleData = {
   'story.boss.phoenix.epithet': 'The Bound Sunbird',
   'story.boss.demon_lord.name': 'Ignaroth',
   'story.boss.demon_lord.epithet': 'The Oathburner, Abyssfire Incarnate',
+  'story.boss.dungeon_abyss_lord.name': 'Kassanor',
+  'story.boss.dungeon_abyss_lord.epithet': 'Lord of the Abyss, Prisoner-King of the Labyrinth',
+  'story.cs_boss_kassanor.1': 'At the labyrinth\'s heart, shattered memories settle into a black sea. Beneath its surface, something opens its eyes.',
+  'story.cs_boss_kassanor.2': 'Ignaroth has fallen? Good. His throne stands empty, and this labyrinth has but one master now.',
+  'story.cs_boss_kassanor.3': 'Every memory down here whispers to the fire you carry. Give it to me, and I will let you walk back into the sun.',
+  'story.cs_boss_kassanor.4': 'All you guard is someone else\'s broken dream.',
+  'story.cs_boss_kassanor.5': 'Then drown in it with me!',
 
   // ─── cs_ep_mark ───
   'story.cs_ep_mark.2': 'Hold still, child. Give me your hand... let me see that brand on your palm.',

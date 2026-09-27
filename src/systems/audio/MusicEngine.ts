@@ -472,7 +472,8 @@ export class MusicEngine {
       return;
     }
 
-    const theme = ZONE_THEMES[zoneId];
+    // Abyss Labyrinth floors are generated per run; they share the rift's score.
+    const theme = ZONE_THEMES[zoneId] ?? (zoneId.startsWith('dungeon_floor_') ? ZONE_THEMES.abyss_rift : undefined);
     if (!theme) {
       if (oldSet) this._fadeOutAndDestroy(ctx, oldSet, duration);
       return;
