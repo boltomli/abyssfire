@@ -3,7 +3,7 @@
 // 大师铁匠 — master smith of the later camps: black-haired, short-bearded,
 // charcoal apron with plum trim and an ornate orb-set hammer.
 import { glow, vec } from '../rig/Rig';
-import { anvilScenery, hammerSparks, npcDrawer } from '../rig/NpcKit';
+import { anvilScenery, hammerSparks, npcDrawer, propTip } from '../rig/NpcKit';
 
 export const BlacksmithAdvancedDrawer = npcDrawer({
   key: 'npc_blacksmith_advanced',
@@ -22,12 +22,11 @@ export const BlacksmithAdvancedDrawer = npcDrawer({
     offItem: 'tongs',
   },
   work: 'hammer',
-  ready: { wpn: 1.2, off: 1.3 },
-  scenery: (ctx) => anvilScenery(ctx),
+  ready: { wpn: 2.7, off: 2.4 },
+  scenery: anvilScenery,
   fx: (ctx, p, sk, act, t) => {
-    if (act === 'working') hammerSparks(ctx, p.fx, t);
+    if (act === 'working') hammerSparks(ctx, p.fx, t, sk);
     // Arcane orb on the hammer
-    const a = p.wpn;
-    glow(ctx, vec(sk.handN.x + Math.sin(a) * 12.5, sk.handN.y - Math.cos(a) * 12.5), 2.6, 0xc060ff, 0.55);
+    glow(ctx, propTip(sk, p.wpn, 12.5), 2.6, 0xc060ff, 0.55);
   },
 });

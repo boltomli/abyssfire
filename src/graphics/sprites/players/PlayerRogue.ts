@@ -3,13 +3,13 @@
 // 影刃 — hooded shadowblade in teal and oiled leather: masked face with
 // amber eyes, bandolier of throwing knives, wrapped legs, twin curved
 // daggers and long scarf tails that stream behind every move.
-// Rigged 3/4 view facing right.
-import type { EntityDrawer, PlayerAction } from '../types';
-import { PLAYER_ACTION_FRAME_COUNTS, PLAYER_TOTAL_FRAMES } from '../types';
+// Drawn in two isometric 3/4 views (se front, ne back; mirrored for sw/nw) by
+// projecting the shared humanoid keyframes through rig/HumanView.
+import type { EntityDrawer, PlayerAction, PlayerView } from '../types';
+import { PLAYER_ACTION_FRAME_COUNTS, PLAYER_SHEET_FRAMES, PLAYER_VIEWS } from '../types';
 import {
   CENTER_X,
   GROUND_Y,
-  along,
   blobPath,
   cel,
   clothChain,
@@ -17,7 +17,6 @@ import {
   frameTime,
   glow,
   groundShadow,
-  inBone,
   lerpV,
   limb,
   polyPath,
@@ -31,14 +30,24 @@ import {
 } from '../rig/Rig';
 import {
   basePose,
-  drawHumanoid,
   gait,
-  solveSkeleton,
-  spun,
   type HumanPose,
-  type HumanSkin,
-  type Skeleton,
+  type Proportions,
 } from '../rig/Humanoid';
+import {
+  drawHumanoidView,
+  footOutline,
+  inItem,
+  midpointPath,
+  ringAt,
+  solveViewSkeleton,
+  strokeLine,
+  v3,
+  type HumanView,
+  type HumanViewSkin,
+  type Ring,
+  type ViewSkeleton,
+} from '../rig/HumanView';
 import { getCurrentZonePalette, standardOutlineBlur } from '../../ZonePalette';
 
 // ── Palette ─────────────────────────────────────────────────────────────
@@ -60,29 +69,6 @@ const BLADE_LEN = 13;
 const ROGUE_SCALE = 1.15;
 
 // ── Skin ────────────────────────────────────────────────────────────────
-
-function leg(ctx: CanvasRenderingContext2D, hip: V, knee: V, ankle: V, sole: V, far: boolean): void {
-  const wrap = far ? WRAP_FAR : WRAP;
-  const leather = far ? LEATHER_FAR : LEATHER;
-  limb(ctx, hip, knee, 3.6, 2.9, wrap);
-  limb(ctx, knee, ankle, 2.8, 2.2, wrap);
-  // Cross-strapping up the shin
-  ctx.strokeStyle = leather.shade;
-  ctx.lineWidth = 0.55;
-  for (let i = 0; i < 3; i++) {
-    const a = lerpV(knee, ankle, 0.2 + i * 0.25);
-    ctx.beginPath();
-    ctx.moveTo(a.x - 2.3, a.y - 0.8);
-    ctx.lineTo(a.x + 2.3, a.y + 0.8);
-    ctx.stroke();
-  }
-  cel(ctx, () => ellipsePath(ctx, vec(knee.x + 0.8, knee.y), 2.6, 2.2), leather, { band: 0.7 });
-  // Soft boot
-  cel(ctx, () => polyPath(ctx, [
-    vec(ankle.x - 2.4, ankle.y - 2.6), vec(ankle.x + 1.8, ankle.y - 2.6),
-    vec(sole.x + 5, sole.y - 1.2), vec(sole.x + 5.4, sole.y), vec(sole.x - 2.6, sole.y),
-  ]), leather, { band: 0.8 });
-}
 
 function arm(ctx: CanvasRenderingContext2D, sh: V, el: V, hand: V, far: boolean): void {
   limb(ctx, sh, el, 2.8, 2.4, far ? WRAP_FAR : WRAP);
@@ -134,113 +120,300 @@ function dagger(ctx: CanvasRenderingContext2D, at: V, angle: number, far: boolea
   ctx.restore();
 }
 
-function scarf(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
-  const knot = along(sk.neck, p.lean - 1.3, 3.2);
+const ROGUE_PROP: Proportions = {
+  thigh: 12, shin: 12, upperArm: 9, foreArm: 8.5,
+  torso: 15, neck: 6.6, ankle: 2.2,
+  hipN: vec(1.8, 0), hipF: vec(-2.2, -0.4),
+  shN: vec(1.4, 3.6), shF: vec(-3.8, 3),
+};
+
+// ── Isometric 3/4 views (se = front, ne = back) ─────────────────────────
+
+function jerkinRings(len: number): Ring[] {
+  return [
+    { h: len + 0.6, a: 2.5, b: 3.6 },
+    { h: len - 2, a: 3.7, b: 5.6 },
+    { h: len - 6.5, a: 3.8, b: 5.2, f: 0.4 },
+    { h: 3, a: 3.2, b: 4.4 },
+    { h: 0.4, a: 3.5, b: 4.8 },
+  ];
+}
+
+const TASSET_RINGS: Ring[] = [
+  { h: 2.2, a: 3.5, b: 4.8 },
+  { h: -1.6, a: 4.3, b: 5.6 },
+  { h: -3.6, a: 4.6, b: 5.9, f: 0.2 },
+];
+
+function viewLeg(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, near: boolean): void {
+  const far = !near;
+  const wrap = far ? WRAP_FAR : WRAP;
+  const leather = far ? LEATHER_FAR : LEATHER;
+  const hip = near ? sk.hipN : sk.hipF;
+  const knee = near ? sk.kneeN : sk.kneeF;
+  const ankle = near ? sk.footN : sk.footF;
+  limb(ctx, hip, knee, 3.7, 3, wrap);
+  limb(ctx, knee, ankle, 2.9, 2.3, wrap);
+  ctx.strokeStyle = leather.shade;
+  ctx.lineWidth = 0.55;
+  for (let i = 0; i < 3; i++) {
+    const a = lerpV(knee, ankle, 0.2 + i * 0.25);
+    ctx.beginPath();
+    ctx.moveTo(a.x - 2.3, a.y - 0.8);
+    ctx.lineTo(a.x + 2.3, a.y + 0.8);
+    ctx.stroke();
+  }
+  const f = sk.rig.fwd;
+  cel(ctx, () => ellipsePath(ctx, vec(knee.x + f.x * 1, knee.y + f.y * 1), 2.6, 2.2), leather, { band: 0.7 });
+  const j = near ? sk.j.footN : sk.j.footF;
+  const sole = near ? sk.j.soleN : sk.j.soleF;
+  cel(ctx, () => polyPath(ctx, footOutline(sk.rig, v3(j.x, j.y - 1, j.z), sole, 5.2, 2.6, 4.4, 1.9)), leather, { band: 0.8 });
+}
+
+function viewJerkin(ctx: CanvasRenderingContext2D, sk: ViewSkeleton): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const rings = jerkinRings(len);
+  const front = T.vis(0.2) > -0.05;
+  const tassets = T.loft(TASSET_RINGS);
+  cel(ctx, () => midpointPath(ctx, tassets), LEATHER_FAR, { band: 0.8 });
+  ctx.save();
+  ctx.beginPath();
+  midpointPath(ctx, tassets);
+  ctx.clip();
+  // Split tassets: vertical slits round the skirt
+  for (let k = 0; k < 8; k++) {
+    const phi = (k / 8) * Math.PI * 2 + 0.2;
+    if (T.vis(phi) < 0.05) continue;
+    const a = T.at(-0.2, phi, 4, 5.3);
+    const b = T.at(-3.8, phi, 4.7, 6);
+    strokeLine(ctx, [a, b], LEATHER_FAR.shade, 0.5);
+  }
+  ctx.restore();
+  const body = T.loft(rings);
+  cel(ctx, () => midpointPath(ctx, body), LEATHER, { band: 1.5 });
+  ctx.save();
+  ctx.beginPath();
+  midpointPath(ctx, body);
+  ctx.clip();
+  // Stitched seam down the front (or spine)
+  const seam: V[] = [];
+  for (let h = len - 1; h >= 1; h -= 1.5) {
+    const r = ringAt(rings, h);
+    seam.push(T.at(h, front ? 0.25 : Math.PI, r.a, r.b, r.f));
+  }
+  ctx.setLineDash([0.8, 0.8]);
+  strokeLine(ctx, seam, LEATHER.shade, 0.4);
+  ctx.setLineDash([]);
+  // Bandolier: near shoulder, across the chest (front) or back, to the far hip.
+  const strap = (phiEnd: number): V[][] => {
+    const runs: V[][] = [];
+    let cur: V[] = [];
+    for (let i = 0; i <= 12; i++) {
+      const k = i / 12;
+      const h = len - 0.2 + (2.2 - (len - 0.2)) * k;
+      const phi = Math.PI / 2 + (phiEnd - Math.PI / 2) * k;
+      const r = ringAt(rings, h);
+      if (T.vis(phi, r.a, r.b) > -0.05) cur.push(T.at(h, phi, r.a + 0.25, r.b + 0.25, r.f));
+      else if (cur.length) { runs.push(cur); cur = []; }
+    }
+    if (cur.length) runs.push(cur);
+    return runs;
+  };
+  for (const run of strap(front ? -0.9 : Math.PI + 0.9)) {
+    strokeLine(ctx, run, MASK.line, 3.6);
+    strokeLine(ctx, run, MASK.base, 2.8);
+    strokeLine(ctx, run.map(q => vec(q.x - 0.3, q.y - 0.5)), MASK.light, 0.4);
+  }
+  if (front) {
+    // Throwing knives in the bandolier, below the capelet: bright steel
+    // blades with brass pommels so they read at game scale.
+    for (let i = 0; i < 4; i++) {
+      const k = 0.3 + i * 0.14;
+      const h = len - 0.2 + (2.2 - (len - 0.2)) * k;
+      const phi = Math.PI / 2 + (-0.9 - Math.PI / 2) * k;
+      const r = ringAt(rings, h);
+      if (T.vis(phi) < 0.1) continue;
+      const c = T.at(h, phi, r.a + 0.5, r.b + 0.5, r.f);
+      cel(ctx, () => polyPath(ctx, [vec(c.x - 0.75, c.y - 3), vec(c.x, c.y - 3.9), vec(c.x + 0.75, c.y - 3), vec(c.x + 0.55, c.y + 0.4), vec(c.x - 0.55, c.y + 0.4)]), STEEL, { band: 0.25, stroke: 0.35 });
+      ctx.fillStyle = BRASS.base;
+      ctx.fillRect(c.x - 0.6, c.y + 0.4, 1.2, 1);
+    }
+  }
+  ctx.restore();
+  // Belt, buckle and hip pouch
+  const belt = ringAt(rings, 1.4);
+  for (const run of T.visibleArcs({ ...belt, a: belt.a + 0.3, b: belt.b + 0.3 }, 0, Math.PI * 2, 28, -0.15)) {
+    strokeLine(ctx, run, LEATHER_FAR.line, 2.8);
+    strokeLine(ctx, run, LEATHER_FAR.base, 2);
+  }
+  if (T.vis(0.3) > 0.1) {
+    const b = T.at(1.4, 0.3, belt.a + 0.4, belt.b + 0.4);
+    cel(ctx, () => polyPath(ctx, [vec(b.x - 1.1, b.y - 1.5), vec(b.x + 1.1, b.y - 1.5), vec(b.x + 1.1, b.y + 1.5), vec(b.x - 1.1, b.y + 1.5)]), BRASS, { band: 0.3 });
+  }
+  const pouchPhi = -1.9;
+  if (T.vis(pouchPhi) > -0.2) {
+    const c = T.at(0.2, pouchPhi, belt.a + 1, belt.b + 1);
+    cel(ctx, () => blobPath(ctx, [vec(c.x - 1.8, c.y - 1.4), vec(c.x + 1.8, c.y - 1.5), vec(c.x + 1.7, c.y + 2.6), vec(c.x - 1.6, c.y + 2.8)]), LEATHER, { band: 0.6 });
+  }
+  // Short capelet over the shoulders: darker than the hood so the two read
+  // as separate pieces, cut high so the bandolier shows below it.
+  const capelet: Ring[] = [
+    { h: len + 1.2, a: 2.6, b: 3.6 },
+    { h: len - 0.6, a: 4.2, b: 6 },
+    { h: len - 2.9, a: 4.5, b: 6.3, f: 0.1 },
+  ];
+  const cape = T.loft(capelet, 28);
+  cel(ctx, () => midpointPath(ctx, cape), CLOAK_FAR, { band: 1 });
+  for (const run of T.visibleArcs({ ...capelet[2], h: capelet[2].h + 0.5 }, 0, Math.PI * 2, 28, -0.2)) {
+    strokeLine(ctx, run, CLOAK.light, 0.7);
+  }
+  if (front) {
+    const c = T.at(len - 0.4, 0.3, 4.3, 6.1);
+    cel(ctx, () => ellipsePath(ctx, c, 1.1, 1.1), BRASS, { band: 0.4, stroke: 0.4 });
+  }
+}
+
+function viewScarf(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const knot = sk.torso.p3(sk.torsoLen + 0.4, Math.PI - 0.4, 3.2, 3.8);
   const ph = t * Math.PI * 2;
   const tails: [number, number, typeof CLOAK][] = [[23, 0, CLOAK_FAR], [19, 1.4, CLOAK]];
   for (const [len, off, col] of tails) {
-    const chain = clothChain(vec(knot.x - 1, knot.y + off), len, 6, 0.55 + p.flow * 0.8, 1.5, ph + off);
+    // Shorter and hanging lower than in profile: streaming straight back
+    // reads as a stray limb once the back is foreshortened.
+    const chain = clothChain(vec(knot.x - 1, knot.y + off), len * 0.85, 6, 0.3 + p.flow * 0.6, 1.5, ph + off);
     const top: V[] = [];
     const bot: V[] = [];
     chain.forEach((pt, i) => {
       const w = 1.6 - i * 0.12;
-      top.push(vec(pt.x, pt.y - w));
-      bot.push(vec(pt.x, pt.y + w));
+      const z = knot.z - off * 1.2 + Math.sin(ph + i * 0.9) * 0.6 * (i / 6);
+      top.push(sk.rig.pt(pt.x, pt.y - w, z));
+      bot.push(sk.rig.pt(pt.x, pt.y + w, z));
     });
-    // Forked tip
     const end = chain[chain.length - 1];
-    cel(ctx, () => polyPath(ctx, [...top, vec(end.x - 1.6, end.y - 1.2), vec(end.x - 0.4, end.y + 0.2), vec(end.x - 1.6, end.y + 1.6), ...bot.reverse()]), col, { band: 0.7 });
+    const e = (dx: number, dy: number): V => sk.rig.pt(end.x + dx, end.y + dy, knot.z - off * 1.2);
+    cel(ctx, () => polyPath(ctx, [...top, e(-1.6, -1.2), e(-0.4, 0.2), e(-1.6, 1.6), ...bot.reverse()]), col, { band: 0.7 });
   }
 }
 
-function jerkin(ctx: CanvasRenderingContext2D, sk: Skeleton): void {
-  inBone(ctx, sk.neck, sk.pelvis, (len) => {
-    // Tassets over the hips
-    cel(ctx, () => polyPath(ctx, [vec(-5.4, len - 3.6), vec(6, len - 3.8), vec(6.8, len + 3.6), vec(1.6, len + 2.6), vec(-5.8, len + 3.2)]), LEATHER_FAR, { band: 0.8 });
-    const body = [vec(-5.4, 0.6), vec(0.8, -0.6), vec(6, 1.6), vec(7, 6.4), vec(5.6, len - 1.2), vec(-5, len - 1.2), vec(-6, 6.6)];
-    cel(ctx, () => blobPath(ctx, body), LEATHER, { band: 1.5 });
-    // Stitched seams
-    ctx.strokeStyle = LEATHER.shade;
-    ctx.lineWidth = 0.4;
-    ctx.setLineDash([0.8, 0.8]);
-    ctx.beginPath();
-    ctx.moveTo(2.4, 1);
-    ctx.quadraticCurveTo(3.6, 6.5, 2.2, len - 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    // Bandolier with throwing knives
-    cel(ctx, () => polyPath(ctx, [vec(-4.8, 0.8), vec(-2.4, -0.2), vec(6.6, len - 3.4), vec(4.2, len - 1.8)]), MASK, { band: 0.5 });
-    for (let i = 0; i < 3; i++) {
-      const k = lerpV(vec(-2.2, 1.6), vec(4.4, len - 4.6), 0.2 + i * 0.3);
-      cel(ctx, () => polyPath(ctx, [vec(k.x - 0.5, k.y - 2.2), vec(k.x + 0.5, k.y - 2.2), vec(k.x + 0.4, k.y + 0.6), vec(k.x - 0.4, k.y + 0.6)]), STEEL, { band: 0.2, stroke: 0.3 });
-    }
-    // Belt + pouch
-    cel(ctx, () => polyPath(ctx, [vec(-5.4, len - 2.8), vec(6.6, len - 3), vec(6.8, len - 0.6), vec(-5.6, len - 0.4)]), LEATHER_FAR, { band: 0.4 });
-    cel(ctx, () => polyPath(ctx, [vec(3.2, len - 3.2), vec(5.4, len - 3.2), vec(5.4, len - 0.2), vec(3.2, len - 0.2)]), BRASS, { band: 0.3 });
-    cel(ctx, () => blobPath(ctx, [vec(-4.8, len - 1.2), vec(-1.2, len - 1.4), vec(-1, len + 2.8), vec(-4.6, len + 3)]), LEATHER, { band: 0.6 });
-    // Short capelet over the shoulders
-    const cape = [vec(-6.6, -0.2), vec(0, -2), vec(6.2, 0.6), vec(6.6, 4.6), vec(1, 6.2), vec(-6.8, 5)];
-    cel(ctx, () => blobPath(ctx, cape), CLOAK, { band: 1.1 });
-  });
-}
+/** The 3/4 hood is drawn a little tighter than the profile one so the chest shows. */
+const HOOD_K = 0.88;
 
-function hood(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
-  ctx.save();
-  ctx.translate(sk.head.x, sk.head.y);
-  ctx.rotate(sk.headAng);
+const RHOOD_RINGS: Ring[] = [
+  { h: 8, a: 1.6, b: 1.6, f: -0.6 },
+  { h: 6, a: 5.4, b: 5.2, f: -0.4 },
+  { h: 1.2, a: 7.2, b: 6.5, f: -0.2 },
+  { h: -3.6, a: 6.8, b: 6.4 },
+  { h: -5.2, a: 5, b: 5.6, f: -0.5 },
+].map(r => ({ ...r, a: r.a * HOOD_K, b: r.b * HOOD_K }));
+
+function viewRogueHood(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const H = sk.skull;
+  const front = H.vis(0.1) > -0.15;
   const sway = Math.sin(t * Math.PI * 2) * 0.4 + p.flow * 2;
-  const shell = [
-    vec(-6.4, 3), vec(-7, -2.8), vec(-3.4, -7.4), vec(2.4, -7.8), vec(6.6, -4.2),
-    vec(7.4, 0.6), vec(6, 5.8), vec(-1.4, 6.8), vec(-7 - sway, 5.6), vec(-9.6 - sway * 1.4, 7.4), vec(-8.2 - sway, 1.8),
+  const tip = [
+    H.at(2, Math.PI, 5.46, 5.28),
+    H.at(-2.6, Math.PI, 8.4 + sway, 5.4),
+    H.at(-6.8 - sway * 0.3, Math.PI, 9.6 + sway * 1.4, 0),
+    H.at(-4.6, Math.PI - 0.5, 5.63, 5.28),
+    H.at(-4.6, Math.PI + 0.5, 5.63, 5.28),
   ];
-  cel(ctx, () => blobPath(ctx, shell), CLOAK, { band: 1.6 });
-  // Face opening: shadowed brow, skin band at the eyes, mask below
+  if (front) cel(ctx, () => blobPath(ctx, tip), CLOAK_FAR, { band: 1 });
+  const shell = H.loft(RHOOD_RINGS, 28);
+  cel(ctx, () => midpointPath(ctx, shell), CLOAK, { band: 1.6 });
+  if (!front) {
+    ctx.save();
+    ctx.beginPath();
+    midpointPath(ctx, shell);
+    ctx.clip();
+    strokeLine(ctx, RHOOD_RINGS.map(r => H.at(r.h, Math.PI, r.a, r.b, r.f)), CLOAK.shade, 0.7);
+    ctx.restore();
+    cel(ctx, () => blobPath(ctx, tip), CLOAK, { band: 1 });
+    return;
+  }
+  const patch = (hAmp: number, hMid: number, phiAmp: number, phiMid: number, lift = 0.2): V[] => {
+    const out: V[] = [];
+    const N = 14;
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      const h = hMid + Math.sin(a) * hAmp;
+      const phi = phiMid + Math.cos(a) * phiAmp;
+      const r = ringAt(RHOOD_RINGS, h);
+      out.push(H.at(h, phi, r.a + lift, r.b + lift, r.f));
+    }
+    return out;
+  };
+  ctx.save();
+  ctx.beginPath();
+  midpointPath(ctx, shell);
+  ctx.clip();
+  const open = patch(5, -0.2, 1, 0.22);
   ctx.fillStyle = '#0e1416';
   ctx.beginPath();
-  blobPath(ctx, [vec(0.2, -4.6), vec(5.8, -3.4), vec(7, 1.2), vec(5.6, 5), vec(0.4, 4.6)]);
+  midpointPath(ctx, open);
   ctx.fill();
-  cel(ctx, () => blobPath(ctx, [vec(1.4, -2.2), vec(6.2, -1.8), vec(7.3, 0.2), vec(6.8, 1.1), vec(1.6, 1.2)]), SKIN, { band: 0.6, stroke: 0.3 });
-  cel(ctx, () => blobPath(ctx, [vec(1, 0.8), vec(7.4, 0.6), vec(7.2, 3.4), vec(5, 5.4), vec(1, 5)]), MASK, { band: 0.8, stroke: 0.4 });
-  // Amber eyes
+  // Skin band across the eyes, mask below.
+  const band: V[] = [
+    ...[-0.5, -0.1, 0.3, 0.7, 1.0].map(phi => H.at(1.9, phi, 5.81, 5.46)),
+    ...[1.0, 0.7, 0.3, -0.1, -0.5].map(phi => H.at(-0.4, phi, 5.98, 5.54)),
+  ];
+  cel(ctx, () => polyPath(ctx, band), SKIN, { band: 0.6, stroke: 0.3 });
+  const mask: V[] = [
+    ...[-0.6, -0.2, 0.2, 0.6, 1.05].map(phi => H.at(-0.2, phi, 6.07, 5.63)),
+    ...[1.0, 0.6, 0.25, -0.1, -0.5].map((phi, i) => H.at(-4.6 + Math.abs(i - 2) * 0.5, phi, 5.63, 5.37)),
+  ];
+  cel(ctx, () => polyPath(ctx, mask), MASK, { band: 0.8, stroke: 0.4 });
   ctx.fillStyle = '#ffd36e';
-  ctx.fillRect(4, -1.3, 1.5, 0.9);
-  ctx.fillRect(6.1, -1.2, 0.7, 0.8);
+  for (const phi of [-0.15, 0.55]) {
+    if (H.vis(phi) > 0.05) {
+      const e = H.at(0.9, phi, 5.98, 5.54);
+      ctx.fillRect(e.x - 0.75, e.y - 0.45, 1.5, 0.9);
+    }
+  }
   ctx.restore();
 }
 
-const ROGUE_SKIN: HumanSkin = {
-  prop: {
-    thigh: 12, shin: 12, upperArm: 9, foreArm: 8.5,
-    torso: 15, neck: 6.6, ankle: 2.2,
-    hipN: vec(1.8, 0), hipF: vec(-2.2, -0.4),
-    shN: vec(1.4, 3.6), shF: vec(-3.8, 3),
-  },
-  back(ctx, sk, p, t) {
-    scarf(ctx, sk, p, t);
-  },
-  armFar(ctx, sk, p) {
-    arm(ctx, sk.shF, sk.elF, sk.handF, true);
-    dagger(ctx, sk.handF, p.off, true, p.fx);
-    gloveHand(ctx, sk.handF, true);
-  },
-  legFar(ctx, sk) {
-    leg(ctx, sk.hipF, sk.kneeF, sk.footF, sk.soleF, true);
-  },
-  legNear(ctx, sk) {
-    leg(ctx, sk.hipN, sk.kneeN, sk.footN, sk.soleN, false);
-  },
-  torso(ctx, sk) {
-    jerkin(ctx, sk);
-  },
-  head(ctx, sk, p, t) {
-    hood(ctx, sk, p, t);
-  },
-  armNear(ctx, sk) {
-    arm(ctx, sk.shN, sk.elN, sk.handN, false);
-  },
-  weapon(ctx, sk, p) {
-    dagger(ctx, sk.handN, p.wpn, false, p.fx);
-    gloveHand(ctx, sk.handN, false);
+/** Wrapped arm with a small leather spaulder so it doesn't read as one dark mass. */
+function viewArm(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, near: boolean): void {
+  const sh = near ? sk.shN : sk.shF;
+  const el = near ? sk.elN : sk.elF;
+  arm(ctx, sh, el, near ? sk.handN : sk.handF, !near);
+  const c = lerpV(sh, el, 0.22);
+  const ang = Math.atan2(el.y - sh.y, el.x - sh.x) - Math.PI / 2;
+  const leather = near ? LEATHER : LEATHER_FAR;
+  cel(ctx, () => ellipsePath(ctx, c, 3.4, 2.6, ang), leather, { band: 0.8 });
+  strokeLine(ctx, [lerpV(sh, el, 0.3), lerpV(sh, el, 0.42)], leather.shade, 0.5);
+}
+
+function viewDagger(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, near: boolean): void {
+  const hand = near ? sk.handN : sk.handF;
+  inItem(ctx, sk.rig, hand, near ? p.wpn : p.off, () => dagger(ctx, vec(0, 0), 0, !near, p.fx));
+  gloveHand(ctx, hand, !near);
+}
+
+const ROGUE_VIEW_SKIN: HumanViewSkin = {
+  prop: ROGUE_PROP,
+  build: { hipW: 2.5, shW: 5.6, elbowOut: 2.4, footOut: 0.4 },
+  parts(ctx, sk, p, t) {
+    const d0 = sk.d.pelvis;
+    const T = sk.torso;
+    const armZ = (near: boolean): number => (near
+      ? sk.d.elN * 0.6 + sk.d.handN * 0.4
+      : sk.d.elF * 0.6 + sk.d.handF * 0.4) - d0;
+    const legZ = (near: boolean): number => -0.6 + 0.02 * ((near ? sk.d.kneeN + sk.d.footN : sk.d.kneeF + sk.d.footF) / 2 - d0);
+    const scarfZ = T.depth(sk.torsoLen, Math.PI, 5, 0) - d0;
+    const headZ = Math.max(sk.d.head - d0 + 2.5, scarfZ + 0.2);
+    return [
+      { z: scarfZ, draw: () => viewScarf(ctx, sk, p, t) },
+      { z: legZ(true), draw: () => viewLeg(ctx, sk, true) },
+      { z: legZ(false), draw: () => viewLeg(ctx, sk, false) },
+      { z: 0, draw: () => viewJerkin(ctx, sk) },
+      { z: armZ(false), draw: () => viewArm(ctx, sk, false) },
+      { z: Math.max(armZ(false), sk.d.handF - d0) + 0.02, draw: () => viewDagger(ctx, sk, p, false) },
+      { z: armZ(true), draw: () => viewArm(ctx, sk, true) },
+      { z: headZ, draw: () => viewRogueHood(ctx, sk, p, t) },
+      { z: Math.max(armZ(true), sk.d.handN - d0) + 0.02, draw: () => viewDagger(ctx, sk, p, true) },
+    ];
   },
 };
 
@@ -257,6 +430,9 @@ const READY: HumanPose = basePose({
   wpn: 1.45,
   off: 0.8,
   flow: 0.15,
+  // 3/4 views: blades held wide of the body so the jerkin reads.
+  zN: 2.6,
+  zF: -1.8,
 });
 
 function pose(over: Partial<HumanPose>): HumanPose {
@@ -419,35 +595,46 @@ function roguePose(act: PlayerAction, t: number): HumanPose {
   }
 }
 
-function drawFx(ctx: CanvasRenderingContext2D, act: PlayerAction, t: number, p: HumanPose): void {
-  const sk = solveSkeleton(p, ROGUE_SKIN.prop);
+function bladePoint(sk: ViewSkeleton, near: boolean, angle: number, len: number): V {
+  const hand = near ? sk.handN : sk.handF;
+  const { ang, k } = sk.rig.dir(angle);
+  return vec(hand.x + Math.sin(ang) * k * len, hand.y - Math.cos(ang) * k * len);
+}
+
+function drawFx(ctx: CanvasRenderingContext2D, act: PlayerAction, t: number, p: HumanPose, view: HumanView): void {
+  const sk = solveViewSkeleton(p, ROGUE_PROP, ROGUE_VIEW_SKIN.build, view);
   if (act === 'attack' && p.fx > 0.3) {
     for (const which of ['n', 'f'] as const) {
       const tips: V[] = [];
       const bases: V[] = [];
       for (let i = 6; i >= 0; i--) {
         const sp = samplePoseTrack(ATTACK, Math.max(0, t - i * 0.02));
-        const ssk = solveSkeleton(sp, ROGUE_SKIN.prop);
-        const hand = which === 'n' ? ssk.handN : ssk.handF;
-        const ang = which === 'n' ? sp.wpn : sp.off;
-        tips.push(spun(sp, along(hand, ang, BLADE_LEN), ssk));
-        bases.push(spun(sp, along(hand, ang, 3), ssk));
+        const ssk = solveViewSkeleton(sp, ROGUE_PROP, ROGUE_VIEW_SKIN.build, view);
+        const near = which === 'n';
+        const ang = near ? sp.wpn : sp.off;
+        tips.push(bladePoint(ssk, near, ang, BLADE_LEN));
+        bases.push(bladePoint(ssk, near, ang, 3));
       }
       smear(ctx, tips, bases, which === 'n' ? 0xd8ffe8 : POISON, (which === 'n' ? 0.55 : 0.35) * p.fx);
     }
   }
   if (act === 'cast' && p.fx > 0.05) {
     for (const hand of [sk.handN, sk.handF]) {
-      glow(ctx, spun(p, hand, sk), 4 + p.fx * 4, POISON, 0.5 * p.fx);
+      glow(ctx, hand, 4 + p.fx * 4, POISON, 0.5 * p.fx);
     }
     // Wisps of shadow rising off the body
+    const r = sk.rig.pt(p.root.x, p.root.y);
     for (let i = 0; i < 5; i++) {
       const k = (i / 5 + t * 1.3) % 1;
-      glow(ctx, vec(p.root.x - 4 + i * 2.5, p.root.y + 8 - k * 26), 2.2, 0x2fd6a0, 0.45 * p.fx * (1 - k));
+      glow(ctx, vec(r.x - 4 + i * 2.5, r.y + 8 - k * 26), 2.2, 0x2fd6a0, 0.45 * p.fx * (1 - k));
     }
   }
-  const eye = spun(p, along(sk.head, sk.headAng + 1.4, 5), sk);
-  if (act !== 'death' || t < 0.6) glow(ctx, eye, 2.2, EYE, 0.45);
+  const H = sk.skull;
+  if (H.vis(0.2) > 0.1 && (act !== 'death' || t < 0.6)) {
+    for (const phi of [-0.15, 0.55]) {
+      if (H.vis(phi) > 0.05) glow(ctx, H.at(0.9, phi, 6.8 * HOOD_K, 6.3 * HOOD_K), 1.8, EYE, 0.4);
+    }
+  }
 }
 
 export const PlayerRogueDrawer: EntityDrawer = {
@@ -455,10 +642,12 @@ export const PlayerRogueDrawer: EntityDrawer = {
   // Wide frame leaves room for weapon reach at the contact pose.
   frameW: 96,
   frameH: 96,
-  totalFrames: PLAYER_TOTAL_FRAMES,
+  totalFrames: PLAYER_SHEET_FRAMES,
   inked: true,
+  views: PLAYER_VIEWS,
 
-  drawFrame(ctx, frame, action, w, h) {
+  drawFrame(ctx, frame, action, w, h, _utils, view?: PlayerView) {
+    const v: HumanView = view ?? 'se';
     const act = action as PlayerAction;
     const count = PLAYER_ACTION_FRAME_COUNTS[act];
     const loop = act === 'idle' || act === 'walk';
@@ -466,12 +655,13 @@ export const PlayerRogueDrawer: EntityDrawer = {
     const p = roguePose(act, t);
     const palette = getCurrentZonePalette();
     const lift = Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y));
+    let shadowX = p.root.x + 1;
     renderRigFrame(
       ctx, w, h,
-      c => { drawHumanoid(c, p, ROGUE_SKIN, t); },
+      c => { shadowX = drawHumanoidView(c, p, ROGUE_VIEW_SKIN, t, v).rig.pt(p.root.x + 1, GROUND_Y).x; },
       { glowColor: palette.playerOutlineColor, glowBlur: standardOutlineBlur(w, h), scale: ROGUE_SCALE },
-      c => groundShadow(c, p.root.x + 1, 13, lift),
-      c => drawFx(c, act, t, p),
+      c => groundShadow(c, shadowX, 13, lift),
+      c => drawFx(c, act, t, p, v),
     );
   },
 };

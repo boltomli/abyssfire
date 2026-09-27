@@ -3,7 +3,7 @@
 // 林中隐士 — wild-haired hermit in a mossy cloak, puffing a pipe beside his
 // gnarled staff with a green crystal.
 import { glow, vec } from '../rig/Rig';
-import { npcDrawer } from '../rig/NpcKit';
+import { npcDrawer, propTip, STAFF_ORB } from '../rig/NpcKit';
 
 export const ForestHermitDrawer = npcDrawer({
   key: 'npc_forest_hermit',
@@ -22,15 +22,14 @@ export const ForestHermitDrawer = npcDrawer({
     offItem: 'staff',
   },
   work: 'smoke',
-  ready: { off: -0.12, handF: { x: 38, y: 63 } },
   fx: (ctx, p, sk, act, t) => {
-    glow(ctx, vec(sk.handF.x + Math.sin(p.off) * 19.6, sk.handF.y - Math.cos(p.off) * 19.6), 3.6, 0x80e080, 0.6);
+    glow(ctx, propTip(sk, p.off, STAFF_ORB, false, 'staff'), 3.6, 0x80e080, 0.6);
     if (act === 'working' && p.fx > 0.2) {
       for (let i = 0; i < 3; i++) {
         const k = (i / 3 + t) % 1;
         ctx.fillStyle = `rgba(220,220,210,${0.5 * (1 - k) * p.fx})`;
         ctx.beginPath();
-        ctx.arc(sk.head.x + 9 + k * 3, sk.head.y - 2 - k * 10, 1.2 + k * 2, 0, Math.PI * 2);
+        ctx.arc(sk.head.x + 7 + k * 3, sk.head.y + 1 - k * 10, 1.2 + k * 2, 0, Math.PI * 2);
         ctx.fill();
       }
     }

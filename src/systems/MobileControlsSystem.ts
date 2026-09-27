@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT } from '../config';
+import { GAME_WIDTH, GAME_HEIGHT, RENDER_SCALE, logicalPointer } from '../config';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import type { Player } from '../entities/Player';
 import { t } from '../i18n';
@@ -119,7 +119,7 @@ export class MobileControlsSystem {
 
   private readonly pointerMoveHandler = (pointer: Phaser.Input.Pointer): void => {
     if (this.joystickState.active && pointer.id === this.joystickState.pointerId) {
-      this.updateJoystickThumb(pointer.x, pointer.y);
+      { const lp = logicalPointer(pointer); this.updateJoystickThumb(lp.x, lp.y); }
     }
   };
   private readonly pointerUpHandler = (pointer: Phaser.Input.Pointer): void => {
@@ -186,7 +186,8 @@ export class MobileControlsSystem {
     if (z === this.appliedZoom) return;
     this.appliedZoom = z;
     const cx = cam.width * cam.originX, cy = cam.height * cam.originY;
-    this.root.setScale(1 / z);
+    // Lay the controls out in logical pixels: undo the gameplay zoom, keep the render scale.
+    this.root.setScale(RENDER_SCALE / z);
     this.root.setPosition(cx - cx / z, cy - cy / z);
   }
 
@@ -265,7 +266,7 @@ export class MobileControlsSystem {
       this.claim(pointer);
       this.joystickState.active = true;
       this.joystickState.pointerId = pointer.id;
-      this.updateJoystickThumb(pointer.x, pointer.y);
+      { const lp = logicalPointer(pointer); this.updateJoystickThumb(lp.x, lp.y); }
     });
     this.joystickContainer = container;
     this.attach(container);

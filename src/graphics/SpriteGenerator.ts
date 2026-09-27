@@ -4,11 +4,14 @@ import { CAMP_THEMES } from '../data/camp-themes';
 import { getActionFrameRate } from '../systems/CharacterAnimator';
 import { DrawUtils } from './DrawUtils';
 import { generateLegacyTiles } from './terrain/LegacyTiles';
-import type { EntityAction, EntityDrawer } from './sprites/types';
+import type { EntityAction, EntityDrawer, PlayerView } from './sprites/types';
 import {
   PLAYER_ACTION_FRAME_COUNTS,
   PLAYER_ACTION_ORDER,
+  PLAYER_VIEWS,
   getPlayerActionFrameRange,
+  getPlayerViewFrameRange,
+  playerAnimKey,
   computeSheetGrid,
   sheetFrameOrigin,
   type SheetGrid,
@@ -100,6 +103,9 @@ const WALK_START = 4, WALK_COUNT = 6;
 const ATK_START = 10, ATK_COUNT = 4;
 const HURT_START = 14, HURT_COUNT = 2;
 const DEATH_START = 16, DEATH_COUNT = 4;
+/** Frames per view in a monster sheet (multi-view sheets repeat the block). */
+const MONSTER_VIEW_FRAMES = 20;
+const MONSTER_ACTIONS = ['idle', 'walk', 'attack', 'hurt', 'death'] as const;
 
 // NPC frame layout (24 frames total per NPC)
 const NPC_WORK_START = 0, NPC_WORK_COUNT = 8;
@@ -453,12 +459,20 @@ export class SpriteGenerator {
   }
 
   private static clearEntityAnimations(scene: Phaser.Scene, key: string, isPlayer: boolean): void {
-    const actions = isPlayer
-      ? PLAYER_ACTION_ORDER
-      : ['idle', 'walk', 'attack', 'hurt', 'death'];
-    for (const action of actions) {
-      const animKey = `${key}_${action}`;
-      if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
+    if (isPlayer) {
+      for (const view of PLAYER_VIEWS) {
+        for (const action of PLAYER_ACTION_ORDER) {
+          const animKey = playerAnimKey(key, view, action);
+          if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
+        }
+      }
+      return;
+    }
+    for (const view of PLAYER_VIEWS) {
+      for (const action of MONSTER_ACTIONS) {
+        const animKey = playerAnimKey(key, view, action);
+        if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
+      }
     }
   }
 
@@ -567,25 +581,27 @@ export class SpriteGenerator {
     const [canvas, ctx] = this.utils.createCanvas(grid.width, grid.height);
 
     const isPlayer = PLAYER_DRAWER_BY_KEY.has(drawer.key);
-    const actions: [EntityAction, number, number][] = isPlayer
-      ? PLAYER_ACTION_ORDER.map(action => {
-          const range = getPlayerActionFrameRange(action);
-          return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action]];
-        })
-      : [
-          ['idle', IDLE_START, IDLE_COUNT],
-          ['walk', WALK_START, WALK_COUNT],
-          ['attack', ATK_START, ATK_COUNT],
-          ['hurt', HURT_START, HURT_COUNT],
-          ['death', DEATH_START, DEATH_COUNT],
-        ];
+    // Player heroes carry every action once per isometric view (view-major).
+    const actions: [EntityAction, number, number, PlayerView | undefined][] = isPlayer
+      ? (drawer.views ?? [undefined]).flatMap(view => PLAYER_ACTION_ORDER.map((action): [EntityAction, number, number, PlayerView | undefined] => {
+          const range = view ? getPlayerViewFrameRange(view, action) : getPlayerActionFrameRange(action);
+          return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action], view];
+        }))
+      // Monsters: 20 frames per view, view-major (se first).
+      : (drawer.views ?? [undefined]).flatMap((view, vi): [EntityAction, number, number, PlayerView | undefined][] => [
+          ['idle', vi * MONSTER_VIEW_FRAMES + IDLE_START, IDLE_COUNT, view],
+          ['walk', vi * MONSTER_VIEW_FRAMES + WALK_START, WALK_COUNT, view],
+          ['attack', vi * MONSTER_VIEW_FRAMES + ATK_START, ATK_COUNT, view],
+          ['hurt', vi * MONSTER_VIEW_FRAMES + HURT_START, HURT_COUNT, view],
+          ['death', vi * MONSTER_VIEW_FRAMES + DEATH_START, DEATH_COUNT, view],
+        ]);
 
     // Rigged drawers ink themselves; legacy ones get the shared ink pass.
     const legacy = !drawer.inked;
-    for (const [action, start, count] of actions) {
+    for (const [action, start, count, view] of actions) {
       for (let f = 0; f < count; f++) {
         this.drawCell(ctx, grid, start + f, fw, fh, legacy,
-          c => drawer.drawFrame(c, f, action, fw, fh, this.utils));
+          c => drawer.drawFrame(c, f, action, fw, fh, this.utils, view));
       }
     }
 
@@ -715,10 +731,31 @@ export class SpriteGenerator {
   // ═══════════════════════════════════════════════════════════════════════
 
   private hasEntityAnimationsRegistered(key: string, isPlayer: boolean): boolean {
-    const actions = isPlayer
-      ? PLAYER_ACTION_ORDER
-      : ['idle', 'walk', 'attack', 'hurt', 'death'];
-    return actions.every(action => this.scene.anims.exists(`${key}_${action}`));
+    if (isPlayer) {
+      return this.playerSheetViews(key).every(view =>
+        PLAYER_ACTION_ORDER.every(action => this.scene.anims.exists(playerAnimKey(key, view, action))));
+    }
+    return this.monsterSheetViews(key).every(view =>
+      MONSTER_ACTIONS.every(action => this.scene.anims.exists(playerAnimKey(key, view, action))));
+  }
+
+  /** Views a monster sheet holds (an external PNG override only has the first). */
+  private monsterSheetViews(key: string): readonly PlayerView[] {
+    const views = ENTITY_DRAWER_BY_KEY.get(key)?.views ?? [PLAYER_VIEWS[0]];
+    if (!this.scene.textures.exists(key)) return views;
+    const frames = this.scene.textures.get(key).frameTotal - 1; // minus __BASE
+    return views.filter((_, vi) => (vi + 1) * MONSTER_VIEW_FRAMES <= frames);
+  }
+
+  /**
+   * Views the loaded sheet actually holds. An external single-view PNG
+   * override only has the first view's frames.
+   */
+  private playerSheetViews(key: string): readonly PlayerView[] {
+    const views = PLAYER_DRAWER_BY_KEY.get(key)?.views ?? [PLAYER_VIEWS[0]];
+    if (!this.scene.textures.exists(key)) return views;
+    const frames = this.scene.textures.get(key).frameTotal - 1; // minus __BASE
+    return views.filter(view => getPlayerViewFrameRange(view, 'cast').end < frames);
   }
 
   private ensureEntityAnimationsRegistered(key: string, isPlayer: boolean): void {
@@ -730,19 +767,23 @@ export class SpriteGenerator {
   private registerEntityAnimations(key: string, isPlayer: boolean): void {
     const anims = this.scene.anims;
     const defs: [string, number, number, number, number][] = isPlayer
-      ? PLAYER_ACTION_ORDER.map(action => {
-          const range = getPlayerActionFrameRange(action);
+      ? this.playerSheetViews(key).flatMap(view => PLAYER_ACTION_ORDER.map((action): [string, number, number, number, number] => {
+          const range = getPlayerViewFrameRange(view, action);
           const rate = getActionFrameRate(key.replace(/^player_/, ''), action);
           const repeat = action === 'idle' || action === 'walk' ? -1 : 0;
-          return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action], rate, repeat];
-        })
-      : [
-          ['idle', IDLE_START, IDLE_COUNT, 6, -1],
-          ['walk', WALK_START, WALK_COUNT, 10, -1],
-          ['attack', ATK_START, ATK_COUNT, 12, 0],
-          ['hurt', HURT_START, HURT_COUNT, 10, 0],
-          ['death', DEATH_START, DEATH_COUNT, 6, 0],
-        ];
+          return [playerAnimKey('', view, action).slice(1), range.start, PLAYER_ACTION_FRAME_COUNTS[action], rate, repeat];
+        }))
+      : this.monsterSheetViews(key).flatMap((view, vi): [string, number, number, number, number][] => {
+          const base = vi * MONSTER_VIEW_FRAMES;
+          const name = (action: string): string => playerAnimKey('', view, action).slice(1);
+          return [
+            [name('idle'), base + IDLE_START, IDLE_COUNT, 6, -1],
+            [name('walk'), base + WALK_START, WALK_COUNT, 10, -1],
+            [name('attack'), base + ATK_START, ATK_COUNT, 12, 0],
+            [name('hurt'), base + HURT_START, HURT_COUNT, 10, 0],
+            [name('death'), base + DEATH_START, DEATH_COUNT, 6, 0],
+          ];
+        });
     for (const [action, start, count, rate, repeat] of defs) {
       const animKey = `${key}_${action}`;
       if (anims.exists(animKey)) anims.remove(animKey);

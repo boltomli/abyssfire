@@ -18,7 +18,7 @@ Deployed to GitHub Pages via `.github/workflows/deploy.yml` — push to `main` a
 - **Storage**: IndexedDB via Dexie.js (saves, stash)
 - **State**: Custom EventBus pub/sub + direct references
 - **Art**: Procedurally generated sprites with external asset override (cartoon-style PNG fallback)
-- **Resolution**: 1280x720, isometric tiles 64x32
+- **Resolution**: 1280x720 logical, isometric tiles 64x32. The canvas renders at `RENDER_SCALE` (1 / 1.5 / 2 × by window size, device pixel ratio and render quality; `?res=` overrides) with every camera zoomed to match, so code stays in logical pixels: screen-fixed scenes call `applyScreenCamera`, the zone camera is `ZONE_CAMERA_ZOOM × RENDER_SCALE`, and raw pointer coordinates in UI code go through `/ RENDER_SCALE` (`logicalPointer`). Text is rasterised at the matching resolution (`installTextResolution`)
 
 ## Project Structure
 
@@ -144,6 +144,14 @@ Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4)
   zone-themed terrain (`src/graphics/terrain/`), props, pooled skill VFX (`src/graphics/vfx/`),
   item/skill icons (`src/graphics/icons/`) and the UI kit (`src/ui/UiKit.ts`) follow
   `docs/art-direction.md`. External PNGs in `public/assets/` still override any texture key.
+- Hero sheets are isometric: every action in a front 3/4 (`se`) and back 3/4 (`ne`) view, mirrored
+  for sw/nw (`PLAYER_VIEWS`, view-major frames; `ne` anims are `player_<class>_ne_<action>`).
+  `rig/HumanView.ts` lifts the side-view keyframes into 3D (lateral axis, ±45° yaw, 2:1 iso drop,
+  depth-sorted parts); `CharacterAnimator.resolveFacing` picks view + flip from the screen-space
+  move/target vector with hysteresis. Monsters use the same two views (`rig/MonsterView.ts`:
+  lofted solids, turned heads, wing planes; radial/amorphous ones like slimes have a single se view
+  and mirror it); `Monster` faces its heading or, while attacking, the player. NPCs are drawn in
+  the se view only (`NpcKit` over `HumanView`) and mirror toward the player within 3 tiles.
 
 ### Needs Work
 - **Performance**: first entry to a zone draws its monster/NPC sheets (~1 s on a software

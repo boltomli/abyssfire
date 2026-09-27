@@ -26,6 +26,26 @@ import {
 } from '../rig/Rig';
 import { basePose, solveSkeleton, spun, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { humanoidMonster, humanoidTracks, type HumanoidMonsterSpec } from '../rig/MonsterKit';
+import type { ViewSkeleton } from '../rig/HumanView';
+import type { MonsterAction } from '../types';
+import {
+  backSpikes,
+  eye3,
+  eyeGlowPoints,
+  lp,
+  poly3,
+  profileRings,
+  sagittalSpun,
+  solid3,
+  surf,
+  surfCurve,
+  surfPatch,
+  surfVis,
+  tube3,
+  turnedHead,
+  type L3,
+  type Part3,
+} from '../rig/MonsterView';
 
 const HIDE = tone(0x8e2a2c, { light: 0.3, shadow: 0.45 });
 const HIDE_FAR = tone(0x5a171d, { light: 0.18 });
@@ -246,6 +266,124 @@ function fiendHead(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose): v
   ctx.restore();
 }
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const FIEND_BODY = (len: number): V[] => [vec(-7.4, -1), vec(0, -3), vec(7, 0.6), vec(9.4, len * 0.42), vec(6.4, len * 0.85), vec(4, len + 1), vec(-4.4, len + 1.2), vec(-7, len * 0.5)];
+const fiendRings = (len: number): ReturnType<typeof profileRings> => profileRings(FIEND_BODY(len), y => len - y, a => a * 1.05, 8);
+const FIEND_SKULL = profileRings([vec(-5.4, -1.8), vec(-3.6, -6.2), vec(2, -6.8), vec(6.4, -4.4), vec(7.4, -1.6), vec(7, 2.2), vec(4, 3), vec(-3.6, 2.4)], y => -y, a => a * 0.95, 7);
+const FIEND_EYE = { h: 1.6, phi: 0.5 };
+/** Molten cracks on the chest, as (h from neck, phi) control points. */
+const CRACKS: (readonly [number, number])[][] = [
+  [[2, -0.9], [4.6, -0.5], [7.6, -0.7], [10.4, -0.3]],
+  [[4.6, -0.5], [5.4, -0.1]],
+];
+
+function fiendTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = fiendRings(len);
+  const front = T.vis(0) > T.vis(Math.PI);
+  const flap = (s: 1 | -1): L3[] => {
+    const fr = s > 0 ? 5.6 : -4.8;
+    const sw = -p.flow * 2 * s;
+    return [[1.2, fr, -3], [1.2, fr, 3], [-5, fr + sw + s, 2.4], [-3.6, fr + sw + s * 0.6, 0], [-5.4, fr + sw + s, -2.4]];
+  };
+  const spikes = backSpikes(T, R, len + 0.5, len * 0.35, 4, [0], i => 5.2 - i * 0.9, 1.4);
+  const parts: Part3[] = [
+    { pts: flap(front ? -1 : 1), tone: tone(0x3a2622), bias: -30 },
+    ...spikes.map(pts => ({ pts, tone: OBSIDIAN, hull: true, band: 0.4 })),
+  ];
+  solid3(ctx, T, R, HIDE, {
+    band: 2.2,
+    hi: 0.9,
+    parts,
+    face: () => {
+      if (T.vis(0) > -0.3) {
+        for (let i = 0; i < 4; i++) {
+          const h = len - len * 0.28 - i * 3;
+          cel(ctx, () => polyPath(ctx, surfPatch(T, R, h, h - 2.6, -0.7 + i * 0.05, 0.7 - i * 0.05, 0.2, 6)), BELLY, { band: 0.6, stroke: 0.4 });
+        }
+      }
+      for (const c of CRACKS) {
+        for (const run of surfCurve(T, R, c.map(([h, phi]) => [len - h, phi] as const), 0.1, 4, 0.02)) {
+          ctx.strokeStyle = MAGMA;
+          ctx.lineWidth = 0.65;
+          ctx.lineJoin = 'round';
+          ctx.beginPath();
+          run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+          ctx.stroke();
+        }
+      }
+    },
+    over: () => poly3(ctx, T, flap(front ? 1 : -1), tone(0x3a2622), { band: 0.6 }),
+  });
+}
+
+function fiendHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const H = turnedHead(sk, 0.35);
+  const R = FIEND_SKULL;
+  const jaw = 0.8 + p.fx * 2.2;
+  const horn = (s: 1 | -1): L3[] => [[5, 1, 3.6 * s], [7.4, -3.4, 6.4 * s], [11, -6, 7.6 * s], [14.6, -4.8, 7 * s], [16, -1, 5.6 * s], [15, 2.4, 4.4 * s]];
+  const deep = (s: 1 | -1): boolean => H.rig.d(lp(H, 12, -5, 7 * s)) < H.rig.d(H.o);
+  const drawHorn = (s: 1 | -1): void => tube3(ctx, H, horn(s), [2.4, 2, 1.6, 1.1, 0.6, 0.25], s > 0 ? HORN : tone(0x241a1c));
+  for (const s2 of [1, -1] as const) if (deep(s2)) drawHorn(s2);
+  const d = jaw * 0.6;
+  const parts: Part3[] = [
+    // Lower jaw hanging open with the snarl, tusks jutting up
+    { pts: [[-1.8, 0, -4], [-1.8, 0, 4], [-3 - d * 0.3, 9, -2.4], [-3 - d * 0.3, 9, 2.4], [-5.8 - d, 7, -2.2], [-5.8 - d, 7, 2.2], [-5.4 - d * 0.5, 0.4, -3.4], [-5.4 - d * 0.5, 0.4, 3.4]], tone: HIDE, hull: true, band: 1, bias: -0.4 },
+    { pts: [[-3.2 - d * 0.3, 7.6, 2], [-3.2 - d * 0.3, 8.6, 1.8], [1.4, 8.4, 2.2]], tone: TUSK, mirror: true, band: 0.3, bias: 1 },
+  ];
+  solid3(ctx, H, R, HIDE, {
+    band: 1.6,
+    parts,
+    face: () => {
+      if (H.vis(0) < -0.3) return;
+      cel(ctx, () => polyPath(ctx, surfPatch(H, R, FIEND_EYE.h + 2.4, FIEND_EYE.h + 1, -1.05, 1.05, 0.3, 6)), HIDE_FAR, { band: 0.4, stroke: 0.35 });
+      for (const sgn of [1, -1]) {
+        eye3(ctx, H, R, FIEND_EYE.h, sgn * FIEND_EYE.phi, { rx: 1.7, ry: 0.65, iris: '#fff2a0', tilt: -0.15 });
+      }
+      ctx.fillStyle = '#2a0808';
+      ctx.beginPath();
+      polyPath(ctx, surfPatch(H, R, -2, -2.6 - d * 0.5, -0.8, 0.8, 0.2, 6));
+      ctx.fill();
+      for (const phi of [-0.15, 0.15]) {
+        if (surfVis(H, R, -0.6, phi) < 0.1) continue;
+        const q = surf(H, R, -0.6, phi, 0.2);
+        ctx.fillRect(q.x - 0.45, q.y - 0.35, 0.9, 0.7);
+      }
+    },
+  });
+  for (const s2 of [1, -1] as const) if (!deep(s2)) drawHorn(s2);
+}
+
+function fiendRakeSmear(ctx: CanvasRenderingContext2D, p: HumanPose, act: MonsterAction, t: number): void {
+  if (!(act === 'attack' && t > 0.8)) return;
+  const tips: V[] = [];
+  const bases: V[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const sp = samplePoseTrack(TRACKS_REF.attack, Math.max(0.34, t - i * 0.05));
+    const ssk = solveSkeleton(sp, SKIN.prop);
+    const tl = talons(ssk.handN, ssk.elN, sp.fx)[1];
+    tips.push(spun(sp, tl.tip, ssk));
+    bases.push(spun(sp, lerpV(ssk.handN, tl.tip, 0.25), ssk));
+  }
+  smear(ctx, tips, bases, 0xff7a3a, 0.6 * p.fx);
+}
+
+function fiendViewFx(ctx: CanvasRenderingContext2D, p: HumanPose, sk: ViewSkeleton, act: MonsterAction, t: number): void {
+  if (act === 'death' && t > 0.8) return;
+  const live = act === 'death' ? 1 - t : 1;
+  for (const e of eyeGlowPoints(turnedHead(sk, 0.35), FIEND_SKULL, FIEND_EYE.h, [FIEND_EYE.phi, -FIEND_EYE.phi])) glow(ctx, e, 2.6 + p.fx * 1.5, EYE, (0.5 + p.fx * 0.3) * live);
+  const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 2);
+  const R = fiendRings(sk.torsoLen);
+  for (const [h, phi] of [[4.6, -0.5], [8.6, -0.6], [11.8, -0.4]] as const) {
+    if (surfVis(sk.torso, R, sk.torsoLen - h, phi) < 0.05) continue;
+    glow(ctx, surf(sk.torso, R, sk.torsoLen - h, phi, 0.3), 2.6 + pulse, MAGMA_GLOW, (0.35 + pulse * 0.15 + p.fx * 0.2) * live);
+  }
+  glow(ctx, lerpV(sk.elN, sk.handN, 0.5), 2.4, MAGMA_GLOW, 0.3 * live);
+  sagittalSpun(ctx, sk, p, () => fiendRakeSmear(ctx, p, act, t));
+}
+
 const SKIN: HumanSkin = {
   prop: {
     thigh: 10, shin: 10, upperArm: 10, foreArm: 10,
@@ -327,9 +465,18 @@ const TRACKS = {
   ],
 };
 
+const TRACKS_REF = TRACKS;
+
 export const DungeonFiendDrawer = humanoidMonster({
   ...SPEC,
   tracks: TRACKS,
+  view: {
+    build: { hipW: 3, shW: 6.4, elbowOut: 1.6, footOut: 0.7 },
+    headBias: 3,
+    torso: fiendTorsoView,
+    head: fiendHeadView,
+  },
+  viewFx: fiendViewFx,
   fx: (ctx, p, sk, act, t) => {
     if (act === 'death' && t > 0.8) return;
     const live = act === 'death' ? 1 - t : 1;

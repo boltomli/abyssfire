@@ -27,6 +27,28 @@ import {
 } from '../rig/Rig';
 import { basePose, drawHumanoid, solveSkeleton, spun, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { humanoidTracks, rigMonster, type HumanoidMonsterSpec } from '../rig/MonsterKit';
+import { drawHumanoidView, solveViewSkeleton, type HumanView, type ViewSkeleton } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  band,
+  clipTo,
+  decal,
+  depthOf,
+  groundX,
+  loftFill,
+  monsterViewSkin,
+  poly3,
+  profileRings,
+  ringsBetween,
+  sagittalSpun,
+  sorted,
+  sp,
+  surf,
+  surfPatch,
+  surfVis,
+  turnedHead,
+  type L3,
+} from '../rig/MonsterView';
 
 // ── Palette ─────────────────────────────────────────────────────────────
 const FLESH = tone(0x93a37c, { light: 0.3, shadow: 0.4 });
@@ -279,6 +301,211 @@ function head(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: numb
   ctx.restore();
 }
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const ZBODY = (len: number): V[] => [vec(-5, 0.4), vec(0.6, -0.8), vec(5.4, 1.4), vec(5.8, len * 0.55), vec(4.6, len + 0.6), vec(-4.4, len + 0.8), vec(-5.6, len * 0.5)];
+
+function zombieTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = profileRings(ZBODY(len), y => len - y, a => a * 1.1, 7);
+  const front = T.vis(0) > T.vis(Math.PI);
+  const ph = t * Math.PI * 2;
+  loftFill(ctx, T, R, FLESH, { band: 1.5 });
+  // Torn shirt over most of the torso, ragged hem hanging below the belt
+  const shirtR = ringsBetween(R, -0.6, len + 0.2, 0.35);
+  const shirt = loftFill(ctx, T, shirtR, SHIRT, { band: 1.2 });
+  for (let k = 0; k < 9; k++) {
+    const phi = (k / 9) * Math.PI * 2 + 0.3;
+    if (T.vis(phi) < 0.02) continue;
+    const r = shirtR[shirtR.length - 1];
+    const l = 1.4 + ((k * 5) % 3) * 0.9 + Math.sin(ph + k) * 0.3 + p.flow;
+    const a = T.at(r.h + 0.2, phi - 0.2, r.a, r.b, r.f ?? 0);
+    const b = T.at(r.h + 0.2, phi + 0.2, r.a, r.b, r.f ?? 0);
+    const c = T.at(r.h - l, phi + 0.05, r.a + 0.1, r.b + 0.1, r.f ?? 0);
+    cel(ctx, () => polyPath(ctx, [a, b, c]), SHIRT, { band: 0.4, stroke: 0.4 });
+  }
+  clipTo(ctx, shirt, () => {
+    // Hole over the ribs (front) — rotten flesh with ribs showing
+    decal(ctx, T, R, len * 0.62, 0.45, () => {
+      cel(ctx, () => polyPath(ctx, [vec(-2.4, -2.4), vec(1.6, -2.8), vec(2.8, -0.2), vec(1.6, 2.4), vec(-1.8, 2), vec(-2.8, 0.2)]), ROT, { band: 0.5, stroke: 0.5 });
+      ctx.strokeStyle = BONE.base;
+      ctx.lineWidth = 0.7;
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 3; i++) {
+        const y = -1.4 + i * 1.3;
+        ctx.beginPath();
+        ctx.moveTo(-2, y);
+        ctx.quadraticCurveTo(0, y - 0.8, 2.2, y + 0.4);
+        ctx.stroke();
+      }
+    }, { lift: 0.4, minVis: 0.05 });
+    // Stains & rips
+    for (const [h, phi, r] of [[len * 0.3, -0.9, 1.8], [len * 0.2, 2.4, 1.4], [len * 0.7, 3.4, 1.6]] as const) {
+      decal(ctx, T, R, h, phi, () => {
+        ctx.fillStyle = 'rgba(40,30,40,0.35)';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r, r * 0.7, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }, { lift: 0.4 });
+    }
+    for (const phi of [-1.4, 2.8]) {
+      decal(ctx, T, R, len * 0.55, phi, () => {
+        ctx.strokeStyle = SHIRT.shade;
+        ctx.lineWidth = 0.45;
+        ctx.beginPath();
+        ctx.moveTo(-0.6, -2.4);
+        ctx.lineTo(0.4, 2.4);
+        ctx.stroke();
+      }, { lift: 0.4 });
+    }
+  });
+  // Collar
+  band(ctx, T, R, len - 0.4, SHIRT_IN, 1.4, 0.4);
+  // Rope belt with a dangling knot
+  band(ctx, T, R, 1, ROPE, 1.4, 0.5);
+  if (front) {
+    const k0 = surf(T, R, 1, 0.5, 0.6);
+    const knot = clothChain(k0, 4, 2, p.flow, 1, ph + 0.5);
+    ctx.strokeStyle = ROPE.shade;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(knot[0].x, knot[0].y);
+    for (const q of knot) ctx.lineTo(q.x, q.y);
+    ctx.stroke();
+  }
+}
+
+const ZSKULL: V[] = [vec(-5, -0.6), vec(-4.2, -5.2), vec(0.6, -6.8), vec(5, -5), vec(6.6, -1.4), vec(6.2, 2.4), vec(3.2, 3), vec(-1, 2.6), vec(-4, 2.2)];
+const ZHEAD_RINGS = profileRings(ZSKULL, y => -y, a => a * 0.88, 8);
+/** Near (glowing) eye and far (milky) eye angles on the head. */
+const Z_EYES = { glow: 0.42, milky: -0.42, h: 1.2 };
+
+function zombieHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  limb(ctx, sk.neck, lerpV(sk.neck, sk.head, 0.7), 1.9, 1.7, FLESH);
+  const H = turnedHead(sk, 0.4);
+  const R = ZHEAD_RINGS;
+  const ph = t * Math.PI * 2;
+  const items: { d: number; draw: () => void }[] = [];
+  // Stringy hair hanging off the back of the skull
+  for (let i = 0; i < 4; i++) {
+    const l = (i - 1.5) * 1.8;
+    const root: L3 = [4.6 - Math.abs(l) * 0.2, -3.6, l];
+    const sw = Math.sin(ph + i) * 0.8 + p.flow * 2;
+    const pts: L3[] = [root, [1.6, -5.6 - sw * 0.4, l * 1.15], [-2, -6.4 - sw, l * 1.25], [-4.6 + i * 0.4, -6.6 - sw * 1.3, l * 1.3]];
+    items.push({
+      d: depthOf(H, pts),
+      draw: () => {
+        const scr = pts.map(q => sp(H, q[0], q[1], q[2]));
+        ctx.strokeStyle = HAIR.base;
+        ctx.lineWidth = 1.1 - Math.abs(i - 1.5) * 0.15;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        scr.forEach((q, k) => (k ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+        ctx.stroke();
+      },
+    });
+  }
+  // Torn ears
+  for (const s of [1, -1] as const) {
+    const ear: L3[] = [[1.8, -0.6, 5 * s], [2.2, -2.4, 5.6 * s], [-0.4, -2.6, 5.8 * s], [-1, -1, 5.4 * s]];
+    items.push({ d: depthOf(H, ear), draw: () => poly3(ctx, H, ear, FLESH_FAR, { band: 0.4, stroke: 0.4 }) });
+  }
+  const jaw = 0.25 + p.fx * 0.45 + Math.max(0, Math.sin(ph * 2)) * 0.08;
+  const drop = jaw * 1.8;
+  const jawRings = [
+    { h: -1, a: 4.4, b: 4.2, f: 1.8 },
+    { h: -3.2 - drop * 0.6, a: 3.8, b: 3.6, f: 2.2 + drop * 0.3 },
+    { h: -4.8 - drop, a: 2.4, b: 2.4, f: 2.6 + drop * 0.5 },
+  ];
+  items.push({
+    d: depthOf(H, [[-3, 2, 0]]) - 1.5,
+    draw: () => {
+      const jp = loftFill(ctx, H, jawRings, FLESH, { band: 0.6 });
+      if (H.vis(0) < -0.2) return;
+      clipTo(ctx, jp, () => {
+        ctx.fillStyle = '#2a1820';
+        ctx.beginPath();
+        polyPath(ctx, surfPatch(H, jawRings, -1.6, -2.4 - drop * 0.4, -0.6, 0.6, 0.1, 6));
+        ctx.fill();
+        ctx.fillStyle = BONE.base;
+        for (const phi of [-0.3, 0.25]) {
+          if (surfVis(H, jawRings, -2, phi) < 0.05) continue;
+          const q = surf(H, jawRings, -1.9 - drop * 0.3, phi, 0.15);
+          ctx.fillRect(q.x - 0.35, q.y - 0.5, 0.7, 0.9);
+        }
+      });
+    },
+  });
+  items.push({
+    d: depthOf(H, [[0, 0, 0]]),
+    draw: () => {
+      const shell = loftFill(ctx, H, R, FLESH, { band: 1.4 });
+      clipTo(ctx, shell, () => {
+        decal(ctx, H, R, 2, -2.2, () => {
+          ctx.fillStyle = 'rgba(110,70,130,0.42)';
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 1.9, 1.4, 0.4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        // Exposed skull patch + stitched scar
+        decal(ctx, H, R, 5.4, 2.3, () => cel(ctx, () => ellipsePath(ctx, vec(0, 0), 2.1, 1.3, 0.2), BONE, { band: 0.4, stroke: 0.4 }), { lift: 0.1 });
+        decal(ctx, H, R, 3.2, -2.3, () => {
+          ctx.strokeStyle = '#2a2026';
+          ctx.lineWidth = 0.4;
+          ctx.beginPath();
+          ctx.moveTo(-1.6, -2);
+          ctx.lineTo(1.4, 1.6);
+          for (let i = 0; i < 3; i++) {
+            const c = lerpV(vec(-1.6, -2), vec(1.4, 1.6), (i + 0.5) / 3);
+            ctx.moveTo(c.x - 0.7, c.y + 0.6);
+            ctx.lineTo(c.x + 0.7, c.y - 0.6);
+          }
+          ctx.stroke();
+        });
+        if (H.vis(0) < -0.3) return;
+        // Heavy brow, sunken sockets: one glowing eye, one milky
+        cel(ctx, () => polyPath(ctx, surfPatch(H, R, 3.8, 2.8, -0.95, 0.95, 0.1)), FLESH_FAR, { band: 0.3, stroke: 0.3 });
+        for (const [phi, col] of [[Z_EYES.glow, '#e8ff9a'], [Z_EYES.milky, '#b8b8a8']] as const) {
+          decal(ctx, H, R, Z_EYES.h, phi, () => {
+            ctx.fillStyle = '#231a26';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 1.8, 1.5, 0.1, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = col;
+            ctx.beginPath();
+            ctx.arc(0.2, 0.1, 0.75, 0, Math.PI * 2);
+            ctx.fill();
+          }, { minVis: 0.02 });
+        }
+        // Nose stub + upper teeth
+        decal(ctx, H, R, -0.8, 0.05, () => {
+          ctx.fillStyle = '#2a2026';
+          ctx.beginPath();
+          ctx.ellipse(-0.5, 0, 0.45, 0.6, 0, 0, Math.PI * 2);
+          ctx.ellipse(0.5, 0, 0.45, 0.6, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }, { minVis: 0.05 });
+        ctx.fillStyle = BONE.light;
+        for (const phi of [-0.35, 0, 0.35]) {
+          if (surfVis(H, R, -2.6, phi) < 0.05) continue;
+          const q = surf(H, R, -2.6, phi, 0.1);
+          ctx.fillRect(q.x - 0.4, q.y - 0.4, 0.8, 1);
+        }
+      });
+    },
+  });
+  sorted(items);
+}
+
+const ZOMBIE_VIEW = (): ReturnType<typeof monsterViewSkin> => monsterViewSkin(SKIN, {
+  build: { hipW: 2.3, shW: 5, elbowOut: 1.2 },
+  headBias: 5,
+  torso: zombieTorsoView,
+  head: zombieHeadView,
+});
+
 // ── Skin & poses ────────────────────────────────────────────────────────
 
 const SKIN: HumanSkin = {
@@ -408,7 +635,7 @@ function zombiePose(act: MonsterAction, t: number): HumanPose {
   }
 }
 
-function zombieFx(ctx: CanvasRenderingContext2D, p: HumanPose, act: MonsterAction, t: number): void {
+function zombieFx(ctx: CanvasRenderingContext2D, p: HumanPose, act: MonsterAction, t: number, rakeOnly = false): void {
   const sk = solveSkeleton(p, SKIN.prop);
   // Rake streaks on the contact frame
   if (act === 'attack' && p.fx > 0.9) {
@@ -426,6 +653,7 @@ function zombieFx(ctx: CanvasRenderingContext2D, p: HumanPose, act: MonsterActio
     }
     ctx.restore();
   }
+  if (rakeOnly) return;
   // Sickly glow in the one working eye + a whiff of grave miasma
   if (act === 'death' && t > 0.6) return;
   const eye = spun(p, vec(
@@ -440,17 +668,43 @@ function zombieFx(ctx: CanvasRenderingContext2D, p: HumanPose, act: MonsterActio
   }
 }
 
+const VSKIN = ZOMBIE_VIEW();
+
+function zombieViewFx(ctx: CanvasRenderingContext2D, p: HumanPose, act: MonsterAction, t: number, view: HumanView): void {
+  const vsk = solveViewSkeleton(p, SKIN.prop, VSKIN.build, view);
+  if (act === 'attack' && p.fx > 0.9) {
+    // Rake streaks: the side art, flattened onto the body plane
+    sagittalSpun(ctx, vsk, p, () => zombieFx(ctx, { ...p }, 'attack', t, true));
+  }
+  if (act === 'death' && t > 0.6) return;
+  const H = turnedHead(vsk, 0.4);
+  if (surfVis(H, ZHEAD_RINGS, Z_EYES.h, Z_EYES.glow) > 0.15) {
+    glow(ctx, surf(H, ZHEAD_RINGS, Z_EYES.h, Z_EYES.glow, 0.2), 2.6 + p.fx, EYE, 0.5 + p.fx * 0.25);
+  }
+  const back = vsk.rig.fwd;
+  for (let i = 0; i < 3; i++) {
+    const k = (i / 3 + t) % 1;
+    const base = lerpV(vsk.pelvis, vsk.neck, 0.4 + i * 0.2);
+    const d = 3 + k * 4;
+    glow(ctx, vec(base.x - back.x * d + Math.sin(i * 2 + t * 6), base.y - back.y * d - k * 6), 2.2 * (1 - k * 0.5), 0x9ad07a, 0.22 * (1 - k));
+  }
+}
+
 export const ZombieDrawer = rigMonster<HumanPose>({
   key: SPEC.key,
   frameW: SPEC.frameW,
   frameH: SPEC.frameH,
   scale: SPEC.scale,
+  views: MONSTER_VIEWS,
   pose: zombiePose,
-  draw: (ctx, p, _act, t) => { drawHumanoid(ctx, p, SKIN, t); },
-  shadow: (p) => ({
-    x: Math.abs(p.spin) > 1 ? p.root.x + (p.spin > 0 ? 8 : -8) : p.root.x + 1,
+  draw: (ctx, p, _act, t, view) => {
+    if (view) drawHumanoidView(ctx, p, VSKIN, t, view);
+    else drawHumanoid(ctx, p, SKIN, t);
+  },
+  shadow: (p, _act, _t, view) => ({
+    x: groundX(view, Math.abs(p.spin) > 1 ? p.root.x + (p.spin > 0 ? 8 : -8) : p.root.x + 1),
     r: Math.abs(p.spin) > 1 ? 16 : 11,
     lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)),
   }),
-  fx: zombieFx,
+  fx: (ctx, p, act, t, view) => (view ? zombieViewFx(ctx, p, act, t, view) : zombieFx(ctx, p, act, t)),
 });

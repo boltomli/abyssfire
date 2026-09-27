@@ -27,6 +27,8 @@ import {
   type V,
 } from '../rig/Rig';
 import { rigMonster } from '../rig/MonsterKit';
+import { Section, ViewRig, v3, type HumanView } from '../rig/HumanView';
+import { MONSTER_VIEWS, groundX, loftFill, profileRings, sorted, wingDepth, wingPlane, withAffine } from '../rig/MonsterView';
 
 interface PhoenixPose {
   body: V;
@@ -375,13 +377,13 @@ function headPos(p: PhoenixPose): { neck0: V; head: V; ang: number } {
   return { neck0, head, ang };
 }
 
-function drawBody(ctx: CanvasRenderingContext2D, p: PhoenixPose, t: number): void {
+function drawBody(ctx: CanvasRenderingContext2D, p: PhoenixPose, t: number, lofted = false): void {
   const k = sizeK(p);
   const ph = t * Math.PI * 2;
   const ash = p.ash;
-  // Torso
+  // Torso (the 3/4 views loft it separately)
   const torso = [L(p, -11, 2.5), L(p, -7, -4.5), L(p, 1, -7), L(p, 8, -5), L(p, 11, 0), L(p, 7, 6.5), L(p, -3, 7), L(p, -9, 5)];
-  cel(ctx, () => blobPath(ctx, torso), ft(C.crimson, ash), { band: 1.8 * k });
+  if (!lofted) cel(ctx, () => blobPath(ctx, torso), ft(C.crimson, ash), { band: 1.8 * k });
   // Golden breast
   const breast = [L(p, 1, -4), L(p, 8, -4.5), L(p, 11, 0.2), L(p, 7, 6.2), L(p, 0, 5.8), L(p, -2, 1)];
   cel(ctx, () => blobPath(ctx, breast), ft(C.breast, ash, false, 0.5), { band: 1.2 * k });
@@ -504,6 +506,60 @@ function drawPhoenix(ctx: CanvasRenderingContext2D, p: PhoenixPose, t: number): 
   drawWing(ctx, p, false, t);
 }
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const TORSO_L = [vec(-11, 2.5), vec(-7, -4.5), vec(1, -7), vec(8, -5), vec(11, 0), vec(7, 6.5), vec(-3, 7), vec(-9, 5)];
+const TORSO_RINGS = profileRings(TORSO_L.map(q => vec(-q.y, q.x)), y => y, a => a * 0.95, 7);
+const WING_SPREAD = 1.15;
+
+function phoenixRig(p: PhoenixPose, view: HumanView): ViewRig {
+  return new ViewRig(view, 0, p.body, p.body.x);
+}
+
+/** Body section: h along the body's length, f up, lateral z. */
+function bodySection(rig: ViewRig, p: PhoenixPose): Section {
+  const c = Math.cos(p.pitch);
+  const s = Math.sin(p.pitch);
+  return new Section(rig, v3(p.body.x, p.body.y, 0), v3(c, s, 0), v3(s, -c, 0));
+}
+
+function onPlane(ctx: CanvasRenderingContext2D, rig: ViewRig, z: number, fn: () => void): void {
+  withAffine(ctx, q => rig.pt(q.x, q.y, z), fn);
+}
+
+function drawPhoenixView(ctx: CanvasRenderingContext2D, p: PhoenixPose, t: number, view: HumanView): void {
+  const rig = phoenixRig(p, view);
+  onPlane(ctx, rig, 0, () => drawAshHeap(ctx, p));
+  if (p.burst > 0.97) return;
+  const k = sizeK(p) * 1.12;
+  const items: { d: number; draw: () => void }[] = [];
+  for (const far of [true, false]) {
+    const g = wingGeo(p, far, t);
+    const s = far ? -1 : 1;
+    const anchor = v3(g.sh.x, g.sh.y, s * 3.2 * k);
+    // The far wing seen from the front would turn edge-on; sweep it back more.
+    const spread = far && view === 'se' ? 0.05 : WING_SPREAD;
+    items.push({
+      d: wingDepth(rig, anchor, s as 1 | -1, spread, 8) + (far ? -4 : 4),
+      draw: () => wingPlane(ctx, rig, anchor, g.sh, s as 1 | -1, spread, () => drawWing(ctx, p, far, t)),
+    });
+    items.push({ d: rig.depth(p.body.x, p.body.y, s * 2) + s * 0.5, draw: () => onPlane(ctx, rig, s * 2 * k, () => drawLeg(ctx, p, far)) });
+  }
+  const tailRoot = L(p, -12, 2.5);
+  items.push({ d: rig.depth(tailRoot.x - 6, tailRoot.y, 0), draw: () => onPlane(ctx, rig, 0, () => drawTail(ctx, p, t)) });
+  items.push({
+    d: rig.depth(p.body.x, p.body.y, 0),
+    draw: () => {
+      // Round torso loft, the neck, head and crest as side art on the body plane.
+      const S = bodySection(rig, p);
+      const rings = TORSO_RINGS.map(r => ({ h: r.h * k, a: r.a * k, b: r.b * k, f: (r.f ?? 0) * k }));
+      loftFill(ctx, S, rings, ft(C.crimson, p.ash), { band: 1.8 * sizeK(p) });
+      onPlane(ctx, rig, 0, () => drawBody(ctx, p, t, true));
+    },
+  });
+  sorted(items);
+}
+
 function talonTip(p: PhoenixPose): V {
   const k = sizeK(p);
   const tucked = L(p, -2, 10.5);
@@ -583,10 +639,14 @@ export const PhoenixDrawer = rigMonster<PhoenixPose>({
   frameW: 72,
   frameH: 56,
   scale: 1.2,
+  views: MONSTER_VIEWS,
   pose: phoenixPose,
-  draw: (ctx, p, _act, t) => drawPhoenix(ctx, p, t),
-  shadow: (p) => ({ x: p.body.x, r: 14 * sizeK(p) + 4 * p.burst, lift: Math.max(0, GROUND_Y - p.body.y - 12) }),
-  fx: phoenixFx,
+  draw: (ctx, p, _act, t, view) => (view ? drawPhoenixView(ctx, p, t, view) : drawPhoenix(ctx, p, t)),
+  shadow: (p, _act, _t, view) => ({ x: groundX(view, p.body.x), r: 14 * sizeK(p) + 4 * p.burst, lift: Math.max(0, GROUND_Y - p.body.y - 12) }),
+  fx: (ctx, p, act, t, view) => {
+    if (!view) phoenixFx(ctx, p, act, t);
+    else onPlane(ctx, phoenixRig(p, view), 0, () => phoenixFx(ctx, p, act, t));
+  },
   ink: '#3a0c06',
   rim: 'rgba(255,236,160,0.7)',
 });

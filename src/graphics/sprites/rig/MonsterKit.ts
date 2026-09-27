@@ -11,6 +11,8 @@
  * be overridden when a monster needs bespoke motion.
  */
 import type { EntityDrawer, MonsterAction } from '../types';
+import { drawHumanoidView, solveViewSkeleton, type HumanView, type ViewSkeleton } from './HumanView';
+import { MONSTER_VIEWS, monsterViewSkin, sagittalSpun, viewGroundX, type MonsterViewOpts } from './MonsterView';
 import {
   CENTER_X,
   GROUND_Y,
@@ -52,12 +54,18 @@ export interface RigMonsterSpec<P> {
   frameH: number;
   /** Figure size within the 96-unit frame height. */
   scale: number;
-  pose(action: MonsterAction, t: number): P;
-  draw(ctx: CanvasRenderingContext2D, p: P, action: MonsterAction, t: number): void;
+  pose(action: MonsterAction, t: number, view?: HumanView): P;
+  /**
+   * Isometric 3/4 views the drawer paints (se front, ne back). The sheet
+   * then holds all 20 frames once per view, and draw/shadow/fx get the view.
+   * Omitted: a single view (radially symmetric / amorphous creatures).
+   */
+  views?: readonly HumanView[];
+  draw(ctx: CanvasRenderingContext2D, p: P, action: MonsterAction, t: number, view?: HumanView): void;
   /** Ground shadow centre x and radius for a pose. */
-  shadow(p: P, action: MonsterAction, t: number): { x: number; r: number; lift: number };
+  shadow(p: P, action: MonsterAction, t: number, view?: HumanView): { x: number; r: number; lift: number };
   /** Glows, smears, particles — drawn over the inked body. */
-  fx?(ctx: CanvasRenderingContext2D, p: P, action: MonsterAction, t: number): void;
+  fx?(ctx: CanvasRenderingContext2D, p: P, action: MonsterAction, t: number, view?: HumanView): void;
   /** Ink colour override (e.g. ghostly monsters). */
   ink?: string;
   rim?: string;
@@ -68,17 +76,19 @@ export function rigMonster<P>(spec: RigMonsterSpec<P>): EntityDrawer {
     key: spec.key,
     frameW: spec.frameW,
     frameH: spec.frameH,
-    totalFrames: 20,
+    totalFrames: 20 * (spec.views?.length ?? 1),
     inked: true,
-    drawFrame(ctx, frame, action, w, h) {
+    views: spec.views,
+    drawFrame(ctx, frame, action, w, h, _utils, view) {
       const act = action as MonsterAction;
       const t = monsterTime(act, frame);
-      const p = spec.pose(act, t);
+      const v = spec.views ? (view ?? spec.views[0]) : undefined;
+      const p = spec.pose(act, t, v);
       const palette = getCurrentZonePalette();
-      const sh = spec.shadow(p, act, t);
+      const sh = spec.shadow(p, act, t, v);
       renderRigFrame(
         ctx, w, h,
-        c => spec.draw(c, p, act, t),
+        c => spec.draw(c, p, act, t, v),
         {
           glowColor: palette.entityOutlineColor,
           glowBlur: standardOutlineBlur(w, h),
@@ -87,7 +97,7 @@ export function rigMonster<P>(spec: RigMonsterSpec<P>): EntityDrawer {
           rim: spec.rim,
         },
         c => groundShadow(c, sh.x, sh.r, sh.lift),
-        spec.fx ? c => spec.fx!(c, p, act, t) : undefined,
+        spec.fx ? c => spec.fx!(c, p, act, t, v) : undefined,
       );
     },
   };
@@ -115,6 +125,13 @@ export interface HumanoidMonsterSpec {
   fx?(ctx: CanvasRenderingContext2D, p: HumanPose, sk: Skeleton, action: MonsterAction, t: number): void;
   shadowR?: number;
   ink?: string;
+  /**
+   * Isometric 3/4 views (se + ne): torso/head painters that turn with the
+   * body; limbs and weapon reuse the side-view skin. Omitted: side view only.
+   */
+  view?: MonsterViewOpts;
+  /** Effects for the 3/4 views (default: `fx` flattened onto the body plane). */
+  viewFx?(ctx: CanvasRenderingContext2D, p: HumanPose, sk: ViewSkeleton, action: MonsterAction, t: number): void;
 }
 
 function offset(p: V, dx: number, dy: number): V {
@@ -249,21 +266,37 @@ export function humanoidMonster(spec: HumanoidMonsterSpec): EntityDrawer {
     }
   };
 
+  const vskin = spec.view ? monsterViewSkin(spec.skin, spec.view) : undefined;
   return rigMonster<HumanPose>({
     key: spec.key,
     frameW: spec.frameW,
     frameH: spec.frameH,
     scale: spec.scale,
     ink: spec.ink,
+    views: vskin ? MONSTER_VIEWS : undefined,
     pose,
-    draw: (ctx, p, act, t) => { drawHumanoid(ctx, p, spec.skin, t); },
-    shadow: (p) => ({
-      x: p.spin !== 0 && Math.abs(p.spin) > 1 ? p.root.x + (p.spin > 0 ? 8 : -8) : p.root.x + 1,
-      r: Math.abs(p.spin) > 1 ? shR * 1.5 : shR,
-      lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)),
-    }),
-    fx: spec.fx
-      ? (ctx, p, act, t) => spec.fx!(ctx, p, solveSkeleton(p, spec.skin.prop), act, t)
+    draw: (ctx, p, _act, t, view) => {
+      if (vskin && view) drawHumanoidView(ctx, p, vskin, t, view);
+      else drawHumanoid(ctx, p, spec.skin, t);
+    },
+    shadow: (p, _act, _t, view) => {
+      const x = p.spin !== 0 && Math.abs(p.spin) > 1 ? p.root.x + (p.spin > 0 ? 8 : -8) : p.root.x + 1;
+      return {
+        x: view ? viewGroundX(view, x) : x,
+        r: Math.abs(p.spin) > 1 ? shR * 1.5 : shR,
+        lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)),
+      };
+    },
+    fx: spec.fx || spec.viewFx
+      ? (ctx, p, act, t, view) => {
+        if (!vskin || !view) {
+          spec.fx?.(ctx, p, solveSkeleton(p, spec.skin.prop), act, t);
+          return;
+        }
+        const vsk = solveViewSkeleton(p, vskin.prop, vskin.build, view);
+        if (spec.viewFx) spec.viewFx(ctx, p, vsk, act, t);
+        else sagittalSpun(ctx, vsk, p, () => spec.fx!(ctx, p, solveSkeleton(p, spec.skin.prop), act, t));
+      }
       : undefined,
   });
 }

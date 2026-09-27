@@ -1632,6 +1632,13 @@ const zhCN: LocaleData = {
   'ui.tooltip.gemEffect': '镶嵌效果: +{value}{suffix} {label}',
   'ui.tooltip.gemHeader': '── 宝石 ──',
   'ui.tooltip.socketCount': '插槽: {filled}/{max}',
+  'ui.compare.header': '对比已装备（{slot}）',
+  'ui.compare.equippedTag': '已装备',
+  'ui.compare.emptySlot': '▲ 该部位空着，穿上即是提升',
+  'ui.compare.same': '与已装备属性相同',
+  'ui.compare.unidentified': '未鉴定：仅比较基础属性',
+  'ui.compare.avgDamage': '平均伤害',
+  'ui.compare.defense': '防御',
   'ui.tooltip.sellPrice': '售价: {price}G',
   'ui.tooltip.legendaryEffect': '蕴含未知的力量',
 

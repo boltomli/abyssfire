@@ -39,6 +39,28 @@ import {
   type Skeleton,
 } from '../rig/Humanoid';
 import { rigMonster } from '../rig/MonsterKit';
+import { drawHumanoidView, solveViewSkeleton, type HumanView, type ViewPart, type ViewSkeleton } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  band,
+  decal,
+  groundX,
+  loftFill,
+  lp,
+  monsterViewSkin,
+  poly3,
+  profileRings,
+  ringsBetween,
+  sagittalSpun,
+  solid3,
+  sp,
+  strap,
+  surf,
+  surfVis,
+  tube3,
+  turnedHead,
+  type L3,
+} from '../rig/MonsterView';
 
 const IRON = tone(0x7c8696, { light: 0.45 });
 const IRON_FAR = tone(0x5a6272, { light: 0.25 });
@@ -397,6 +419,218 @@ const SKIN: HumanSkin = {
   },
 };
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const GUARD_BUILD = { hipW: 4, shW: 8.6, elbowOut: 1.8, footOut: 0.8 };
+const CHEST = (len: number): V[] => [vec(-8.4, -0.6), vec(-2, -2.6), vec(6, -1.4), vec(10.2, 3.4), vec(10.4, len * 0.55), vec(7.4, len - 1.4), vec(-6.4, len - 1), vec(-9, len * 0.45)];
+const guardRings = (len: number): ReturnType<typeof profileRings> => profileRings(CHEST(len), y => len - y, a => a * 0.95, 8);
+const GRATE = { hk: 0.5, phi: 0.25 };
+const HELM = profileRings([vec(-5.4, 4.6), vec(-6, -3), vec(-3.6, -7.4), vec(2.6, -7.8), vec(6.4, -4.6), vec(7, 0.6), vec(6.4, 5), vec(0, 5.8)], y => -y, a => a * 1.02, 7);
+const VISOR_H = 1.6;
+
+/** Tabard panel hanging from the belt, front (+1) or back (−1). */
+function tabardPanel(_len: number, s: 1 | -1, R: ReturnType<typeof guardRings>, p: HumanPose, t: number): L3[] {
+  const r = R[R.length - 1];
+  const fr = (r.f ?? 0) + s * (r.a + 1.2);
+  const ph = t * Math.PI * 2;
+  const sw = (Math.sin(ph) * 0.5 - p.flow * 2.4) * (s > 0 ? 1 : -1);
+  return [[1, fr, -3.4], [1, fr, 3.4], [-11, fr + s * 1 + sw, 3.2], [-9.4, fr + s * 0.8 + sw, 1], [-11.6, fr + s * 1 + sw, -0.6], [-9.6, fr + s * 0.8 + sw, -3.2]];
+}
+
+function guardTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const gp = p as GuardPose;
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = guardRings(len);
+  const front = T.vis(0) > T.vis(Math.PI);
+  // Mail skirt below the cuirass
+  const mail = [{ h: 2, a: 8, b: 7.6, f: 0.6 }, { h: -5.6, a: 8.4, b: 8, f: 0.2 - p.flow }];
+  poly3(ctx, T, tabardPanel(len, front ? -1 : 1, R, p, t), CLOTH, { band: 1 });
+  loftFill(ctx, T, mail, IRON_DARK, { band: 0.8 });
+  for (let h = 1; h > -5.4; h -= 1.4) band(ctx, T, mail, h, { ...IRON_DARK, base: IRON_DARK.shade, line: 'rgba(0,0,0,0)' }, 0.35, 0.05);
+  solid3(ctx, T, R, IRON, {
+    band: 2,
+    hi: 1,
+    face: () => {
+      strap(ctx, T, R, [[len, 0.1], [len * 0.55, 0.2], [2, 0.15]], { ...IRON, base: IRON.light, line: 'rgba(0,0,0,0)' }, 0.8, 0.1);
+      // Furnace grate
+      const flick = 0.75 + Math.sin(t * Math.PI * 6) * 0.15;
+      const a = Math.min(1, gp.fire * flick);
+      decal(ctx, T, R, len * GRATE.hk, GRATE.phi, () => {
+        cel(ctx, () => blobPath(ctx, [vec(-4.4, -3.6), vec(4.6, -3.8), vec(5, 3.6), vec(-4, 3.8)]), IRON_DARK, { band: 0.6 });
+        for (let i = 0; i < 3; i++) {
+          ctx.fillStyle = `rgba(255,${150 + i * 25},70,${a})`;
+          ctx.fillRect(-3.2, -2.2 + i * 2.2 - 0.55, 7.2, 1.1);
+        }
+        rivets(ctx, [vec(-3.6, -3), vec(4, -3.2), vec(-3.4, 3.2), vec(4.2, 3)], IRON);
+      }, { lift: 0.2, minVis: 0.02 });
+    },
+    over: () => {
+      // Brass neck guard, belt and fauld lames
+      loftFill(ctx, T, ringsBetween(R, len - 1.2, len + 1.6, 0.6, 0.95), BRASS, { band: 0.7 });
+      band(ctx, T, R, 1.4, LEATHER, 2.4, 0.4);
+      decal(ctx, T, R, 1.4, 0.35, () => cel(ctx, () => polyPath(ctx, [vec(-1.8, -1.6), vec(1.8, -1.6), vec(1.8, 1.8), vec(-1.8, 1.8)]), BRASS, { band: 0.4 }), { lift: 0.8, minVis: 0.05 });
+      const r0 = R[R.length - 1];
+      for (let i = 0; i < 2; i++) {
+        const fl = [{ h: 0.2 - i * 2.6, a: r0.a + 0.8 + i * 0.3, b: r0.b + 0.8 + i * 0.3, f: r0.f }, { h: -2.6 - i * 2.6, a: r0.a + 1.2 + i * 0.3, b: r0.b + 1.2 + i * 0.3, f: r0.f }];
+        loftFill(ctx, T, fl, IRON, { band: 0.7 });
+      }
+      const panel = tabardPanel(len, front ? 1 : -1, R, p, t);
+      poly3(ctx, T, panel, CLOTH, { band: 1 });
+      if (front) {
+        // Brass anvil emblem on the tabard
+        const e = sp(T, -3, panel[0][1] + 0.3, 0);
+        cel(ctx, () => polyPath(ctx, [vec(e.x - 2.6, e.y - 1.2), vec(e.x + 2.8, e.y - 1.2), vec(e.x + 1.4, e.y + 0.2), vec(e.x + 1.4, e.y + 1.4), vec(e.x - 1.4, e.y + 1.4), vec(e.x - 1.4, e.y + 0.2)]), BRASS, { band: 0.3, stroke: 0.35 });
+      }
+    },
+  });
+}
+
+function guardHelmView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const gp = p as GuardPose;
+  const H = turnedHead(sk, 0.3);
+  const R = HELM;
+  const horn = (s: 1 | -1): L3[] => [[3, -1, 5.4 * s], [3.6, -3, 9.4 * s], [7, -4, 11.6 * s], [11.4, -2.6, 11 * s], [13.6, 0.6, 9.4 * s]];
+  const deep = (s: 1 | -1): boolean => H.rig.d(lp(H, 7, -3, 11 * s)) < H.rig.d(H.o);
+  const drawHorn = (s: 1 | -1): void => {
+    tube3(ctx, H, horn(s), [1.9, 1.7, 1.3, 0.9, 0.35], s > 0 ? IRON : IRON_FAR);
+    const b = sp(H, 3, -1, 5.4 * s);
+    cel(ctx, () => ellipsePath(ctx, b, 2, 2), BRASS, { band: 0.4 });
+  };
+  // Gorget
+  loftFill(ctx, H, [{ h: -3.4, a: 5.4, b: 5.4, f: 0.4 }, { h: -7, a: 6.6, b: 6.6, f: 0.6 }], IRON_DARK, { band: 0.7 });
+  for (const s of [1, -1] as const) if (deep(s)) drawHorn(s);
+  solid3(ctx, H, R, IRON, {
+    band: 1.4,
+    hi: 0.7,
+    face: () => {
+      strap(ctx, H, R, [[3, -Math.PI], [7.4, -Math.PI / 2], [8.2, 0], [7.4, Math.PI / 2], [3, Math.PI]], BRASS, 1.2, 0.3);
+      band(ctx, H, R, 2.6, BRASS, 1.4, 0.3);
+      if (H.vis(0) < -0.2) return;
+      // T-visor slot with the fire inside
+      decal(ctx, H, R, VISOR_H, 0, () => {
+        ctx.fillStyle = '#140a0a';
+        ctx.beginPath();
+        polyPath(ctx, [vec(-3.2, -0.8), vec(3.2, -0.8), vec(3.2, 0.8), vec(0.8, 0.8), vec(0.8, 4.2), vec(-0.8, 4.2), vec(-0.8, 0.8), vec(-3.2, 0.8)]);
+        ctx.fill();
+        if (gp.fire > 0.05) {
+          ctx.fillStyle = `rgba(255,170,70,${Math.min(1, gp.fire)})`;
+          ctx.fillRect(-2.5, -0.3, 5, 0.6);
+          ctx.fillRect(-0.35, 0.6, 0.7, 3.2);
+        }
+      }, { lift: 0.1, minVis: 0.02 });
+      for (const [h, phi] of [[-1.4, -0.7], [-1.6, -0.45], [-2.6, -0.6], [-1.4, 0.7], [-1.6, 0.45], [-2.6, 0.6]] as const) {
+        if (surfVis(H, R, h, phi) < 0.05) continue;
+        const q = surf(H, R, h, phi, 0.1);
+        ctx.fillStyle = IRON_DARK.base;
+        ctx.fillRect(q.x - 0.3, q.y - 0.3, 0.6, 0.6);
+      }
+    },
+  });
+  for (const s of [1, -1] as const) if (!deep(s)) drawHorn(s);
+}
+
+/** Forge chimneys bolted to the back plate. */
+function stackPts(sk: ViewSkeleton, i: number): L3[] {
+  const len = sk.torsoLen;
+  const R = guardRings(len);
+  const r = R[2];
+  const back = (r.f ?? 0) - r.a * 0.85;
+  return i === 0 ? [[len - 8, back, -2.6], [len + 9, back - 5, -3.4]] : [[len - 10, back, 2.8], [len + 3.6, back - 7.4, 3.6]];
+}
+
+function guardExtra(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, _p: HumanPose, _t: number, d0: number): ViewPart[] {
+  return [0, 1].map(i => ({
+    z: sk.torso.depth(sk.torsoLen, Math.PI, 8, 0) - d0,
+    draw: () => {
+      const pts = stackPts(sk, i);
+      const r = i === 0 ? 2 : 1.6;
+      tube3(ctx, sk.torso, pts, [r, r * 1.05], IRON_DARK);
+      const top = sp(sk.torso, pts[1][0], pts[1][1], pts[1][2]);
+      cel(ctx, () => ellipsePath(ctx, top, r * 1.5, r * 0.9), BRASS, { band: 0.4 });
+      ctx.fillStyle = '#1a0e0a';
+      ctx.beginPath();
+      ctx.ellipse(top.x, top.y, r * 0.9, r * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    },
+  }));
+}
+
+const GUARD_VIEW = monsterViewSkin(SKIN, {
+  build: GUARD_BUILD,
+  headBias: 9,
+  torso: guardTorsoView,
+  head: guardHelmView,
+  back: () => undefined,
+  extra: guardExtra,
+  // Pauldrons a size down: seen from the front they'd swallow the helm.
+  armNear: (ctx, sk, p) => {
+    armouredArm(ctx, sk.shN, sk.elN, sk.handN, IRON, (p as GuardPose).fire);
+    pauldron(ctx, sk.shN, sk.elN, STEEL, BRASS, 0.85);
+  },
+  armFar: (ctx, sk, p) => {
+    pauldron(ctx, sk.shF, sk.elF, IRON_FAR, tone(0x8a6a3c), 0.8);
+    armouredArm(ctx, sk.shF, sk.elF, sk.handF, IRON_FAR, (p as GuardPose).fire);
+    gauntlet(ctx, sk.handF, IRON_FAR);
+  },
+});
+
+/** Two-handed haft in 3/4: the far hand crosses over to the near side. */
+function viewPose(p: GuardPose, t: number, act: MonsterAction): GuardPose {
+  const gripping = act !== 'death' || t < 0.5;
+  return gripping ? { ...p, zF: GUARD_BUILD.shW * 2 - 2 } : p;
+}
+
+function drawFxView(ctx: CanvasRenderingContext2D, p0: GuardPose, act: MonsterAction, t: number, view: HumanView): void {
+  const p = viewPose(p0, t, act);
+  const vsk = solveViewSkeleton(p, SKIN.prop, GUARD_BUILD, view);
+  sagittalSpun(ctx, vsk, p, () => drawFx(ctx, p, act, t, true));
+  const fire = p.fire;
+  if (fire <= 0.02) return;
+  const T = vsk.torso;
+  const R = guardRings(vsk.torsoLen);
+  const hc = vsk.torsoLen * GRATE.hk;
+  if (surfVis(T, R, hc, GRATE.phi) > 0.05) glow(ctx, surf(T, R, hc, GRATE.phi, 0.4), 6 + p.fx * 2, FIRE, 0.35 * fire);
+  const H = turnedHead(vsk, 0.3);
+  if (H.vis(0) > 0.1) glow(ctx, surf(H, HELM, VISOR_H, 0, 0.3), 3.4 + p.fx, FIRE, 0.55 * Math.min(1, fire));
+  // Flames licking out of the crown of the helm
+  const up = vsk.rig.vec(H.up.x, H.up.y, 0);
+  const crown0 = surf(H, HELM, 7.6, 0, 0);
+  const crown = vec(crown0.x + up.x * 1.2, crown0.y + up.y * 1.2);
+  const f = Math.min(1, fire);
+  const back = vsk.rig.fwd;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 3; i++) {
+    const ph = t * Math.PI * 2 * 2 + i * 2.1;
+    const h = (7 + Math.sin(ph) * 1.6 + p.fx * 3 - i * 1.6) * f;
+    const bx = crown.x - 1.6 + i * 1.6;
+    const tipX = bx - back.x * (1.6 + p.flow * 4) + Math.sin(ph + 1) * 1.2;
+    ctx.fillStyle = i === 1 ? `rgba(255,214,140,${0.75 * f})` : `rgba(255,120,40,${0.6 * f})`;
+    ctx.beginPath();
+    ctx.moveTo(bx - 1.8, crown.y + 1);
+    ctx.quadraticCurveTo(bx - 2, crown.y - h * 0.5, tipX, crown.y - h);
+    ctx.quadraticCurveTo(bx + 1.6, crown.y - h * 0.4, bx + 1.8, crown.y + 1);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+  for (let i = 0; i < 2; i++) {
+    const pts = stackPts(vsk, i);
+    const top = sp(T, pts[1][0], pts[1][1], pts[1][2]);
+    for (let j = 0; j < 3; j++) {
+      const k = (j / 3 + t + i * 0.17) % 1;
+      const pos = vec(top.x - back.x * k * (4 + p.flow * 6), top.y - 1 - k * 9);
+      ctx.fillStyle = `rgba(70,66,76,${0.45 * (1 - k) * f})`;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 1.4 + k * 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    glow(ctx, top, 2.2, FIRE, 0.5 * f);
+  }
+  for (const j of [vsk.kneeN, vsk.elN, vsk.kneeF]) glow(ctx, j, 2.4, FIRE, 0.3 * f);
+}
+
 // ── Poses ───────────────────────────────────────────────────────────────
 
 /** Both hands on the haft: the far hand grips a little further up. */
@@ -495,7 +729,7 @@ function hammerHead(p: GuardPose): { tip: V; base: V } {
   return { tip: along(hand, p.wpn + p.spin, HAM_LEN + 7), base: along(hand, p.wpn + p.spin, HAM_LEN - 7) };
 }
 
-function drawFx(ctx: CanvasRenderingContext2D, p: GuardPose, act: MonsterAction, t: number): void {
+function drawFx(ctx: CanvasRenderingContext2D, p: GuardPose, act: MonsterAction, t: number, groundOnly = false): void {
   const sk = solveSkeleton(p, SKIN.prop);
   const fire = p.fire;
   if (act === 'attack' && t > 0.9) {
@@ -521,7 +755,7 @@ function drawFx(ctx: CanvasRenderingContext2D, p: GuardPose, act: MonsterAction,
       ctx.fillRect(hit.x + dx, hit.y + dy, 1, 1);
     }
   }
-  if (fire <= 0.02) return;
+  if (fire <= 0.02 || groundOnly) return;
   // Chest furnace and visor glow
   const chest = spun(p, lerpV(sk.neck, sk.pelvis, 0.42), sk);
   glow(ctx, vec(chest.x + 2, chest.y + 1), 6 + p.fx * 2, FIRE, 0.35 * fire);
@@ -575,13 +809,17 @@ export const IronGuardianDrawer = rigMonster<GuardPose>({
   frameW: 104,
   frameH: 72,
   scale: 1.25,
+  views: MONSTER_VIEWS,
   pose: guardPose,
-  draw: (ctx, p, _act, t) => { drawHumanoid(ctx, p, SKIN, t); },
-  shadow: (p) => ({
-    x: Math.abs(p.spin) > 1 ? p.root.x + 8 : p.root.x + 2,
+  draw: (ctx, p, act, t, view) => {
+    if (view) drawHumanoidView(ctx, viewPose(p, t, act), GUARD_VIEW, t, view);
+    else drawHumanoid(ctx, p, SKIN, t);
+  },
+  shadow: (p, _act, _t, view) => ({
+    x: groundX(view, Math.abs(p.spin) > 1 ? p.root.x + 8 : p.root.x + 2),
     r: Math.abs(p.spin) > 1 ? 22 : 16,
     lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)),
   }),
-  fx: drawFx,
+  fx: (ctx, p, act, t, view) => (view ? drawFxView(ctx, p, act, t, view) : drawFx(ctx, p, act, t)),
   rim: 'rgba(255,214,170,0.55)',
 });

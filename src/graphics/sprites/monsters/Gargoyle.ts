@@ -34,6 +34,30 @@ import {
   type Skeleton,
 } from '../rig/Humanoid';
 import { rigMonster } from '../rig/MonsterKit';
+import { drawHumanoidView, solveViewSkeleton, type HumanView, type ViewSkeleton } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  backSpikes,
+  eye3,
+  eyeGlowPoints,
+  groundX,
+  lp,
+  monsterViewSkin,
+  profileRings,
+  sagittal,
+  sagittalSpun,
+  sd,
+  solid3,
+  strap,
+  surfCurve,
+  surfPatch,
+  tube3,
+  turnedHead,
+  wingDepth,
+  wingPlane,
+  type L3,
+  type Part3,
+} from '../rig/MonsterView';
 
 const HIDE = tone(0x8190a6, { light: 0.38 });
 const HIDE_FAR = tone(0x525d70, { light: 0.2 });
@@ -279,6 +303,122 @@ const SKIN: HumanSkin = {
   },
 };
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const GARG_BODY = (len: number): V[] => [vec(-7.4, 0), vec(-2, -3.2), vec(4.6, -1.8), vec(8.4, 2.6), vec(7.4, len * 0.6), vec(3.6, len + 1.2), vec(-3.2, len + 1.4), vec(-5.2, len * 0.6), vec(-8.4, len * 0.25)];
+const garRings = (len: number): ReturnType<typeof profileRings> => profileRings(GARG_BODY(len), y => len - y, a => a * 0.95, 7);
+
+function crackRuns(ctx: CanvasRenderingContext2D, runs: V[][], heat: number): void {
+  for (const r of runs) crack(ctx, r, heat);
+}
+
+function gargTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const g = p as GargPose;
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = garRings(len);
+  const spikes = backSpikes(T, R, len - 1, len * 0.35, 3, [0], i => 3.4 - i * 0.4, 1.2);
+  solid3(ctx, T, R, HIDE, {
+    band: 1.6,
+    hi: 0.8,
+    parts: spikes.map(pts => ({ pts, tone: HORN, hull: true, band: 0.3 })),
+    face: () => {
+      if (T.vis(0) > -0.3) {
+        cel(ctx, () => polyPath(ctx, surfPatch(T, R, len - 2, 1.4, -0.8, 0.8, 0.1, 8)), BELLY, { band: 0.9, stroke: 0.35 });
+        for (const k of [0.4, 0.6, 0.8]) strap(ctx, T, R, [[len * (1 - k), -0.75], [len * (1 - k) - 0.4, 0.75]], BELLY, 0.2, 0.15);
+      }
+      crackRuns(ctx, surfCurve(T, R, [[len - 2, 2.2], [len - 4.6, 1.8], [len - 7, 2.3], [len - 9.4, 1.9]], 0.05, 4), g.heat);
+      crackRuns(ctx, surfCurve(T, R, [[len - 2, -2.2], [len - 4.6, -1.8], [len - 7, -2.3]], 0.05, 4), g.heat);
+    },
+  });
+}
+
+const GARG_SKULL = profileRings([vec(-4.4, -0.4), vec(-3.2, -4.4), vec(1.6, -5.2), vec(5.2, -3), vec(6, -0.8), vec(5.6, 3.4), vec(0, 4.2), vec(-3.4, 2.6)].map(q => vec(q.x * 1.15, q.y * 1.15)), y => -y, a => a * 0.95, 7);
+const GARG_EYE = { h: 1.6, phi: 0.5 };
+
+function gargHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const g = p as GargPose;
+  const H = turnedHead(sk, 0.35);
+  const R = GARG_SKULL;
+  const k = 1.15;
+  const horn = (s: 1 | -1): L3[] => [[4.2, 1, 3.4 * s], [7.4, -2.4, 5.2 * s], [8.4, -7.2, 6.4 * s], [5.6, -10.4, 7 * s], [2.2, -9.4, 7.4 * s]].map(q => [q[0] * k, q[1] * k, q[2] * k] as const);
+  const parts: Part3[] = [
+    { pts: [[2, -1, 5.2], [3, -7.4 - g.flow, 7.4], [1, -5.6, 7], [-1.4, -1.6, 5.2]], tone: HIDE, farTone: HIDE_FAR, mirror: true, band: 0.4 },
+    // Snout + fanged jaw
+    { pts: [[1.4, 5.2, -3], [1.4, 5.2, 3], [-0.6, 10, -1.8], [-0.6, 10, 1.8], [-3.2, 9.4, -1.6], [-3.2, 9.4, 1.6], [-4.2, 4.6, -3], [-4.2, 4.6, 3]], tone: HIDE, hull: true, band: 1, bias: 0.3 },
+  ];
+  const hornItems = ([1, -1] as const).map(s => ({ s, d: sd(H, 7 * k, -5 * k, 6 * s * k) }));
+  const drawHorn = (s: 1 | -1): void => {
+    tube3(ctx, H, horn(s), [1.8, 1.6, 1.3, 0.9, 0.5], s > 0 ? HORN : tone(0x2e323d));
+  };
+  const c0 = sd(H, 0, 0, 0);
+  for (const h of hornItems) if (h.d < c0) drawHorn(h.s);
+  solid3(ctx, H, R, HIDE, {
+    band: 1.2,
+    parts,
+    face: () => {
+      if (H.vis(0) < -0.3) return;
+      cel(ctx, () => polyPath(ctx, surfPatch(H, R, GARG_EYE.h + 2.2, GARG_EYE.h + 1, -1, 1, 0.2, 6)), HIDE_FAR, { band: 0.3, stroke: 0.35 });
+      for (const sgn of [1, -1]) {
+        eye3(ctx, H, R, GARG_EYE.h, sgn * GARG_EYE.phi, { rx: 1.5, ry: 1, socket: '#1a0a08', iris: `rgba(255,${170 + Math.round(g.heat * 50)},80,${0.6 + g.heat * 0.4})`, irisR: 0.65, tilt: -0.2 });
+      }
+      crackRuns(ctx, surfCurve(H, R, [[4.6, -1.8], [3, -2.2], [1, -2]], 0.05, 3), g.heat);
+    },
+    over: () => {
+      if (H.vis(0) < -0.2) return;
+      // Fanged grin across the muzzle
+      const a = sp3(H, -1.4, 9.6, 0);
+      const l = sp3(H, -1.2, 5.6, 2.8);
+      const r = sp3(H, -1.2, 5.6, -2.8);
+      ctx.fillStyle = '#1c0f12';
+      ctx.beginPath();
+      ctx.moveTo(l.x, l.y);
+      ctx.quadraticCurveTo(a.x, a.y + 1.2 + g.fx * 1.2, r.x, r.y);
+      ctx.quadraticCurveTo(a.x, a.y + 0.2, l.x, l.y);
+      ctx.fill();
+      ctx.fillStyle = CLAW.base;
+      for (const lat of [-1.6, 1.6]) {
+        const f = sp3(H, -1.4, 8.4, lat);
+        ctx.beginPath();
+        ctx.moveTo(f.x - 0.5, f.y);
+        ctx.lineTo(f.x + 0.5, f.y);
+        ctx.lineTo(f.x, f.y + 1.5);
+        ctx.fill();
+      }
+    },
+  });
+  for (const h of hornItems) if (h.d >= c0) drawHorn(h.s);
+}
+
+function sp3(H: ReturnType<typeof turnedHead>, h: number, f: number, l: number): V {
+  return H.rig.p(lp(H, h, f, l));
+}
+
+/** Wings spread out to either side in their own planes; tail on the body plane. */
+function gargExtra(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number, d0: number): { z: number; draw: () => void }[] {
+  const g = p as GargPose;
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = garRings(len);
+  const back = R[1];
+  const spread = 1.3;
+  const out: { z: number; draw: () => void }[] = [];
+  for (const s of [1, -1] as const) {
+    const anchor = lp(T, len - 2, (back.f ?? 0) - back.a * 0.6, s * 2.2);
+    const size = s > 0 ? 1.3 : 1.15;
+    out.push({
+      z: wingDepth(sk.rig, anchor, s, spread, 10) - d0 + (s > 0 ? 0 : -6),
+      draw: () => wingPlane(ctx, sk.rig, anchor, vec(anchor.x, anchor.y), s, spread, () =>
+        wing(ctx, vec(anchor.x, anchor.y), g.wing + (s > 0 ? 0 : 0.2), g.open, s > 0 ? MEMBRANE : MEMBRANE_FAR, s > 0 ? HIDE : HIDE_FAR, size)),
+    });
+  }
+  out.push({
+    z: sk.torso.depth(0, Math.PI, 4, 0) - d0,
+    draw: () => sagittal(ctx, sk.rig, 0, () => tail(ctx, solveSkeleton(p, SKIN.prop), g, t)),
+  });
+  return out;
+}
+
 // ── Poses ───────────────────────────────────────────────────────────────
 
 const HOVER_Y = 69;
@@ -411,14 +551,34 @@ function drawGargoyle(ctx: CanvasRenderingContext2D, p: GargPose, t: number): vo
   drawHumanoid(ctx, p, SKIN, t);
 }
 
+const VIEW_SKIN = monsterViewSkin(SKIN, {
+  build: { hipW: 2.6, shW: 5.2, elbowOut: 1.4, footOut: 0.6 },
+  headBias: 4,
+  torso: gargTorsoView,
+  head: gargHeadView,
+  back: () => undefined,
+  extra: gargExtra,
+});
+
+function drawFxView(ctx: CanvasRenderingContext2D, p: GargPose, act: MonsterAction, t: number, view: HumanView): void {
+  const sk = solveViewSkeleton(p, SKIN.prop, VIEW_SKIN.build, view);
+  if (p.heat > 0.05) {
+    for (const e of eyeGlowPoints(turnedHead(sk, 0.35), GARG_SKULL, GARG_EYE.h, [GARG_EYE.phi, -GARG_EYE.phi])) {
+      glow(ctx, e, 2.2 + p.fx, EMBER, 0.35 + p.heat * 0.35);
+    }
+  }
+  sagittalSpun(ctx, sk, p, () => drawFx(ctx, { ...p, heat: 0 }, act, t));
+}
+
 export const GargoyleDrawer = rigMonster<GargPose>({
   key: 'monster_gargoyle',
   // Wide for the wing span; width doesn't move the sprite in-game.
   frameW: 84,
   frameH: 60,
   scale: 1.38,
+  views: MONSTER_VIEWS,
   pose: gargPose,
-  draw: (ctx, p, _act, t) => drawGargoyle(ctx, p, t),
-  shadow: (p) => ({ x: p.root.x + 1, r: Math.abs(p.spin) > 1 ? 16 : 12, lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)) }),
-  fx: drawFx,
+  draw: (ctx, p, _act, t, view) => (view ? drawHumanoidView(ctx, p, VIEW_SKIN, t, view) : drawGargoyle(ctx, p, t)),
+  shadow: (p, _act, _t, view) => ({ x: groundX(view, p.root.x + 1), r: Math.abs(p.spin) > 1 ? 16 : 12, lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)) }),
+  fx: (ctx, p, act, t, view) => (view ? drawFxView(ctx, p, act, t, view) : drawFx(ctx, p, act, t)),
 });

@@ -39,6 +39,29 @@ import {
   type Skeleton,
 } from '../rig/Humanoid';
 import { rigMonster } from '../rig/MonsterKit';
+import { drawHumanoidView, solveViewSkeleton, type HumanView, type ViewPart, type ViewSkeleton } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  decal,
+  eye3,
+  eyeGlowPoints,
+  groundX,
+  lp,
+  monsterViewSkin,
+  poly3,
+  profileRings,
+  sagittal,
+  sagittalSpun,
+  solid3,
+  strap,
+  surfPatch,
+  tube3,
+  turnedHead,
+  wingDepth,
+  wingPlane,
+  type L3,
+  type Part3,
+} from '../rig/MonsterView';
 
 // ── Shared abyss kit ────────────────────────────────────────────────────
 
@@ -465,6 +488,125 @@ const IMP_SKIN: HumanSkin = {
   },
 };
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const IMP_BODY = (len: number): V[] => [vec(-3.6, 0), vec(1.2, -0.8), vec(4, 1.6), vec(5.4, len * 0.55), vec(4.6, len + 0.4), vec(-2.8, len + 0.8), vec(-4.2, len * 0.45)];
+const IMP_SKULL = profileRings([vec(-5.4, -1), vec(-4.6, -5.4), vec(0.6, -7.2), vec(5.2, -5.4), vec(7.2, -1.6), vec(7.4, 1.8), vec(5.4, 5.2), vec(1.6, 6), vec(-3.4, 4.2)], y => -y, a => a * 0.95, 8);
+const IMP_EYE = { h: 2.2, phi: 0.48 };
+
+function impTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, _p: HumanPose): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = profileRings(IMP_BODY(len), y => len - y, a => a * 1.05, 7);
+  const front = T.vis(0) > T.vis(Math.PI);
+  const flap = (s: 1 | -1): L3[] => {
+    const fr = s > 0 ? 4.6 : -3.6;
+    return [[0.8, fr, -2], [0.8, fr, 2], [-4.4, fr + 0.4 * s, 1.6], [-3.4, fr + 0.3 * s, 0], [-4.8, fr + 0.4 * s, -1.6]];
+  };
+  poly3(ctx, T, flap(front ? -1 : 1), CLOTH, { band: 0.6 });
+  solid3(ctx, T, R, SKIN, {
+    band: 1.3,
+    face: () => {
+      decal(ctx, T, R, len * 0.38, 0.3, () => cel(ctx, () => ellipsePath(ctx, vec(0, 0), 2.7, 3.4), BELLY, { band: 0.8, stroke: 0.3 }), { lift: 0.1 });
+      for (let i = 0; i < 3; i++) strap(ctx, T, R, [[len - 2.4 - i * 1.5, -1.2], [len - 3 - i * 1.5, 0], [len - 2.4 - i * 1.5, 1.2]], { ...SKIN, base: SKIN.shade, line: 'rgba(0,0,0,0)' }, 0.4, 0.05);
+    },
+    over: () => {
+      strap(ctx, T, R, [[0.8, -Math.PI], [0.8, 0], [0.8, Math.PI]], HORN, 0.6, 0.3);
+      poly3(ctx, T, flap(front ? 1 : -1), CLOTH, { band: 0.6 });
+    },
+  });
+}
+
+function impHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const H = turnedHead(sk, 0.4);
+  const R = IMP_SKULL;
+  const flick = Math.sin(t * Math.PI * 2 + 1.3) * 0.8 + p.flow * 1.2;
+  const horn = (s: 1 | -1): L3[] => [[5.8, 2.4, 2.6 * s], [9.8, 0.4, 4.2 * s], [13.4, -3.6, 5.2 * s], [16, -7, 5.6 * s]];
+  const parts: Part3[] = [
+    { pts: [[3.6, -0.6, 4.6], [5 + flick * 0.3, -6 - flick, 13], [2.6, -4.6, 11], [-1.4, -1, 4.8]], tone: SKIN, farTone: SKIN_FAR, mirror: true, band: 0.8 },
+    { pts: [[0.6, 7.4, -1.1], [0.6, 7.4, 1.1], [-0.8, 8.6, -0.9], [-0.8, 8.6, 0.9], [-1.6, 7.2, -1.1], [-1.6, 7.2, 1.1]], tone: SKIN, hull: true, band: 0.3, stroke: 0.35, bias: 0.4 },
+  ];
+  const drawHorns = (behind: boolean): void => {
+    for (const s of [1, -1] as const) {
+      const deep = H.rig.d(lp(H, 10, 0, 4.2 * s)) < H.rig.d(H.o);
+      if (deep !== behind) continue;
+      tube3(ctx, H, horn(s), [1.5, 1.2, 0.8, 0.35], s > 0 ? HORN : tone(0x2a1a26));
+    }
+  };
+  drawHorns(true);
+  solid3(ctx, H, R, SKIN, {
+    band: 1.4,
+    parts,
+    face: () => {
+      if (H.vis(0) < -0.3) return;
+      cel(ctx, () => polyPath(ctx, surfPatch(H, R, IMP_EYE.h + 2.4, IMP_EYE.h + 1.2, -1.1, 1.1, 0.2, 6, k => IMP_EYE.h + 1.2 - Math.sin(k * Math.PI) * 0.3)), SKIN_FAR, { band: 0.3, stroke: 0.3 });
+      for (const sgn of [1, -1]) {
+        eye3(ctx, H, R, IMP_EYE.h, sgn * IMP_EYE.phi, { rx: 2, ry: 1.4, socket: '#2a0608', iris: '#ffd24a', irisR: 0.8, tilt: -0.2 });
+      }
+      // Wide fanged grin
+      const mouth = surfPatch(H, R, -1.6, -2, -0.9, 0.9, 0.15, 10, k => -2.2 - Math.sin(k * Math.PI) * (1.4 + p.fx * 0.8));
+      ctx.fillStyle = '#2a0508';
+      ctx.beginPath();
+      polyPath(ctx, mouth);
+      ctx.fill();
+      ctx.fillStyle = CLAW.base;
+      for (const phi of [-0.6, -0.2, 0.2, 0.6]) {
+        decal(ctx, H, R, -1.8, phi, () => {
+          ctx.beginPath();
+          ctx.moveTo(-0.45, 0);
+          ctx.lineTo(0.45, 0);
+          ctx.lineTo(0, 1.2);
+          ctx.fill();
+        }, { lift: 0.2, minVis: 0.05 });
+      }
+    },
+  });
+  drawHorns(false);
+}
+
+/** Bat wings spread out in their own planes; tail on the body plane. */
+function impExtra(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number, d0: number): ViewPart[] {
+  const ip = p as ImpPose;
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const out: ViewPart[] = [];
+  for (const s of [1, -1] as const) {
+    const anchor = lp(T, len - 2.4, -3, s * 1.6);
+    const spread = s < 0 && sk.rig.front ? 0.2 : 1.2;
+    const root = { x: anchor.x, y: anchor.y };
+    out.push({
+      z: wingDepth(sk.rig, anchor, s, spread, 8) - d0 + (s > 0 ? 0 : -8),
+      draw: () => wingPlane(ctx, sk.rig, anchor, root, s, spread, () =>
+        batWing(ctx, root, wingAng(ip, s < 0) - p.lean * 0.5, s > 0 ? 24 : 21, Math.max(0, -ip.wing) * 0.3, s > 0 ? WING : WING_FAR, s > 0 ? 7 : 3)),
+    });
+  }
+  out.push({
+    z: T.depth(0, Math.PI, 4, 0) - d0,
+    draw: () => sagittal(ctx, sk.rig, 0, () => {
+      const side = solveSkeleton(p, PROP);
+      const root = localPt(side.pelvis, p.lean * 0.3, -2.4, 1);
+      const tail = curlChain(root, -2.1 + p.lean * 0.4, 2.1, 17, 8, 1 + p.flow, t * Math.PI * 2 + ip.tail);
+      demonTail(ctx, tail, 1.25, SKIN_FAR, HORN, 2.2);
+    }),
+  });
+  return out;
+}
+
+const IMP_VIEW = monsterViewSkin(IMP_SKIN, {
+  build: { hipW: 1.8, shW: 3.6, elbowOut: 1, footOut: 0.4 },
+  headBias: 5,
+  torso: impTorsoView,
+  head: impHeadView,
+  back: () => undefined,
+  extra: impExtra,
+  armNear: (ctx, sk, p) => impArm(ctx, sk.shN, sk.elN, sk.handN, SKIN, p.fx),
+  weapon: () => undefined,
+});
+
+function impViewEyes(sk: ViewSkeleton): V[] {
+  return eyeGlowPoints(turnedHead(sk, 0.4), IMP_SKULL, IMP_EYE.h, [IMP_EYE.phi, -IMP_EYE.phi]);
+}
+
 // ── Animation ───────────────────────────────────────────────────────────
 
 const READY: ImpPose = {
@@ -592,16 +734,21 @@ export const ImpDrawer = rigMonster<ImpPose>({
   frameW: 64,
   frameH: 48,
   scale: 1.36,
+  views: MONSTER_VIEWS,
   pose: impPose,
-  draw: (ctx, p, _act, t) => {
-    const sk = drawHumanoid(ctx, p, IMP_SKIN, t);
+  draw: (ctx, p, _act, t, view) => {
+    const sk = view ? drawHumanoidView(ctx, p, IMP_VIEW, t, view) : drawHumanoid(ctx, p, IMP_SKIN, t);
     if (p.burn > 0) {
       const c = sk.pelvis;
       erode(ctx, p.burn, { x: c.x - 26, y: c.y - 24, w: 50, h: 34 }, 17, 1.7);
     }
   },
-  shadow: (p) => ({ x: p.root.x + 1, r: 11, lift: Math.max(0, GROUND_Y - 4 - Math.max(p.footN.y, p.footF.y)) }),
-  fx: (ctx, p, act, t) => {
+  shadow: (p, _act, _t, view) => ({ x: groundX(view, p.root.x + 1), r: 11, lift: Math.max(0, GROUND_Y - 4 - Math.max(p.footN.y, p.footF.y)) }),
+  fx: (ctx, p, act, t, view) => {
+    if (view) {
+      impFxView(ctx, p, act, t, view);
+      return;
+    }
     const sk = solveSkeleton(p, PROP);
     // Hellfire talons + slash smear
     if (act === 'attack' && p.fx > 0.3) {
@@ -636,3 +783,37 @@ export const ImpDrawer = rigMonster<ImpPose>({
   },
   rim: 'rgba(255,170,120,0.5)',
 });
+
+function impFxView(ctx: CanvasRenderingContext2D, p: ImpPose, act: MonsterAction, t: number, view: HumanView): void {
+  const vsk = solveViewSkeleton(p, PROP, IMP_VIEW.build, view);
+  if (act === 'attack' && p.fx > 0.3) {
+    if (t > 0.5) {
+      // Slash smear: the side art on the body plane
+      sagittalSpun(ctx, vsk, p, () => {
+        const tips: V[] = [];
+        const bases: V[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const q = lower(samplePoseTrack(ATTACK, Math.max(0, t - i * 0.055)), 5);
+          const c = clawTip(q);
+          tips.push(c.tip);
+          bases.push(c.base);
+        }
+        smear(ctx, tips, bases, HELLFIRE, 0.6 * p.fx);
+      });
+    }
+    const hand = vsk.handN;
+    glow(ctx, hand, 5 + p.fx * 4, HELLFIRE, 0.45 * p.fx);
+    glow(ctx, hand, 2.2, 0xffe08a, 0.7 * p.fx);
+    for (let i = 0; i < 4; i++) {
+      const k = (i / 4 + t * 2) % 1;
+      glow(ctx, vec(hand.x + Math.sin(i * 2.4) * 2.5, hand.y - k * 7), 1.2, 0xffa040, (1 - k) * p.fx);
+    }
+  }
+  if (act !== 'death' || t < 0.5) {
+    for (const e of impViewEyes(vsk)) glow(ctx, e, 2.6, EYE, 0.5 + p.fx * 0.25);
+  }
+  if (p.burn > 0) {
+    const c = vsk.pelvis;
+    embers(ctx, { x: c.x - 14, y: c.y - 12, w: 26, h: 14 }, 14, t, Math.min(1, p.burn * 1.6), HELLFIRE, 5);
+  }
+}

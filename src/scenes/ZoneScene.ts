@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TILE_WIDTH, TILE_HEIGHT, GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE, DPR } from '../config';
+import { TILE_WIDTH, TILE_HEIGHT, GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE, DPR, RENDER_SCALE } from '../config';
 import { cartToIso, isoToCart, worldToTile, euclideanDistance, distanceSq } from '../utils/IsometricUtils';
 import { randomInt } from '../utils/MathUtils';
 import { EventBus, GameEvents } from '../utils/EventBus';
@@ -103,6 +103,8 @@ function skillImpactColor(skillId: string, damageType: string): number {
 const ZONE_SCREEN_UI_DEPTH = 5000;
 /** An escort left this far behind (tiles) catches up next to the player. */
 const ESCORT_CATCH_UP_TILES = 14;
+/** World camera zoom in logical pixels (× RENDER_SCALE on the real camera). */
+export const ZONE_CAMERA_ZOOM = 1.8;
 /** Hold-to-move re-plans its path at most this often while the pointer stays on one tile. */
 const HOLD_MOVE_REPATH_MS = 120;
 
@@ -525,7 +527,7 @@ export class ZoneScene extends Phaser.Scene {
 
     // Camera
     this.cameras.main.startFollow(this.player.sprite, true, 0.08, 0.08);
-    this.cameras.main.setZoom(1.8);
+    this.cameras.main.setZoom(ZONE_CAMERA_ZOOM * RENDER_SCALE);
 
     // Lighting system — ambient darkness + point lights
     const renderQuality = profileForQuality(resolveRenderQuality());
@@ -2460,7 +2462,9 @@ export class ZoneScene extends Phaser.Scene {
 
     let releaseDelay: number;
     if (skill.buff || skill.aoe || skill.range > 2) {
-      releaseDelay = this.player.playCast();
+      releaseDelay = target && !skill.buff
+        ? this.player.playCast(target.sprite.x, target.sprite.y)
+        : this.player.playCast();
     } else {
       const animTarget = this.findPreferredSkillTarget();
       if (animTarget) {
@@ -5724,6 +5728,11 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   /** Convert a desired screen-fraction position to scrollFactor(0) object position, accounting for camera zoom. */
+  /** Camera zoom in logical pixels (the render scale divided out): offsets for screen-fixed text use this. */
+  private viewZoom(): number {
+    return this.cameras.main.zoom / RENDER_SCALE;
+  }
+
   private screenPos(fracX: number, fracY: number): { x: number; y: number } {
     const cam = this.cameras.main;
     const ox = cam.width * cam.originX;
@@ -5827,7 +5836,7 @@ export class ZoneScene extends Phaser.Scene {
       fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(5 * DPR),
     }).setOrigin(0.5).setScrollFactor(0).setDepth(ZONE_SCREEN_UI_DEPTH).setAlpha(0).setScale(0.5);
 
-    const lvlText = this.add.text(p.x, p.y + 38 * DPR / this.cameras.main.zoom, t('zone.levelUp.level', { level }), {
+    const lvlText = this.add.text(p.x, p.y + 38 * DPR / this.viewZoom(), t('zone.levelUp.level', { level }), {
       fontSize: fs(20), color: '#ffcc00', fontFamily: '"Cinzel", serif',
       stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5).setScrollFactor(0).setDepth(ZONE_SCREEN_UI_DEPTH).setAlpha(0);
@@ -5848,7 +5857,7 @@ export class ZoneScene extends Phaser.Scene {
 
   private showQuestCompleteBanner(questName: string, hint = ''): void {
     const p = this.screenPos(0.5, 0.22);
-    const z = this.cameras.main.zoom;
+    const z = this.viewZoom();
     const label = this.add.text(p.x, p.y, t('zone.questComplete'), {
       fontSize: fs(20), color: '#f1c40f', fontFamily: '"Cinzel", serif',
       fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(4 * DPR),
@@ -5877,7 +5886,7 @@ export class ZoneScene extends Phaser.Scene {
 
   private showZoneBanner(): void {
     const p = this.screenPos(0.5, 0.32);
-    const z = this.cameras.main.zoom;
+    const z = this.viewZoom();
     const banner = this.add.text(p.x, p.y, getZoneName(this.currentMapId, this.mapData.name), {
       fontSize: fs(28), color: '#c0934a', fontFamily: '"Cinzel", serif',
       fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(5 * DPR),

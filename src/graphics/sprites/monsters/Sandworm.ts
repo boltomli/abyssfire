@@ -23,6 +23,12 @@ import {
   type V,
 } from '../rig/Rig';
 import { rigMonster } from '../rig/MonsterKit';
+import { ViewRig, type HumanView } from '../rig/HumanView';
+import { MONSTER_VIEWS, groundX, withAffine } from '../rig/MonsterView';
+
+/** Pose-space → screen map (identity in the side view). */
+type Map2 = (q: V) => V;
+const IDENT: Map2 = q => q;
 
 interface WormPose {
   /** Bezier control point of the body and the head centre. */
@@ -120,9 +126,10 @@ function radius(t: number): number {
   return 10.5 - 2.4 * t;
 }
 
-function drawBody(ctx: CanvasRenderingContext2D, p: WormPose): void {
+function drawBody(ctx: CanvasRenderingContext2D, p: WormPose, map: Map2 = IDENT): void {
+  // The tube keeps its girth in any view; only the centreline is projected.
   const pts: V[] = [];
-  for (let i = 0; i <= N; i++) pts.push(bez(p, i / N));
+  for (let i = 0; i <= N; i++) pts.push(map(bez(p, i / N)));
   // Hot flesh underneath the plates
   for (let i = 0; i < N; i++) {
     cel(ctx, () => capsulePath(ctx, pts[i], pts[i + 1], radius(i / N) - 0.8, radius((i + 1) / N) - 0.8), FLESH, { band: 1.6, stroke: 0 });
@@ -213,16 +220,33 @@ function petal(ctx: CanvasRenderingContext2D, hinge: V, rot: number, flip: numbe
   ctx.restore();
 }
 
-function drawHead(ctx: CanvasRenderingContext2D, p: WormPose): void {
-  const hx = p.head.x;
-  const hy = p.head.y + p.sink;
+function drawHead(ctx: CanvasRenderingContext2D, p: WormPose, rig?: ViewRig): void {
+  let hx = p.head.x;
+  let hy = p.head.y + p.sink;
+  let ang = p.ang;
+  /** How squarely the maw faces the camera: side 0.2 (thin), front 3/4 ~0.7, back −. */
+  let face = 0;
+  if (rig) {
+    const h = rig.pt(hx, hy, 0);
+    hx = h.x;
+    hy = h.y;
+    const d = rig.vec(Math.cos(p.ang), Math.sin(p.ang), 0);
+    ang = Math.atan2(d.y, d.x);
+    face = rig.facing(Math.cos(p.ang), Math.sin(p.ang), 0);
+  }
   ctx.save();
   ctx.translate(hx, hy);
-  ctx.rotate(p.ang);
+  ctx.rotate(ang);
   ctx.scale(1.22, 1.22);
   const open = p.maw;
-  // Upper jaw petal sits behind the head silhouette
-  petal(ctx, vec(3, -5.6), 0.42 - open * 1.05, 1);
+  if (rig && face < 0) {
+    // Back 3/4: the maw faces away — petals flare out behind the armoured skull.
+    petal(ctx, vec(3, 5.6), -(0.42 - open * 1.05), -1);
+    petal(ctx, vec(3, -5.6), 0.42 - open * 1.05, 1);
+  } else {
+    // Upper jaw petal sits behind the head silhouette
+    petal(ctx, vec(3, -5.6), 0.42 - open * 1.05, 1);
+  }
   // Armoured head
   const skull = [vec(-7, -8), vec(-1, -8.8), vec(4.5, -7.2), vec(6.8, -2), vec(6.8, 2), vec(4.5, 7.2), vec(-1, 8.8), vec(-7, 8)];
   cel(ctx, () => blobPath(ctx, skull), HEAD, { band: 1.6, hi: 0.8 });
@@ -254,10 +278,14 @@ function drawHead(ctx: CanvasRenderingContext2D, p: WormPose): void {
     ctx.arc(x, y, 0.4, 0, Math.PI * 2);
     ctx.fill();
   }
-  // Ringed maw
-  const mx = 5.8;
-  const rx = 1 + 3.4 * open;
+  if (rig && face < 0) {
+    ctx.restore();
+    return;
+  }
+  // Ringed maw (a disc facing forward: wider the more it faces the camera)
+  const mx = rig ? 5.2 : 5.8;
   const ry = 5.2 + 1.2 * open;
+  const rx = rig ? Math.max(1 + 3.4 * open, ry * Math.min(0.8, face + 0.15)) : 1 + 3.4 * open;
   ctx.fillStyle = '#2a0806';
   ctx.beginPath();
   ctx.ellipse(mx, 0, rx, ry, 0, 0, Math.PI * 2);
@@ -338,17 +366,31 @@ function drawMound(ctx: CanvasRenderingContext2D, p: WormPose, front: boolean, t
   }
 }
 
-function drawWorm(ctx: CanvasRenderingContext2D, p: WormPose, t: number): void {
+function drawWorm(ctx: CanvasRenderingContext2D, p: WormPose, t: number, view?: HumanView): void {
+  const rig = view ? wormRig(view) : undefined;
+  const map: Map2 = rig ? q => rig.pt(q.x, q.y, 0) : IDENT;
+  const shift = rig ? map(BASE).x - BASE.x : 0;
+  ctx.save();
+  ctx.translate(shift, 0);
   drawMound(ctx, p, false, t);
+  ctx.restore();
   ctx.save();
   // Everything below the dune line is buried
   ctx.beginPath();
   ctx.rect(-200, -200, 500, GROUND_Y - 1 + 200);
   ctx.clip();
-  drawBody(ctx, p);
-  drawHead(ctx, p);
+  drawBody(ctx, p, map);
+  drawHead(ctx, p, rig);
   ctx.restore();
+  ctx.save();
+  ctx.translate(shift, 0);
   drawMound(ctx, p, true, t);
+  ctx.restore();
+}
+
+/** The worm rises out of its mound: views pivot on the burrow. */
+function wormRig(view: HumanView): ViewRig {
+  return new ViewRig(view, 0, BASE, BASE.x);
 }
 
 function mawCentre(p: WormPose): V {
@@ -395,10 +437,20 @@ export const SandwormDrawer = rigMonster<WormPose>({
   frameW: 72,
   frameH: 48,
   scale: 1.32,
+  views: MONSTER_VIEWS,
   pose: wormPose,
-  draw: (ctx, p, _act, t) => drawWorm(ctx, p, t),
-  shadow: (p) => ({ x: BASE.x + 2 + (p.head.x - 58) * 0.2, r: 24, lift: 0 }),
-  fx: wormFx,
+  draw: (ctx, p, _act, t, view) => drawWorm(ctx, p, t, view),
+  shadow: (p, _act, _t, view) => ({ x: groundX(view, BASE.x + 2 + (p.head.x - 58) * 0.2), r: 24, lift: 0 }),
+  fx: (ctx, p, act, t, view) => {
+    if (!view) {
+      wormFx(ctx, p, act, t);
+      return;
+    }
+    const rig = wormRig(view);
+    // Gullet glow only where the maw faces the camera
+    const face = rig.facing(Math.cos(p.ang), Math.sin(p.ang), 0);
+    withAffine(ctx, q => rig.pt(q.x, q.y, 0), () => wormFx(ctx, face < 0 ? { ...p, maw: 0 } : p, act, t));
+  },
   rim: 'rgba(255,238,200,0.6)',
   ink: '#22100a',
 });

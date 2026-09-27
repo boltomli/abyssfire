@@ -276,6 +276,7 @@ export class NPC {
 
   update(playerCol: number, playerRow: number): void {
     const near = this.isNearPlayer(playerCol, playerRow, 3);
+    if (near) this.faceToward(playerCol, playerRow);
     switch (this.state) {
       case 'working':
       case 'idle':
@@ -297,6 +298,19 @@ export class NPC {
       case 'talking':
         break;
     }
+  }
+
+  /**
+   * NPC sheets are drawn in the front 3/4 view facing screen right-down (se);
+   * mirroring gives sw. Turn toward the player once they are clearly to one
+   * side (screen x follows col − row), so standing straight in front of an
+   * NPC doesn't make it flip back and forth.
+   */
+  private faceToward(playerCol: number, playerRow: number): void {
+    if (!this.npcSprite) return;
+    const dx = (playerCol - playerRow) - (this.tileCol - this.tileRow);
+    if (dx <= -1) this.npcSprite.setFlipX(true);
+    else if (dx >= 1) this.npcSprite.setFlipX(false);
   }
 
   destroy(): void {

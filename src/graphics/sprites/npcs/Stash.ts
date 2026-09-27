@@ -16,21 +16,8 @@ export const StashDrawer = npcDrawer({
     boots: 0x1a1a2a,
     item: 'key',
     offItem: 'book',
+    specs: true,
   },
   work: 'read',
   ready: { off: 0.2 },
-  fx: (ctx, _p, sk) => {
-    // Round spectacles
-    ctx.save();
-    ctx.translate(sk.head.x, sk.head.y);
-    ctx.rotate(sk.headAng);
-    ctx.strokeStyle = 'rgba(160,210,240,0.9)';
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.arc(4, -0.5, 1.6, 0, Math.PI * 2);
-    ctx.moveTo(7.6, -0.4);
-    ctx.arc(6.6, -0.4, 1, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  },
 });

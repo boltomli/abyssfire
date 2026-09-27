@@ -4,7 +4,7 @@
 // gets a silhouette that reads at a glance: the swordsman's straw hat, the
 // miner's pickaxe and pipe, the medium's lantern, the knight's broken plate.
 import { glow, vec } from '../rig/Rig';
-import { npcDrawer } from '../rig/NpcKit';
+import { npcDrawer, propTip, STAFF_ORB } from '../rig/NpcKit';
 
 /** 平原药师 — herbalist in a sage dress and linen apron, counting dried herbs. */
 export const PlainsHerbalistDrawer = npcDrawer({
@@ -75,7 +75,7 @@ export const ForestSpiritMediumDrawer = npcDrawer({
   },
 });
 
-/** 矿工老汉 — stout old miner, bald with a grey beard, pickaxe on his shoulder and a pipe going. */
+/** 矿工老汉 — stout old miner, bald with a grey beard, leaning on his pickaxe with a pipe going. */
 export const MountainMinerDrawer = npcDrawer({
   key: 'npc_mountain_miner',
   look: {
@@ -85,9 +85,12 @@ export const MountainMinerDrawer = npcDrawer({
     hat: { kind: 'cap', color: 0x8a6a2a, accent: 0xffd27a },
     top: { color: 0x6e5a44, kind: 'vest', trim: 0x3a2e22 },
     sleeves: 0x9a7a54, apron: 0x4a3a2a, belt: 0x2a1e12, legs: 0x4a4038, boots: 0x241a10,
-    item: 'pickaxe', offItem: 'pipe',
+    item: 'pipe', offItem: 'pickaxe',
   },
   work: 'smoke',
+  // Leaning on the pickaxe, its head planted beside his boot.
+  ready: { handF: vec(55, 67), zF: -2, off: 2.95 },
+  gesture: 'near',
 });
 
 /** 符文学者 — rune scholar in a deep blue robe and coif, reading a book whose runes glow. */
@@ -138,7 +141,7 @@ export const DesertWaterDivinerDrawer = npcDrawer({
   },
   work: 'ready',
   fx: (ctx, p, sk, _act, t) => {
-    const tip = vec(sk.handN.x + Math.sin(p.wpn) * 19, sk.handN.y - Math.cos(p.wpn) * 19);
+    const tip = propTip(sk, p.wpn, STAFF_ORB, true, 'staff');
     glow(ctx, tip, 3.5 + Math.sin(t * Math.PI * 4) * 0.6, 0x6ac8ff, 0.65);
   },
 });
@@ -174,7 +177,7 @@ export const AbyssVoidResearcherDrawer = npcDrawer({
   },
   work: 'read',
   fx: (ctx, p, sk, _act, t) => {
-    const tip = vec(sk.handN.x + Math.sin(p.wpn) * 11, sk.handN.y - Math.cos(p.wpn) * 11);
+    const tip = propTip(sk, p.wpn, 11);
     glow(ctx, tip, 3.2 + Math.sin(t * Math.PI * 4), 0x9f78dc, 0.75);
   },
 });

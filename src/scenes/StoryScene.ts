@@ -14,6 +14,7 @@ import { GAME_HEIGHT, GAME_WIDTH } from '../config';
 import { t } from '../i18n';
 import { isMobileDevice } from '../systems/MobileControlsSystem';
 import type { Chapter, Cutscene, FocusTarget, Speaker, StorySequence, StorySlide } from '../data/story/types';
+import { applyScreenCamera } from '../rendering/RenderScalePhaser';
 
 const W = GAME_WIDTH;
 const H = GAME_HEIGHT;
@@ -56,6 +57,7 @@ export class StoryScene extends Phaser.Scene {
   }
 
   create(): void {
+    applyScreenCamera(this);
     this.layer = this.add.container(0, 0).setDepth(DEPTH);
     this.barTop = this.add.rectangle(W / 2, -BAR_H / 2, W, BAR_H, 0x000000).setDepth(DEPTH + 5);
     this.barBottom = this.add.rectangle(W / 2, H + BAR_H / 2, W, BAR_H, 0x000000).setDepth(DEPTH + 5);

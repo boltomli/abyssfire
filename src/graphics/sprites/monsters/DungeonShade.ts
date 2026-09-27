@@ -246,6 +246,9 @@ function cloakOutline(b: ShadeBody, p: ShadePose, t: number): { pts: V[]; tip: V
   return { pts: [...top, ...front, ...back.reverse()], tip };
 }
 
+/** How far the face sits back from the hood's front edge (front 3/4 view). */
+const FACE_SHIFT = 2.2;
+
 function hoodAndSkull(ctx: CanvasRenderingContext2D, b: ShadeBody, p: ShadePose, t: number): void {
   ctx.save();
   ctx.translate(b.head.x, b.head.y);
@@ -256,6 +259,8 @@ function hoodAndSkull(ctx: CanvasRenderingContext2D, b: ShadeBody, p: ShadePose,
     vec(8.2, 1), vec(6.4, 7), vec(-1.6, 8.2), vec(-8.6 - sway, 6.4), vec(-13.5 - sway * 1.5, 9.5 + sway * 0.3), vec(-9 - sway, 2.8),
   ];
   cel(ctx, () => blobPath(ctx, shell), CLOAK, { band: 1.8 });
+  // The face turns toward the camera (front 3/4) rather than profile.
+  ctx.translate(-FACE_SHIFT, 0);
   // Deep hood opening
   const opening = [vec(-0.4, -6.2), vec(6, -4.6), vec(7.8, 1.4), vec(6, 6.4), vec(-0.2, 6)];
   ctx.fillStyle = VOID;
@@ -275,13 +280,13 @@ function hoodAndSkull(ctx: CanvasRenderingContext2D, b: ShadeBody, p: ShadePose,
   // Sockets, nasal cavity and a crack
   ctx.fillStyle = VOID;
   ctx.beginPath();
-  ctx.ellipse(4.2, -0.9, 1.5, 1.3, 0, 0, Math.PI * 2);
-  ctx.ellipse(6.9, -0.7, 0.8, 1.1, 0, 0, Math.PI * 2);
+  ctx.ellipse(3.6, -0.9, 1.4, 1.3, 0, 0, Math.PI * 2);
+  ctx.ellipse(6.6, -0.8, 1.2, 1.2, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(6.6, 0.9);
-  ctx.lineTo(7.6, 1.9);
-  ctx.lineTo(6.4, 2);
+  ctx.moveTo(5.1, 0.6);
+  ctx.lineTo(5.8, 1.9);
+  ctx.lineTo(4.4, 1.9);
   ctx.closePath();
   ctx.fill();
   ctx.strokeStyle = BONE.shade;
@@ -293,8 +298,8 @@ function hoodAndSkull(ctx: CanvasRenderingContext2D, b: ShadeBody, p: ShadePose,
   ctx.stroke();
   // Eye-lights (the fx pass adds the glow)
   ctx.fillStyle = '#d8f8ff';
-  ctx.fillRect(3.9, -1.4, 1.1, 0.9);
-  ctx.fillRect(6.6, -1.2, 0.6, 0.8);
+  ctx.fillRect(3.2, -1.4, 1, 0.9);
+  ctx.fillRect(6.2, -1.3, 0.9, 0.9);
   // Hood rim folds catching the light
   ctx.strokeStyle = CLOAK.light;
   ctx.lineWidth = 0.7;
@@ -400,7 +405,7 @@ function shadeFx(ctx: CanvasRenderingContext2D, p: ShadePose, act: MonsterAction
   const b = solveShade(p);
   const live = 1 - p.fade;
   // Eye-lights
-  for (const [l, r] of [[vec(4.4, -1), 3.2], [vec(6.9, -0.8), 2.2]] as const) {
+  for (const [l, r] of [[vec(3.7 - FACE_SHIFT, -1), 2.8], [vec(6.6 - FACE_SHIFT, -0.9), 2.6]] as const) {
     glow(ctx, inHood(b, l), r + p.fx, EYE, (0.4 + p.fx * 0.2) * live);
   }
   // Cold soul-flame burning inside the ribcage

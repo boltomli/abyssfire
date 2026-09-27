@@ -24,6 +24,23 @@ import {
 } from '../rig/Rig';
 import { basePose, drawHumanoid, gait, solveSkeleton, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { rigMonster } from '../rig/MonsterKit';
+import { Section, drawHumanoidView, solveViewSkeleton, type HumanView, type ViewSkeleton } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  decal,
+  groundX,
+  lp,
+  monsterViewSkin,
+  profileRings,
+  sagittal,
+  sagittalSpun,
+  solid3,
+  surf,
+  surfCurve,
+  surfPatch,
+  surfVis,
+  type Part3,
+} from '../rig/MonsterView';
 
 const ROCK = tone(0x98a0aa, { light: 0.4 });
 const BODY = tone(0x7a8392, { light: 0.38 });
@@ -265,6 +282,168 @@ const SKIN: HumanSkin = {
   },
 };
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const GOLEM_BODY = (len: number): V[] => [
+  vec(-14, 1), vec(-11.6, -6.4), vec(-4, -8.4), vec(4, -6.6), vec(11, -1), vec(12.4, len * 0.42),
+  vec(8.6, len * 0.85), vec(4, len + 2), vec(-5, len + 2), vec(-9.4, len * 0.7), vec(-12.6, len * 0.35),
+];
+/** Front rune-core position on the body surface. */
+const CORE = { hk: 0.62, phi: 0.2 };
+
+function runeRun(ctx: CanvasRenderingContext2D, run: V[], g: number): void {
+  runeLine(ctx, run, g);
+}
+
+function golemTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const gp = p as GolemPose;
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = profileRings(GOLEM_BODY(len), y => len - y, a => a * 1.02, 8);
+  const g = gp.glow;
+  const hc = len * CORE.hk;
+  solid3(ctx, T, R, BODY, {
+    band: 2.6,
+    hi: 1.1,
+    face: () => {
+      // Plate seams
+      for (const ctrl of [
+        [[len * 0.7, -2.6], [len * 0.58, -1.2], [len * 0.7, 0.2]],
+        [[len * 0.3, 1.2], [len * 0.2, 2.6], [len * 0.35, 3.8]],
+        [[len + 5, 2.4], [len - 1, 3], [len * 0.6, 3.6]],
+        [[len * 0.2, -1.4], [len * 0.15, -3.2]],
+      ] as const) {
+        for (const run of surfCurve(T, R, ctrl, 0.05, 6)) {
+          ctx.strokeStyle = BODY.shade;
+          ctx.lineWidth = 0.6;
+          ctx.beginPath();
+          run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+          ctx.stroke();
+        }
+      }
+      for (const [h, phi, r] of [[len + 5, 3.2, 1.6], [len + 6, 2.4, 1], [len * 0.3, 2.2, 1.2], [len * 0.5, -2.4, 1.1]] as const) {
+        decal(ctx, T, R, h, phi, () => {
+          ctx.fillStyle = LICHEN;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+        }, { lift: 0.1 });
+      }
+      // Glowing crack network radiating from the core
+      for (const ctrl of [
+        [[hc, CORE.phi], [len * 0.8, -0.4], [len * 0.9, -1.2], [len + 2, -1.8]],
+        [[hc, CORE.phi], [len * 0.86, 0.8], [len + 1, 1.4]],
+        [[hc, CORE.phi], [len * 0.38, 0], [len * 0.22, -0.4], [0, -0.3]],
+        [[hc, CORE.phi], [len * 0.38, 0.9], [len * 0.28, 1.5]],
+      ] as const) {
+        for (const run of surfCurve(T, R, ctrl, 0.1, 5, 0.02)) runeRun(ctx, run, g);
+      }
+      // Rune-core socket
+      decal(ctx, T, R, hc, CORE.phi, () => {
+        cel(ctx, () => polyPath(ctx, [vec(-4.4, -1.2), vec(-1, -4.6), vec(3.8, -2.6), vec(4.2, 2.4), vec(0, 4.4), vec(-3.8, 2.6)]), ROCK_DARK, { band: 0.7, stroke: 0.5 });
+        ctx.fillStyle = `rgba(255,${120 + Math.round(60 * Math.min(1, g))},50,${Math.min(1, 0.25 + g * 0.75)})`;
+        ctx.beginPath();
+        polyPath(ctx, [vec(0, -3), vec(2.6, 0), vec(0, 3), vec(-2.6, 0)]);
+        ctx.fill();
+        if (g > 0.05) {
+          ctx.fillStyle = `rgba(255,236,190,${Math.min(1, g) * (0.7 + 0.3 * Math.sin(t * Math.PI * 4))})`;
+          ctx.beginPath();
+          polyPath(ctx, [vec(0, -1.4), vec(1.2, 0), vec(0, 1.4), vec(-1.2, 0)]);
+          ctx.fill();
+        }
+      }, { lift: 0.2, minVis: 0.05 });
+    },
+  });
+}
+
+/** Head section: sunk into the front of the shoulders. */
+function golemHeadSection(sk: ViewSkeleton): Section {
+  const o = lp(sk.torso, sk.torsoLen - 0.6, 7.4, 0);
+  return new Section(sk.rig, o, sk.skull.up, sk.skull.fw);
+}
+
+const GOLEM_HEAD = profileRings([vec(-4.6, -3), vec(-1, -5.6), vec(4.8, -4.8), vec(7, -1), vec(6.4, 3.4), vec(1, 4.6), vec(-4.4, 3)], y => -y, a => a * 1.05, 6);
+
+function golemHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const gp = p as GolemPose;
+  const H = golemHeadSection(sk);
+  const R = GOLEM_HEAD;
+  const g = Math.min(1, gp.glow);
+  const parts: Part3[] = [
+    // Heavy brow slab jutting over the eyes
+    { pts: [[3.8, -1, -5.6], [3.8, -1, 5.6], [3.4, 7.8, -4.6], [3.4, 7.8, 4.6], [1.2, 7.6, -4.4], [1.2, 7.6, 4.4], [1.6, 2, -5.4], [1.6, 2, 5.4]], tone: ROCK_DARK, hull: true, band: 0.5, bias: 0.5 },
+  ];
+  solid3(ctx, H, R, ROCK, {
+    band: 1.2,
+    parts,
+    face: () => {
+      if (H.vis(0) < -0.2) return;
+      // Slit eyes
+      ctx.fillStyle = '#1a0e0a';
+      ctx.beginPath();
+      polyPath(ctx, surfPatch(H, R, 0.6, -0.8, -0.8, 0.8, 0.1, 6));
+      ctx.fill();
+      if (g > 0.05) {
+        ctx.fillStyle = `rgba(255,190,90,${g})`;
+        for (const [a, b] of [[-0.65, -0.2], [0.2, 0.65]] as const) {
+          ctx.beginPath();
+          polyPath(ctx, surfPatch(H, R, 0.3, -0.5, a, b, 0.15, 3));
+          ctx.fill();
+        }
+      }
+      for (const run of surfCurve(H, R, [[-2.6, -0.5], [-2.2, 0.5]], 0.05, 4)) {
+        ctx.strokeStyle = ROCK.shade;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+        ctx.stroke();
+      }
+    },
+  });
+}
+
+/** Arms hang either side of the boulder body in 3/4 (the side view swings the far arm behind to show breadth). */
+function viewPose(p: GolemPose): GolemPose {
+  const gap = p.handN.x - p.handF.x;
+  return gap > 8 ? { ...p, handF: vec(p.handF.x + (gap - 8) * 0.8, p.handF.y) } : p;
+}
+
+const VIEW_SKIN = monsterViewSkin(SKIN, {
+  build: { hipW: 4.5, shW: 11, elbowOut: 2, footOut: 0.8 },
+  headBias: 6,
+  torso: golemTorsoView,
+  head: golemHeadView,
+});
+
+function drawGolemView(ctx: CanvasRenderingContext2D, p0: GolemPose, t: number, view: HumanView): void {
+  if (p0.crumble > 0.001) {
+    // Rubble collapse: the side art laid onto the body plane.
+    const vsk = solveViewSkeleton(p0, SKIN.prop, VIEW_SKIN.build, view);
+    sagittal(ctx, vsk.rig, 0, () => drawGolem(ctx, p0, t));
+    return;
+  }
+  drawHumanoidView(ctx, viewPose(p0), VIEW_SKIN, t, view);
+}
+
+function drawFxView(ctx: CanvasRenderingContext2D, p0: GolemPose, act: MonsterAction, t: number, view: HumanView): void {
+  const p = viewPose(p0);
+  const sk = solveViewSkeleton(p, SKIN.prop, VIEW_SKIN.build, view);
+  const g = Math.min(1.5, p.glow);
+  if (p.crumble < 0.3) {
+    const T = sk.torso;
+    const R = profileRings(GOLEM_BODY(sk.torsoLen), y => sk.torsoLen - y, a => a * 1.02, 8);
+    const hc = sk.torsoLen * CORE.hk;
+    if (surfVis(T, R, hc, CORE.phi) > 0.05) glow(ctx, surf(T, R, hc, CORE.phi, 0.4), 5 + g * 2, RUNE, 0.2 * g);
+    const H = golemHeadSection(sk);
+    if (H.vis(0) > 0.1) glow(ctx, surf(H, GOLEM_HEAD, 0, 0, 0.3), 3, RUNE, 0.45 * Math.min(1, g));
+    if (act === 'attack') {
+      for (const h of [sk.handN, sk.handF]) glow(ctx, h, 5 + p.fx * 4, RUNE, 0.3 * p.fx);
+    }
+  }
+  // Ground impact and crumble dust: the side art on the body plane.
+  sagittalSpun(ctx, sk, p, () => drawFx(ctx, p, act, t, true));
+}
+
 // ── Poses ───────────────────────────────────────────────────────────────
 
 const READY: GolemPose = {
@@ -422,10 +601,10 @@ function drawGolem(ctx: CanvasRenderingContext2D, p: GolemPose, t: number): void
   }
 }
 
-function drawFx(ctx: CanvasRenderingContext2D, p: GolemPose, act: MonsterAction, t: number): void {
+function drawFx(ctx: CanvasRenderingContext2D, p: GolemPose, act: MonsterAction, t: number, groundOnly = false): void {
   const sk = solveSkeleton(p, SKIN.prop);
   const g = Math.min(1.5, p.glow);
-  if (p.crumble < 0.3) {
+  if (p.crumble < 0.3 && !groundOnly) {
     const core = lerpV(sk.neck, sk.pelvis, 0.38);
     glow(ctx, vec(core.x + 4, core.y), 5 + g * 2, RUNE, 0.2 * g);
     const hd = headAt(sk);
@@ -486,9 +665,10 @@ export const StoneGolemDrawer = rigMonster<GolemPose>({
   frameW: 84,
   frameH: 68,
   scale: 1.45,
+  views: MONSTER_VIEWS,
   pose: golemPose,
-  draw: (ctx, p, _act, t) => drawGolem(ctx, p, t),
-  shadow: (p) => ({ x: p.root.x + 2, r: p.crumble > 0.5 ? 20 : 17, lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)) }),
-  fx: drawFx,
+  draw: (ctx, p, _act, t, view) => (view ? drawGolemView(ctx, p, t, view) : drawGolem(ctx, p, t)),
+  shadow: (p, _act, _t, view) => ({ x: groundX(view, p.root.x + 2), r: p.crumble > 0.5 ? 20 : 17, lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)) }),
+  fx: (ctx, p, act, t, view) => (view ? drawFxView(ctx, p, act, t, view) : drawFx(ctx, p, act, t)),
   rim: 'rgba(230,236,255,0.5)',
 });

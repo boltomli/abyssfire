@@ -22,6 +22,16 @@ function fs(basePx: number): string {
 
 type MonsterState = 'idle' | 'patrol' | 'chase' | 'attack' | 'dead';
 
+/**
+ * Screen-space direction (x right, y down) of a move by (dCol, dRow) tiles
+ * on the isometric grid — the same projection as `cartToIso`.
+ */
+export function tileDeltaToScreen(dCol: number, dRow: number): { x: number; y: number } {
+  const a = cartToIso(dCol, dRow);
+  const o = cartToIso(0, 0);
+  return { x: a.x - o.x, y: a.y - o.y };
+}
+
 export class Monster {
   scene: Phaser.Scene;
   sprite: Phaser.GameObjects.Container;
@@ -207,12 +217,16 @@ export class Monster {
         }
         break;
 
-      case 'attack':
+      case 'attack': {
         if (distToPlayer > this.definition.attackRange * 1.2) {
           this.state = 'chase';
         }
-        // Attack timing handled by ZoneScene
+        // Attack timing handled by ZoneScene; between swings keep squared up
+        // to the player (front or back 3/4 view as they sit on screen).
+        const face = tileDeltaToScreen(playerCol - this.tileCol, playerRow - this.tileRow);
+        this.animator.faceToward(face.x, face.y);
         break;
+      }
     }
 
     // Drive animation states
@@ -249,7 +263,11 @@ export class Monster {
     }
 
     const worldPos = cartToIso(this.tileCol, this.tileRow);
-    this.animator.faceToward(worldPos.x - this.sprite.x);
+    // Face the intended heading (not the per-frame position delta, which is
+    // sub-pixel and zero when blocked): down-screen shows the front 3/4
+    // view, up-screen the back; sheets without a back view just mirror.
+    const heading = tileDeltaToScreen(nx, ny);
+    this.animator.faceToward(heading.x, heading.y);
     this.sprite.setPosition(worldPos.x, worldPos.y);
     this.sprite.setDepth(worldPos.y + 50);
 
