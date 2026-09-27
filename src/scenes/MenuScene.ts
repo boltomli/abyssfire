@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE, DPR } from '../config';
+import { GAME_WIDTH, GAME_HEIGHT, TEXTURE_SCALE, DPR, RENDER_SCALE } from '../config';
 import { SaveSystem } from '../systems/SaveSystem';
 
 import { EventBus, GameEvents } from '../utils/EventBus';
@@ -14,6 +14,7 @@ import { t, setLocale, getLocale } from '../i18n';
 import { getZoneName } from '../i18n/gameAccessors';
 import { AllClasses } from '../data/classes';
 import { addFrame, addButton, addDivider, addTitleFlourishes, UI_COLORS, type UiButton, type ButtonVariant } from '../ui/UiKit';
+import { applyScreenCamera } from '../rendering/RenderScalePhaser';
 
 const MENU_FONT = '"Noto Sans SC", "Noto Sans TC", sans-serif';
 const MENU_TITLE_FONT = '"Cinzel", "Noto Sans SC", "Noto Sans TC", serif';
@@ -67,6 +68,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
+    applyScreenCamera(this);
     // Coming back from a zone (Esc → menu) must hand the music back to the title theme.
     audioManager.playTrack('menu', 'explore');
     this.subscriptions = new DisposableScope();
@@ -676,7 +678,7 @@ export class MenuScene extends Phaser.Scene {
         }
       };
       const onOut = (pointer?: Phaser.Input.Pointer) => {
-        if (pointer && Math.abs(pointer.x - card.x) < cardW / 2 && Math.abs(pointer.y - baseY) < cardH / 2) return;
+        if (pointer && Math.abs((pointer.x / RENDER_SCALE) - card.x) < cardW / 2 && Math.abs((pointer.y / RENDER_SCALE) - baseY) < cardH / 2) return;
         this.tweens.killTweensOf(card);
         this.tweens.add({ targets: card, y: baseY, duration: 160, ease: 'Quad.easeOut' });
         this.tweens.add({ targets: hoverGlow, alpha: 0, duration: 200 });
@@ -907,7 +909,7 @@ export class MenuScene extends Phaser.Scene {
     const progHit = this.add.rectangle(innerLeft + innerW / 2, progY, innerW, px(16), 0x000000, 0)
       .setInteractive({ useHandCursor: true });
     progHit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      const ratio = Math.max(0, Math.min(1, (pointer.x - innerLeft) / innerW));
+      const ratio = Math.max(0, Math.min(1, ((pointer.x / RENDER_SCALE) - innerLeft) / innerW));
       elapsed = ratio * JUKEBOX_TRACKS[trackIndex].duration;
       updateUI();
     });

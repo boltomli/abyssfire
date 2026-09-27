@@ -18,7 +18,7 @@ Deployed to GitHub Pages via `.github/workflows/deploy.yml` — push to `main` a
 - **Storage**: IndexedDB via Dexie.js (saves, stash)
 - **State**: Custom EventBus pub/sub + direct references
 - **Art**: Procedurally generated sprites with external asset override (cartoon-style PNG fallback)
-- **Resolution**: 1280x720, isometric tiles 64x32
+- **Resolution**: 1280x720 logical, isometric tiles 64x32. The canvas renders at `RENDER_SCALE` (1 / 1.5 / 2 × by window size, device pixel ratio and render quality; `?res=` overrides) with every camera zoomed to match, so code stays in logical pixels: screen-fixed scenes call `applyScreenCamera`, the zone camera is `ZONE_CAMERA_ZOOM × RENDER_SCALE`, and raw pointer coordinates in UI code go through `/ RENDER_SCALE` (`logicalPointer`). Text is rasterised at the matching resolution (`installTextResolution`)
 
 ## Project Structure
 

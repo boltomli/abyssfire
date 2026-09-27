@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { BASE_STASH_SLOTS } from '../systems/InventorySystem';
-import { GAME_WIDTH, GAME_HEIGHT, DPR } from '../config';
+import { GAME_WIDTH, GAME_HEIGHT, DPR, RENDER_SCALE } from '../config';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import { DisposableScope } from '../utils/DisposableScope';
 import { getItemBase, GEM_STAT_MAP } from '../data/items/bases';
@@ -45,6 +45,7 @@ import {
   UiButton, type ButtonOptions, type CardStyle,
 } from '../ui/UiKit';
 import { getItemDisplayName, getItemBaseName, getItemBaseDesc, getAffixName, getStatLabel, isStatPercent, getQualityLabel, getSetName, getSetBonusDesc, getClassName, getDirection as getLocalizedDirection, getSkillName, getSkillDesc, getSkillTreeName, getDamageTypeName, getQuestName, getQuestDesc, getZoneName, getMercenaryName, getMercenaryDesc, getMercenaryTypeLabel, getBuildingName, getBuildingDesc, getPetName, getPetDesc, getAchievementName, getAchievementDesc, getAchievementTitle, getLoreName, getLoreText, getNpcName, getQuestTargetName, getPetStatLabel } from '../i18n/gameAccessors';
+import { applyScreenCamera } from '../rendering/RenderScalePhaser';
 
 const FONT = '"Noto Sans SC", sans-serif';
 const TITLE_FONT = '"Cinzel", "Noto Sans SC", serif';
@@ -343,6 +344,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   create(): void {
+    applyScreenCamera(this);
     this.subscriptions = new DisposableScope();
     this.skillSlots = [];
     this.skillCooldownOverlays = [];
@@ -1024,7 +1026,7 @@ export class UIScene extends Phaser.Scene {
         }
         const slot = def.slot;
         slotBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
-          this.showItemTooltip(eq, pointer.x, pointer.y);
+          this.showItemTooltip(eq, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
         });
         slotBg.on('pointerout', () => this.hideHoverTooltip());
         slotBg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -1040,7 +1042,7 @@ export class UIScene extends Phaser.Scene {
               this.zone.invalidateEquipStats();
               this.refreshInventory();
             } });
-            this.showContextPopup(eq, pointer.x, pointer.y, actions);
+            this.showContextPopup(eq, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE), actions);
             return;
           }
           if (ms > 0) {
@@ -1088,12 +1090,12 @@ export class UIScene extends Phaser.Scene {
       const { slot: itemBg, objects } = this.createItemSlot(cx, cy, slotSize, item);
       panel.add(objects);
       itemBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
-        this.showItemTooltip(item, pointer.x, pointer.y);
+        this.showItemTooltip(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
       });
       itemBg.on('pointerout', () => this.hideHoverTooltip());
       itemBg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
         this.hideItemTooltip();
-        this.showContextPopup(item, pointer.x, pointer.y);
+        this.showContextPopup(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
       });
     }
 
@@ -1256,7 +1258,7 @@ export class UIScene extends Phaser.Scene {
         const cy = by + px(14);
         const slot = this.createItemSlot(leftX + px(14), cy, px(26), entry.item, { showCount: false });
         shop.add(slot.objects);
-        slot.slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(entry.item, pointer.x, pointer.y));
+        slot.slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(entry.item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE)));
         slot.slot.on('pointerout', () => this.hideHoverTooltip());
         const nameT = this.add.text(leftX + px(34), cy, getItemDisplayName(entry.item), {
           fontSize: fs(12), color: canAfford ? qualColor : UI_COLORS.dim, fontFamily: FONT,
@@ -1325,7 +1327,7 @@ export class UIScene extends Phaser.Scene {
       }
       itemBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
         if (forging && IS_MOBILE) return; // touch: the tap puts it on the anvil, whose card shows it
-        this.showItemTooltip(item, pointer.x, pointer.y);
+        this.showItemTooltip(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
       });
       itemBg.on('pointerout', () => this.hideHoverTooltip());
       itemBg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -1339,7 +1341,7 @@ export class UIScene extends Phaser.Scene {
         if (IS_MOBILE) {
           // Touch: a tap shows the item + a Sell button instead of selling on the spot.
           const price = (getItemBase(item.baseId)?.sellPrice ?? 1) * item.quantity;
-          this.showContextPopup(item, pointer.x, pointer.y, [{
+          this.showContextPopup(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE), [{
             label: t('ui.shop.sellAction', { price: String(price) }), variant: 'primary',
             callback: () => {
               this.hideContextPopup();
@@ -1483,7 +1485,7 @@ export class UIScene extends Phaser.Scene {
     const textX = scx + slotSize / 2 + px(12);
     const textW = x + w - px(10) - textX;
     if (item) {
-      slot.slot.on('pointerover', (p: Phaser.Input.Pointer) => this.showItemTooltip(item, p.x, p.y));
+      slot.slot.on('pointerover', (p: Phaser.Input.Pointer) => this.showItemTooltip(item, (p.x / RENDER_SCALE), (p.y / RENDER_SCALE)));
       slot.slot.on('pointerout', () => this.hideHoverTooltip());
       const nameT = this.add.text(textX, y + px(10), getItemDisplayName(item), {
         fontSize: fs(14), color: qualityHex(item.quality), fontFamily: FONT, fontStyle: 'bold',
@@ -1839,7 +1841,7 @@ export class UIScene extends Phaser.Scene {
     const pick = (item: ItemInstance, pointer: Phaser.Input.Pointer, label: string, move: () => void): void => {
       if (!IS_MOBILE) { move(); return; }
       this.hideItemTooltip();
-      this.showContextPopup(item, pointer.x, pointer.y, [{
+      this.showContextPopup(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE), [{
         label, variant: 'primary',
         callback: () => { this.hideContextPopup(); move(); },
       }]);
@@ -1869,7 +1871,7 @@ export class UIScene extends Phaser.Scene {
         }
         const { slot, objects } = this.createItemSlot(cx, cy, size, item);
         panel.add(objects);
-        slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(item, pointer.x, pointer.y));
+        slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE)));
         slot.on('pointerout', () => this.hideHoverTooltip());
         slot.on('pointerdown', (pointer: Phaser.Input.Pointer) => onPick(item, pointer));
       }
@@ -2146,14 +2148,14 @@ export class UIScene extends Phaser.Scene {
       const panel = this.skillPanel;
       const onDown = (p: Phaser.Input.Pointer): void => {
         const k = panel.scaleY || 1;
-        const lx = (p.x - panel.x) / k, ly = (p.y - panel.y) / k;
+        const lx = ((p.x / RENDER_SCALE) - panel.x) / k, ly = ((p.y / RENDER_SCALE) - panel.y) / k;
         drag = lx >= 0 && lx <= pw && ly >= contentTop && ly <= contentTop + contentH
-          ? { startY: p.y, startScroll: this.skillTreeScrollY[this.skillTreeActiveTab] ?? 0, active: false }
+          ? { startY: (p.y / RENDER_SCALE), startScroll: this.skillTreeScrollY[this.skillTreeActiveTab] ?? 0, active: false }
           : null;
       };
       const onMove = (p: Phaser.Input.Pointer): void => {
         if (!drag || !p.isDown || !this.skillPanel) return;
-        const dy = p.y - drag.startY;
+        const dy = (p.y / RENDER_SCALE) - drag.startY;
         if (!drag.active && Math.abs(dy) > DRAG_THRESHOLD) {
           drag.active = true;
           pendingTap = null;
@@ -3406,7 +3408,7 @@ export class UIScene extends Phaser.Scene {
           const cx = (pw - rowW) / 2 + i * (bigSz + gap) + bigSz / 2;
           const { slot, objects } = this.createItemSlot(cx, curY + bigSz / 2, bigSz, item);
           card.add(objects);
-          slot.on('pointerover', (p: Phaser.Input.Pointer) => this.showItemTooltip(item, p.x, p.y));
+          slot.on('pointerover', (p: Phaser.Input.Pointer) => this.showItemTooltip(item, (p.x / RENDER_SCALE), (p.y / RENDER_SCALE)));
           slot.on('pointerout', () => this.hideHoverTooltip());
           slot.on('pointerdown', () => { selectedChoice = i; audioManager.playSFX('click'); drawHighlight(); });
           const label = cardData.choiceLabels[i] ?? '';
@@ -3716,14 +3718,14 @@ export class UIScene extends Phaser.Scene {
       const dragMove = (p: Phaser.Input.Pointer): void => {
         if (dragLastY === null || !p.isDown) return;
         const k = this.dialoguePanel?.scaleY || 1;
-        this.dialogueScrollY = Math.max(0, Math.min(maxScroll, this.dialogueScrollY - (p.y - dragLastY) / k));
+        this.dialogueScrollY = Math.max(0, Math.min(maxScroll, this.dialogueScrollY - ((p.y / RENDER_SCALE) - dragLastY) / k));
         npcText.y = -this.dialogueScrollY;
-        dragLastY = p.y;
+        dragLastY = (p.y / RENDER_SCALE);
       };
       const dragEnd = (): void => { dragLastY = null; };
       if (IS_MOBILE) {
         const dragZone = this.add.rectangle(pw / 2, textAreaY + textAreaH / 2, pw - px(28), textAreaH, 0x000000, 0).setInteractive();
-        dragZone.on('pointerdown', (p: Phaser.Input.Pointer) => { dragLastY = p.y; });
+        dragZone.on('pointerdown', (p: Phaser.Input.Pointer) => { dragLastY = (p.y / RENDER_SCALE); });
         this.dialoguePanel.add(dragZone);
         this.input.on('pointermove', dragMove);
         this.input.on('pointerup', dragEnd);
@@ -4610,7 +4612,7 @@ export class UIScene extends Phaser.Scene {
 
         // Tooltip on hover
         gemBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
-          this.showItemTooltip(gemItem, pointer.x, pointer.y);
+          this.showItemTooltip(gemItem, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
         });
         gemBg.on('pointerout', () => this.hideHoverTooltip());
 
@@ -5485,8 +5487,8 @@ export class UIScene extends Phaser.Scene {
         pctText.setText(`${Math.round(v * 100)}%`);
         onVolume(v);
       };
-      hitArea.on('pointerdown', (p: Phaser.Input.Pointer) => { dragging = true; updateSlider(p.x); });
-      const pointerMoveHandler = (p: Phaser.Input.Pointer) => { if (dragging) updateSlider(p.x); };
+      hitArea.on('pointerdown', (p: Phaser.Input.Pointer) => { dragging = true; updateSlider((p.x / RENDER_SCALE)); });
+      const pointerMoveHandler = (p: Phaser.Input.Pointer) => { if (dragging) updateSlider((p.x / RENDER_SCALE)); };
       const pointerUpHandler = () => { dragging = false; };
       this.input.on('pointermove', pointerMoveHandler);
       this.input.on('pointerup', pointerUpHandler);

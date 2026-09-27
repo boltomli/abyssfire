@@ -5,6 +5,7 @@ import { SkillEffectSystem } from '../systems/SkillEffectSystem';
 import { generateSkillIcons } from '../graphics/icons/SkillIcons';
 import { generateFogTileTextures } from '../systems/FogOfWarSystem';
 import { t } from '../i18n';
+import { applyScreenCamera } from '../rendering/RenderScalePhaser';
 // import { buildFrameSizeRegistry } from '../graphics/sprites/types';
 // import { TEXTURE_SCALE } from '../config';
 
@@ -18,6 +19,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
+    applyScreenCamera(this);
     const { width, height } = this.cameras.main;
 
     // Dark vignette background

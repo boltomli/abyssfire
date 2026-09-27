@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { RENDER_SCALE } from '../config';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import { HIT_PROFILES, type HitWeight } from './HitFeedback';
 import { FxEngine } from '../graphics/vfx/FxEngine';
@@ -62,7 +63,7 @@ export class VFXManager {
   private readonly handlePlayerLevelUp = (): void => {
     this.cameraFlash(200, 0.5, 0xffd700);
     this.cameraShake(100, 0.004);
-    this.cameraZoomPulse(1.5, 200, 1.8);
+    this.cameraZoomPulse(1.5 * RENDER_SCALE, 200, 1.8 * RENDER_SCALE);
     this.scene.time.delayedCall(100, () => {
       const cam = this.scene.cameras.main;
       const wv = cam.worldView;
