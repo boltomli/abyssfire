@@ -196,12 +196,13 @@ export class Player {
    */
   moveDirect(col: number, row: number): void {
     const fromX = this.sprite.x;
+    const fromY = this.sprite.y;
     this.moveTo(col, row);
     this.path = [];
     this.isMoving = true;
     this.directMoveMs = 120;
     this.animator.setWalk();
-    this.animator.faceToward(this.sprite.x - fromX);
+    this.animator.faceToward(this.sprite.x - fromX, this.sprite.y - fromY);
   }
 
   setPath(newPath: { col: number; row: number }[]): void {
@@ -281,8 +282,13 @@ export class Player {
     const dx = targetWorld.x - this.sprite.x;
     const dy = targetWorld.y - this.sprite.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    // Ignore sub-pixel jitter so the sprite doesn't flicker on vertical paths.
-    if (Math.abs(dx) > 1.5) this.animator.faceToward(dx);
+    // Face along the path a step ahead so 8-way zigzags (e.g. alternating
+    // right-down / right-up tiles) don't flip the front/back view each step.
+    const ahead = this.path[1] ? cartToIso(this.path[1].col, this.path[1].row) : targetWorld;
+    const fx = ahead.x - this.sprite.x;
+    const fy = ahead.y - this.sprite.y;
+    // Ignore sub-pixel jitter so the sprite doesn't flicker on arrival.
+    if (Math.hypot(fx, fy) > 1.5) this.animator.faceToward(fx, fy);
 
     const step = this.currentSpeed * dt;
 
@@ -452,9 +458,9 @@ export class Player {
     return this.animator.playAttack(targetX, targetY, { attackIntervalMs: this.attackSpeed });
   }
 
-  /** Returns ms until the spell releases. */
-  playCast(): number {
-    return this.animator.playCast();
+  /** Returns ms until the spell releases. Faces the target point when given. */
+  playCast(targetX?: number, targetY?: number): number {
+    return this.animator.playCast(targetX, targetY);
   }
 
   playHurt(sourceX: number, sourceY: number, strength: number = 1): void {

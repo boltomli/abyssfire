@@ -2462,7 +2462,9 @@ export class ZoneScene extends Phaser.Scene {
 
     let releaseDelay: number;
     if (skill.buff || skill.aoe || skill.range > 2) {
-      releaseDelay = this.player.playCast();
+      releaseDelay = target && !skill.buff
+        ? this.player.playCast(target.sprite.x, target.sprite.y)
+        : this.player.playCast();
     } else {
       const animTarget = this.findPreferredSkillTarget();
       if (animTarget) {

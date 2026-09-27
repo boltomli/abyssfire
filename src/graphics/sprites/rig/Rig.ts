@@ -525,11 +525,11 @@ export function inkLegacyFrame(
 }
 
 /** Soft contact shadow on the ground, shrinking as the body leaves it. */
-export function groundShadow(ctx: CanvasRenderingContext2D, x: number, rx: number, lift: number): void {
+export function groundShadow(ctx: CanvasRenderingContext2D, x: number, rx: number, lift: number, y = GROUND_Y): void {
   const k = Math.max(0.45, 1 - lift / 24);
   const r = rx * k;
   ctx.save();
-  ctx.translate(x, GROUND_Y + 0.5);
+  ctx.translate(x, y + 0.5);
   ctx.scale(1, 0.32);
   const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
   g.addColorStop(0, `rgba(8,6,16,${0.45 * (0.6 + 0.4 * k)})`);

@@ -144,6 +144,11 @@ Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4)
   zone-themed terrain (`src/graphics/terrain/`), props, pooled skill VFX (`src/graphics/vfx/`),
   item/skill icons (`src/graphics/icons/`) and the UI kit (`src/ui/UiKit.ts`) follow
   `docs/art-direction.md`. External PNGs in `public/assets/` still override any texture key.
+- Hero sheets are isometric: every action in a front 3/4 (`se`) and back 3/4 (`ne`) view, mirrored
+  for sw/nw (`PLAYER_VIEWS`, view-major frames; `ne` anims are `player_<class>_ne_<action>`).
+  `rig/HumanView.ts` lifts the side-view keyframes into 3D (lateral axis, ±45° yaw, 2:1 iso drop,
+  depth-sorted parts); `CharacterAnimator.resolveFacing` picks view + flip from the screen-space
+  move/target vector with hysteresis. Monsters and NPCs are still side view.
 
 ### Needs Work
 - **Performance**: first entry to a zone draws its monster/NPC sheets (~1 s on a software

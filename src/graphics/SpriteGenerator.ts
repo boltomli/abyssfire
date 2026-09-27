@@ -4,11 +4,14 @@ import { CAMP_THEMES } from '../data/camp-themes';
 import { getActionFrameRate } from '../systems/CharacterAnimator';
 import { DrawUtils } from './DrawUtils';
 import { generateLegacyTiles } from './terrain/LegacyTiles';
-import type { EntityAction, EntityDrawer } from './sprites/types';
+import type { EntityAction, EntityDrawer, PlayerView } from './sprites/types';
 import {
   PLAYER_ACTION_FRAME_COUNTS,
   PLAYER_ACTION_ORDER,
+  PLAYER_VIEWS,
   getPlayerActionFrameRange,
+  getPlayerViewFrameRange,
+  playerAnimKey,
   computeSheetGrid,
   sheetFrameOrigin,
   type SheetGrid,
@@ -453,10 +456,16 @@ export class SpriteGenerator {
   }
 
   private static clearEntityAnimations(scene: Phaser.Scene, key: string, isPlayer: boolean): void {
-    const actions = isPlayer
-      ? PLAYER_ACTION_ORDER
-      : ['idle', 'walk', 'attack', 'hurt', 'death'];
-    for (const action of actions) {
+    if (isPlayer) {
+      for (const view of PLAYER_VIEWS) {
+        for (const action of PLAYER_ACTION_ORDER) {
+          const animKey = playerAnimKey(key, view, action);
+          if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
+        }
+      }
+      return;
+    }
+    for (const action of ['idle', 'walk', 'attack', 'hurt', 'death']) {
       const animKey = `${key}_${action}`;
       if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
     }
@@ -567,25 +576,26 @@ export class SpriteGenerator {
     const [canvas, ctx] = this.utils.createCanvas(grid.width, grid.height);
 
     const isPlayer = PLAYER_DRAWER_BY_KEY.has(drawer.key);
-    const actions: [EntityAction, number, number][] = isPlayer
-      ? PLAYER_ACTION_ORDER.map(action => {
-          const range = getPlayerActionFrameRange(action);
-          return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action]];
-        })
+    // Player heroes carry every action once per isometric view (view-major).
+    const actions: [EntityAction, number, number, PlayerView | undefined][] = isPlayer
+      ? (drawer.views ?? [undefined]).flatMap(view => PLAYER_ACTION_ORDER.map((action): [EntityAction, number, number, PlayerView | undefined] => {
+          const range = view ? getPlayerViewFrameRange(view, action) : getPlayerActionFrameRange(action);
+          return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action], view];
+        }))
       : [
-          ['idle', IDLE_START, IDLE_COUNT],
-          ['walk', WALK_START, WALK_COUNT],
-          ['attack', ATK_START, ATK_COUNT],
-          ['hurt', HURT_START, HURT_COUNT],
-          ['death', DEATH_START, DEATH_COUNT],
+          ['idle', IDLE_START, IDLE_COUNT, undefined],
+          ['walk', WALK_START, WALK_COUNT, undefined],
+          ['attack', ATK_START, ATK_COUNT, undefined],
+          ['hurt', HURT_START, HURT_COUNT, undefined],
+          ['death', DEATH_START, DEATH_COUNT, undefined],
         ];
 
     // Rigged drawers ink themselves; legacy ones get the shared ink pass.
     const legacy = !drawer.inked;
-    for (const [action, start, count] of actions) {
+    for (const [action, start, count, view] of actions) {
       for (let f = 0; f < count; f++) {
         this.drawCell(ctx, grid, start + f, fw, fh, legacy,
-          c => drawer.drawFrame(c, f, action, fw, fh, this.utils));
+          c => drawer.drawFrame(c, f, action, fw, fh, this.utils, view));
       }
     }
 
@@ -715,10 +725,22 @@ export class SpriteGenerator {
   // ═══════════════════════════════════════════════════════════════════════
 
   private hasEntityAnimationsRegistered(key: string, isPlayer: boolean): boolean {
-    const actions = isPlayer
-      ? PLAYER_ACTION_ORDER
-      : ['idle', 'walk', 'attack', 'hurt', 'death'];
-    return actions.every(action => this.scene.anims.exists(`${key}_${action}`));
+    if (isPlayer) {
+      return this.playerSheetViews(key).every(view =>
+        PLAYER_ACTION_ORDER.every(action => this.scene.anims.exists(playerAnimKey(key, view, action))));
+    }
+    return ['idle', 'walk', 'attack', 'hurt', 'death'].every(action => this.scene.anims.exists(`${key}_${action}`));
+  }
+
+  /**
+   * Views the loaded sheet actually holds. An external single-view PNG
+   * override only has the first view's frames.
+   */
+  private playerSheetViews(key: string): readonly PlayerView[] {
+    const views = PLAYER_DRAWER_BY_KEY.get(key)?.views ?? [PLAYER_VIEWS[0]];
+    if (!this.scene.textures.exists(key)) return views;
+    const frames = this.scene.textures.get(key).frameTotal - 1; // minus __BASE
+    return views.filter(view => getPlayerViewFrameRange(view, 'cast').end < frames);
   }
 
   private ensureEntityAnimationsRegistered(key: string, isPlayer: boolean): void {
@@ -730,12 +752,12 @@ export class SpriteGenerator {
   private registerEntityAnimations(key: string, isPlayer: boolean): void {
     const anims = this.scene.anims;
     const defs: [string, number, number, number, number][] = isPlayer
-      ? PLAYER_ACTION_ORDER.map(action => {
-          const range = getPlayerActionFrameRange(action);
+      ? this.playerSheetViews(key).flatMap(view => PLAYER_ACTION_ORDER.map((action): [string, number, number, number, number] => {
+          const range = getPlayerViewFrameRange(view, action);
           const rate = getActionFrameRate(key.replace(/^player_/, ''), action);
           const repeat = action === 'idle' || action === 'walk' ? -1 : 0;
-          return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action], rate, repeat];
-        })
+          return [playerAnimKey('', view, action).slice(1), range.start, PLAYER_ACTION_FRAME_COUNTS[action], rate, repeat];
+        }))
       : [
           ['idle', IDLE_START, IDLE_COUNT, 6, -1],
           ['walk', WALK_START, WALK_COUNT, 10, -1],

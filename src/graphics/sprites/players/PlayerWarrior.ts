@@ -1,14 +1,14 @@
 // src/graphics/sprites/players/PlayerWarrior.ts
 //
 // 渊火骑士 — plate-armoured knight in a crimson tabard and cape, plumed great
-// helm with an ember-lit visor, broadsword and heater shield. Rigged 3/4
-// view facing right; every action is keyframed on the shared humanoid rig.
-import type { EntityDrawer, PlayerAction } from '../types';
-import { PLAYER_ACTION_FRAME_COUNTS, PLAYER_TOTAL_FRAMES } from '../types';
+// helm with an ember-lit visor, broadsword and heater shield. Drawn in two
+// isometric 3/4 views (se front, ne back; mirrored for sw/nw) by projecting
+// the shared humanoid keyframes through rig/HumanView.
+import type { EntityDrawer, PlayerAction, PlayerView } from '../types';
+import { PLAYER_ACTION_FRAME_COUNTS, PLAYER_SHEET_FRAMES, PLAYER_VIEWS } from '../types';
 import {
   CENTER_X,
   GROUND_Y,
-  along,
   blobPath,
   capsulePath,
   cel,
@@ -17,7 +17,6 @@ import {
   frameTime,
   glow,
   groundShadow,
-  inBone,
   lerpV,
   limb,
   polyPath,
@@ -31,14 +30,25 @@ import {
 } from '../rig/Rig';
 import {
   basePose,
-  drawHumanoid,
   gait,
-  solveSkeleton,
-  spun,
   type HumanPose,
-  type HumanSkin,
-  type Skeleton,
+  type Proportions,
 } from '../rig/Humanoid';
+import {
+  drawHumanoidView,
+  footOutline,
+  inItem,
+  midpointPath,
+  ringAt,
+  solveViewSkeleton,
+  strokeLine,
+  v3,
+  type HumanView,
+  type HumanViewSkin,
+  type Ring,
+  type ViewPart,
+  type ViewSkeleton,
+} from '../rig/HumanView';
 import { getCurrentZonePalette, standardOutlineBlur } from '../../ZonePalette';
 
 // ── Palette ─────────────────────────────────────────────────────────────
@@ -58,30 +68,6 @@ const BLADE_LEN = 27;
 const WARRIOR_SCALE = 1.18;
 
 // ── Skin ────────────────────────────────────────────────────────────────
-
-function sabaton(ctx: CanvasRenderingContext2D, ankle: V, sole: V, t: typeof STEEL): void {
-  cel(ctx, () => polyPath(ctx, [
-    vec(ankle.x - 3, ankle.y - 1.5),
-    vec(ankle.x + 2.2, ankle.y - 2.2),
-    vec(sole.x + 6.5, sole.y - 1.6),
-    vec(sole.x + 6.8, sole.y),
-    vec(sole.x - 3.2, sole.y),
-  ]), t, { band: 1 });
-}
-
-function leg(ctx: CanvasRenderingContext2D, hip: V, knee: V, ankle: V, sole: V, far: boolean): void {
-  const plate = far ? STEEL_FAR : STEEL;
-  const under = far ? IRON_FAR : IRON;
-  limb(ctx, hip, knee, 4.3, 3.6, under);
-  // Cuisse plate over the front of the thigh
-  cel(ctx, () => capsulePath(ctx, lerpV(hip, knee, 0.15), lerpV(hip, knee, 0.85), 3.8, 3.1), plate, { band: 1.2 });
-  limb(ctx, knee, ankle, 3.4, 2.6, plate);
-  // Knee cop: steel poleyn with a gold rivet
-  cel(ctx, () => ellipsePath(ctx, vec(knee.x + 0.9, knee.y), 3, 2.5), plate, { band: 0.9 });
-  ctx.fillStyle = far ? GOLD.shade : GOLD.base;
-  ctx.fillRect(knee.x + 0.4, knee.y - 0.5, 1.1, 1.1);
-  sabaton(ctx, ankle, sole, plate);
-}
 
 function arm(ctx: CanvasRenderingContext2D, sh: V, el: V, hand: V, far: boolean): void {
   const plate = far ? STEEL_FAR : STEEL;
@@ -116,150 +102,6 @@ function pauldron(ctx: CanvasRenderingContext2D, sh: V, lean: number, far: boole
   ctx.restore();
 }
 
-function cape(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
-  const anchor = along(sk.neck, p.lean - 1.45, 4.2);
-  const chain = clothChain(vec(anchor.x, anchor.y + 1.5), 25, 6, p.flow, 1, t * Math.PI * 2);
-  const left: V[] = [];
-  const right: V[] = [];
-  chain.forEach((pt, i) => {
-    const k = i / (chain.length - 1);
-    const half = 3 + k * 4.5;
-    left.push(vec(pt.x - half * 0.9, pt.y));
-    right.push(vec(pt.x + half * 0.6, pt.y + k * 0.8));
-  });
-  const outline = [...left, ...right.reverse()];
-  cel(ctx, () => blobPath(ctx, outline), CRIMSON_IN, { band: 1.4 });
-  // Gold hem along the bottom
-  const a = left[left.length - 1];
-  const b = right[0];
-  ctx.strokeStyle = GOLD.shade;
-  ctx.lineWidth = 0.9;
-  ctx.beginPath();
-  ctx.moveTo(a.x, a.y - 0.8);
-  ctx.lineTo(b.x, b.y - 0.8);
-  ctx.stroke();
-}
-
-function tabard(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number, front: boolean): void {
-  const belt = along(sk.pelvis, p.lean, 1.5);
-  const sway = Math.sin(t * Math.PI * 2) * 0.6 - p.flow * 3;
-  if (front) {
-    const top = vec(belt.x + 3.2, belt.y);
-    const pts = [
-      vec(top.x - 3.4, top.y),
-      vec(top.x + 3.6, top.y),
-      vec(top.x + 3.8 + sway * 0.5, top.y + 13),
-      vec(top.x + 0.2 + sway, top.y + 15.5),
-      vec(top.x - 3.4 + sway * 0.7, top.y + 13.5),
-    ];
-    cel(ctx, () => polyPath(ctx, pts), CRIMSON, { band: 1.1 });
-    ctx.strokeStyle = GOLD.base;
-    ctx.lineWidth = 0.7;
-    ctx.beginPath();
-    ctx.moveTo(pts[2].x - 0.4, pts[2].y - 0.8);
-    ctx.lineTo(pts[3].x, pts[3].y - 1);
-    ctx.lineTo(pts[4].x + 0.4, pts[4].y - 0.8);
-    ctx.stroke();
-  } else {
-    const top = vec(belt.x - 3, belt.y);
-    cel(ctx, () => polyPath(ctx, [
-      vec(top.x - 3, top.y),
-      vec(top.x + 2.5, top.y),
-      vec(top.x + 2 + sway, top.y + 13),
-      vec(top.x - 3.8 + sway * 1.2, top.y + 12),
-    ]), CRIMSON_IN, { band: 1 });
-  }
-}
-
-function cuirass(ctx: CanvasRenderingContext2D, sk: Skeleton): void {
-  inBone(ctx, sk.neck, sk.pelvis, (len) => {
-    // Mail skirt under the plate
-    cel(ctx, () => polyPath(ctx, [
-      vec(-6.5, len - 5), vec(6.8, len - 5), vec(7.8, len + 3.2), vec(-7, len + 3.4),
-    ]), IRON, { band: 1 });
-    ctx.strokeStyle = IRON.shade;
-    ctx.lineWidth = 0.35;
-    for (let y = len - 3; y < len + 3; y += 1.3) {
-      ctx.beginPath();
-      ctx.moveTo(-6.5, y);
-      ctx.lineTo(7.3, y + 0.2);
-      ctx.stroke();
-    }
-    // Breastplate — pigeon chest, narrowing waist
-    const chest = [
-      vec(-6.8, 0.5), vec(0, -1), vec(7.2, 1.8), vec(9, 7.5),
-      vec(6.8, len - 3), vec(-5.6, len - 3), vec(-7.6, 7),
-    ];
-    cel(ctx, () => blobPath(ctx, chest), STEEL, { band: 1.8, hi: 0.8 });
-    // Central ridge highlight
-    ctx.strokeStyle = STEEL.light;
-    ctx.lineWidth = 0.9;
-    ctx.beginPath();
-    ctx.moveTo(4.2, 1.5);
-    ctx.quadraticCurveTo(6.6, 7, 4.4, len - 4);
-    ctx.stroke();
-    // Gold-trimmed fauld
-    cel(ctx, () => polyPath(ctx, [vec(-6, len - 4.2), vec(7.2, len - 4.2), vec(7.6, len - 1.8), vec(-6.2, len - 1.8)]), IRON, { band: 0.7 });
-    ctx.fillStyle = GOLD.base;
-    ctx.fillRect(-6, len - 4.4, 13.4, 0.8);
-    // Belt with buckle
-    cel(ctx, () => polyPath(ctx, [vec(-6.4, len - 1.8), vec(7.8, len - 1.8), vec(8, len + 0.6), vec(-6.6, len + 0.6)]), LEATHER, { band: 0.6 });
-    cel(ctx, () => polyPath(ctx, [vec(4, len - 2.3), vec(7, len - 2.3), vec(7, len + 1.1), vec(4, len + 1.1)]), GOLD, { band: 0.5 });
-    // Gorget
-    cel(ctx, () => ellipsePath(ctx, vec(0.8, -0.2), 5.2, 2.4), IRON, { band: 0.8 });
-    // Ember sigil on the chest
-    ctx.fillStyle = 'rgba(255,138,42,0.85)';
-    ctx.beginPath();
-    ctx.moveTo(5.2, 4.2);
-    ctx.quadraticCurveTo(6.6, 6.3, 5.4, 8.4);
-    ctx.quadraticCurveTo(4.3, 6.8, 5.2, 4.2);
-    ctx.fill();
-  });
-}
-
-function helm(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose, t: number): void {
-  ctx.save();
-  ctx.translate(sk.head.x, sk.head.y);
-  ctx.rotate(sk.headAng);
-  // Plume streaming back from the crest
-  const sway = Math.sin(t * Math.PI * 2) * 0.8 + p.flow * 3;
-  const plume = [
-    vec(-1, -7.8), vec(2, -9.6), vec(-3, -10.4 - sway * 0.2), vec(-9 - sway, -8.5),
-    vec(-13 - sway * 1.4, -4 + sway * 0.3), vec(-9 - sway, -5.2), vec(-4, -6.2),
-  ];
-  cel(ctx, () => blobPath(ctx, plume), CRIMSON, { band: 1.2 });
-  // Helm shell
-  const shell = [
-    vec(-6.6, -1.5), vec(-5.4, -6.4), vec(0.2, -8.4), vec(5.6, -6.6),
-    vec(7.4, -1.6), vec(7.2, 4.6), vec(1.6, 7.6), vec(-5.4, 6.4),
-  ];
-  cel(ctx, () => blobPath(ctx, shell), STEEL, { band: 1.9, hi: 0.9 });
-  // Brow band
-  ctx.fillStyle = GOLD.base;
-  ctx.beginPath();
-  ctx.moveTo(-6.6, -2.8);
-  ctx.quadraticCurveTo(1, -4.4, 7.5, -2.9);
-  ctx.lineTo(7.4, -1.7);
-  ctx.quadraticCurveTo(1, -3.2, -6.6, -1.6);
-  ctx.closePath();
-  ctx.fill();
-  // T-visor slit
-  ctx.fillStyle = '#0c0a12';
-  ctx.fillRect(1.2, -0.9, 6.4, 1.7);
-  ctx.fillRect(4.1, -0.9, 1.5, 5.4);
-  // Ember glow in the slit
-  ctx.fillStyle = `rgba(255,${150 + Math.round(p.fx * 60)},60,${0.75 + p.fx * 0.25})`;
-  ctx.fillRect(3.2, -0.5, 3.4, 0.9);
-  // Breaths
-  ctx.fillStyle = IRON.shade;
-  for (let i = 0; i < 3; i++) ctx.fillRect(1.6 + i * 1.1, 3 + i * 0.3, 0.6, 0.6);
-  // Rivets
-  ctx.fillStyle = STEEL.light;
-  ctx.fillRect(-4.6, 1.8, 0.8, 0.8);
-  ctx.fillRect(-4.2, 4, 0.8, 0.8);
-  ctx.restore();
-}
-
 function sword(ctx: CanvasRenderingContext2D, hand: V, angle: number, fx: number): void {
   ctx.save();
   ctx.translate(hand.x, hand.y);
@@ -291,82 +133,405 @@ function sword(ctx: CanvasRenderingContext2D, hand: V, angle: number, fx: number
   ctx.restore();
 }
 
-function shield(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose): void {
-  const c = vec(sk.handF.x + 2.2, sk.handF.y + 1.2);
-  ctx.save();
-  ctx.translate(c.x, c.y);
-  ctx.rotate(p.off);
-  ctx.scale(0.82, 1); // turned three-quarters toward the viewer
-  const outline = [
-    vec(-6.8, -8.6), vec(0, -9.8), vec(6.8, -8.6), vec(6.6, 0.5), vec(3.6, 6.6), vec(0, 10.2), vec(-3.6, 6.6), vec(-6.6, 0.5),
+const WARRIOR_PROP: Proportions = {
+  thigh: 12.5, shin: 12, upperArm: 10, foreArm: 9.5,
+  torso: 16.5, neck: 7.2, ankle: 2.6,
+  hipN: vec(2.2, 0), hipF: vec(-2.6, -0.4),
+  shN: vec(1.6, 4), shF: vec(-4.6, 3),
+};
+
+// ── Isometric 3/4 views (se = front, ne = back) ─────────────────────────
+
+/** Breastplate loft, pelvis (h = 0) up to the gorget. */
+function cuirassRings(len: number): Ring[] {
+  return [
+    { h: len + 0.8, a: 2.8, b: 4 },
+    { h: len - 1.6, a: 4.4, b: 6.6, f: 0.3 },
+    { h: len - 5, a: 4.7, b: 6.3, f: 0.8 },
+    { h: len - 9.5, a: 4, b: 5.2, f: 0.5 },
+    { h: 3.4, a: 3.5, b: 4.7 },
+    { h: 1.2, a: 3.8, b: 5 },
   ];
-  cel(ctx, () => blobPath(ctx, outline), GOLD, { band: 1.1 });
-  const inner = outline.map(pt => vec(pt.x * 0.8, pt.y * 0.82 + 0.1));
-  cel(ctx, () => blobPath(ctx, inner), CRIMSON, { band: 1.5 });
-  // Flame emblem
-  ctx.fillStyle = GOLD.base;
+}
+
+const SKIRT_RINGS: Ring[] = [
+  { h: 2.4, a: 3.8, b: 5 },
+  { h: -1.5, a: 4.5, b: 5.8 },
+  { h: -4.2, a: 5, b: 6.3, f: -0.2 },
+];
+
+function viewLeg(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, near: boolean): void {
+  const far = !near;
+  const plate = far ? STEEL_FAR : STEEL;
+  const under = far ? IRON_FAR : IRON;
+  const hip = near ? sk.hipN : sk.hipF;
+  const knee = near ? sk.kneeN : sk.kneeF;
+  const ankle = near ? sk.footN : sk.footF;
+  limb(ctx, hip, knee, 4.4, 3.7, under);
+  cel(ctx, () => capsulePath(ctx, lerpV(hip, knee, 0.15), lerpV(hip, knee, 0.85), 3.9, 3.2), plate, { band: 1.2 });
+  limb(ctx, knee, ankle, 3.5, 2.7, plate);
+  // Knee cop sits on the front of the knee.
+  const f = sk.rig.fwd;
+  const cop = vec(knee.x + f.x * 1.1, knee.y + f.y * 1.1 - 0.2);
+  cel(ctx, () => ellipsePath(ctx, cop, 3.1, 2.6), plate, { band: 0.9 });
+  ctx.fillStyle = far ? GOLD.shade : GOLD.base;
+  ctx.fillRect(cop.x - 0.55, cop.y - 0.5, 1.1, 1.1);
+  const j = near ? sk.j.footN : sk.j.footF;
+  const sole = near ? sk.j.soleN : sk.j.soleF;
+  cel(ctx, () => polyPath(ctx, footOutline(sk.rig, j, sole, 6.2, 3, 5.4, 2.2)), plate, { band: 1 });
+}
+
+function viewArm(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, near: boolean): void {
+  if (near) arm(ctx, sk.shN, sk.elN, sk.handN, false);
+  else {
+    arm(ctx, sk.shF, sk.elF, sk.handF, true);
+    fist(ctx, sk.handF, true);
+  }
+}
+
+function viewPauldron(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, near: boolean): void {
+  const sh = near ? sk.shN : sk.shF;
+  // Lift the dome onto the top of the shoulder.
+  pauldron(ctx, vec(sh.x, sh.y - 1), sk.torsoAng + (near ? -0.25 : 0.25) * (sk.rig.front ? 1 : -1), !near);
+}
+
+function viewCuirass(ctx: CanvasRenderingContext2D, sk: ViewSkeleton): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const rings = cuirassRings(len);
+  const front = T.vis(0) > -0.05;
+  // Mail skirt under the plate
+  const skirt = T.loft(SKIRT_RINGS);
+  cel(ctx, () => midpointPath(ctx, skirt), IRON, { band: 1 });
+  ctx.save();
   ctx.beginPath();
-  ctx.moveTo(0, -5.4);
-  ctx.quadraticCurveTo(3.4, -1.2, 2.4, 2.4);
-  ctx.quadraticCurveTo(1.6, 4.8, 0, 5.6);
-  ctx.quadraticCurveTo(-1.6, 4.8, -2.4, 2.4);
-  ctx.quadraticCurveTo(-2.8, -0.4, -1, -2.2);
-  ctx.quadraticCurveTo(-0.6, 0.4, 0.4, 0.8);
-  ctx.quadraticCurveTo(1.4, -2, 0, -5.4);
-  ctx.fill();
-  ctx.fillStyle = '#ffcf6b';
+  midpointPath(ctx, skirt);
+  ctx.clip();
+  for (let h = 0.8; h > -4.4; h -= 1.3) {
+    for (const run of T.visibleArcs(ringAt(SKIRT_RINGS, h), 0, Math.PI * 2, 24, -0.2)) strokeLine(ctx, run, IRON.shade, 0.35);
+  }
+  ctx.restore();
+  // Breastplate / backplate
+  const shell = T.loft(rings);
+  cel(ctx, () => midpointPath(ctx, shell), STEEL, { band: 1.8, hi: 0.8 });
+  ctx.save();
   ctx.beginPath();
-  ctx.ellipse(0.2, 2.8, 1, 1.7, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Top highlight
-  ctx.strokeStyle = 'rgba(255,240,210,0.45)';
-  ctx.lineWidth = 0.7;
+  midpointPath(ctx, shell);
+  ctx.clip();
+  const ridge: V[] = [];
+  const spinePhi = front ? 0 : Math.PI;
+  for (let h = len - 1.8; h >= 4.2; h -= 1.2) {
+    const r = ringAt(rings, h);
+    ridge.push(T.at(h, spinePhi, r.a, r.b, r.f));
+  }
+  strokeLine(ctx, ridge, front ? STEEL.light : STEEL.shade, front ? 0.9 : 0.6);
+  // Side seams where front and back plates meet
+  for (const side of [-1, 1]) {
+    const seam: V[] = [];
+    for (let h = len - 2; h >= 3.6; h -= 1.5) {
+      const r = ringAt(rings, h);
+      if (T.vis(side * Math.PI / 2, r.a, r.b) > 0.05) seam.push(T.at(h, side * Math.PI / 2, r.a, r.b, r.f));
+    }
+    strokeLine(ctx, seam, STEEL.shade, 0.5);
+  }
+  // Gold-trimmed fauld band
+  for (const run of T.visibleArcs(ringAt(rings, 4.4), 0, Math.PI * 2, 28, -0.2)) strokeLine(ctx, run, GOLD.base, 0.8);
+  if (front) {
+    // Ember sigil on the chest
+    const c = T.at(len - 6, 0.12, 4.7, 6.3, 0.9);
+    ctx.fillStyle = 'rgba(255,138,42,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y - 2.2);
+    ctx.quadraticCurveTo(c.x + 1.5, c.y, c.x + 0.2, c.y + 2.1);
+    ctx.quadraticCurveTo(c.x - 1.1, c.y + 0.4, c.x, c.y - 2.2);
+    ctx.fill();
+  }
+  ctx.restore();
+  // Belt with buckle
+  const belt = ringAt(SKIRT_RINGS, 1.6);
+  for (const run of T.visibleArcs({ ...belt, a: belt.a + 0.2, b: belt.b + 0.2 }, 0, Math.PI * 2, 28, -0.15)) {
+    strokeLine(ctx, run, LEATHER.line, 2.9);
+    strokeLine(ctx, run, LEATHER.base, 2.1);
+  }
+  const buckleVis = T.vis(front ? 0.35 : Math.PI);
+  if (buckleVis > 0 && front) {
+    const b = T.at(1.6, 0.35, belt.a + 0.3, belt.b + 0.3);
+    cel(ctx, () => polyPath(ctx, [vec(b.x - 1.5, b.y - 1.6), vec(b.x + 1.5, b.y - 1.6), vec(b.x + 1.5, b.y + 1.6), vec(b.x - 1.5, b.y + 1.6)]), GOLD, { band: 0.5 });
+  }
+  // Gorget
+  const g = T.loft([{ h: len + 1.6, a: 2.4, b: 3.3 }, { h: len - 0.6, a: 3.4, b: 4.6 }]);
+  cel(ctx, () => midpointPath(ctx, g), IRON, { band: 0.8 });
+}
+
+/** Tabard panel hanging from the belt, front (φ = 0) or back (φ = π). */
+function viewTabard(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number, back: boolean): void {
+  const T = sk.torso;
+  const phi = back ? Math.PI : 0;
+  const sway = Math.sin(t * Math.PI * 2) * 0.6 - p.flow * 3;
+  const top = ringAt(SKIRT_RINGS, 2);
+  const tl = T.p3(2, phi - 0.62, top.a + 0.5, top.b + 0.5);
+  const tr = T.p3(2, phi + 0.62, top.a + 0.5, top.b + 0.5);
+  const out = back ? -1 : 1;
+  const hang = (q: typeof tl, dy: number, dx: number, dz = 0) => sk.rig.pt(q.x + dx, q.y + dy, q.z + dz);
+  const len = back ? 12.5 : 14.5;
+  const pts = [
+    sk.rig.p(tl),
+    sk.rig.p(tr),
+    hang(tr, len - 1.5, out * 1.2 + sway * 0.6, 0.2),
+    hang(v3((tl.x + tr.x) / 2, (tl.y + tr.y) / 2, (tl.z + tr.z) / 2), len + 1.5, out * 1.4 + sway),
+    hang(tl, len - 1.5, out * 1.2 + sway * 0.8, -0.2),
+  ];
+  const showFace = T.vis(phi) > -0.1;
+  cel(ctx, () => polyPath(ctx, pts), showFace && !back ? CRIMSON : CRIMSON_IN, { band: 1.1 });
+  if (!back) {
+    ctx.strokeStyle = GOLD.base;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    const a = lerpV(pts[2], pts[1], 0.08);
+    const b = lerpV(pts[4], pts[0], 0.08);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(pts[3].x, pts[3].y - 1);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+}
+
+function capeGeometry(sk: ViewSkeleton, p: HumanPose, t: number): { left: V[]; right: V[]; hem: V[]; outer: boolean } {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const anchor = T.p3(len - 1.2, Math.PI, 3.4, 0);
+  const chain = clothChain(vec(anchor.x, anchor.y), 25, 6, p.flow, 1, t * Math.PI * 2);
+  const left: V[] = [];
+  const right: V[] = [];
+  let hem: V[] = [];
+  chain.forEach((pt, i) => {
+    const k = i / (chain.length - 1);
+    const half = 8 + k * 2.6;
+    // U-shaped cross-section: the edges curl forward round the body (most
+    // at the shoulders), so the cape keeps some body even seen edge-on.
+    const curl = 3.4 * (1 - k) * (1 - k) + 2;
+    const ripple = Math.sin(t * Math.PI * 2 + k * 3) * 0.5 * k;
+    const row = [-1, -0.5, 0, 0.5, 1].map(u => sk.rig.pt(pt.x + curl * u * u, pt.y + ripple * u, u * half));
+    let lo = row[0];
+    let hi = row[0];
+    for (const q of row) {
+      if (q.x < lo.x) lo = q;
+      if (q.x > hi.x) hi = q;
+    }
+    left.push(lo);
+    right.push(hi);
+    if (i === chain.length - 1) hem = row;
+  });
+  return { left, right, hem, outer: sk.rig.facing(-1, 0, 0) > 0 };
+}
+
+function viewCape(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const { left, right, hem, outer } = capeGeometry(sk, p, t);
+  const outline = [...left, ...[...right].reverse()];
+  cel(ctx, () => midpointPath(ctx, outline), outer ? CRIMSON : CRIMSON_IN, { band: 1.4 });
+  ctx.save();
   ctx.beginPath();
-  ctx.moveTo(-5.6, -7.6);
-  ctx.quadraticCurveTo(0, -8.8, 5.6, -7.6);
-  ctx.stroke();
+  midpointPath(ctx, outline);
+  ctx.clip();
+  if (outer) {
+    // Fold shadows running down the back of the cape
+    for (const k of [0.33, 0.66]) {
+      const a = lerpV(left[1], right[1], k);
+      const b = lerpV(left[left.length - 1], right[right.length - 1], k + (k - 0.5) * 0.3);
+      strokeLine(ctx, [a, b], CRIMSON.shade, 0.9);
+    }
+  }
+  // Gold hem, kept inside the cape so an edge-on cape doesn't sprout a stick.
+  strokeLine(ctx, hem.map(q => vec(q.x, q.y - 0.6)), outer ? GOLD.base : GOLD.shade, 1.1);
   ctx.restore();
 }
 
-const WARRIOR_SKIN: HumanSkin = {
-  prop: {
-    thigh: 12.5, shin: 12, upperArm: 10, foreArm: 9.5,
-    torso: 16.5, neck: 7.2, ankle: 2.6,
-    hipN: vec(2.2, 0), hipF: vec(-2.6, -0.4),
-    shN: vec(1.6, 4), shF: vec(-4.6, 3),
-  },
-  back(ctx, sk, p, t) {
-    cape(ctx, sk, p, t);
-    tabard(ctx, sk, p, t, false);
-  },
-  armFar(ctx, sk, p) {
-    pauldron(ctx, sk.shF, p.lean, true);
-    arm(ctx, sk.shF, sk.elF, sk.handF, true);
-    fist(ctx, sk.handF, true);
-  },
-  legFar(ctx, sk) {
-    leg(ctx, sk.hipF, sk.kneeF, sk.footF, sk.soleF, true);
-  },
-  legNear(ctx, sk) {
-    leg(ctx, sk.hipN, sk.kneeN, sk.footN, sk.soleN, false);
-  },
-  torso(ctx, sk, p, t) {
-    cuirass(ctx, sk);
-    tabard(ctx, sk, p, t, true);
-  },
-  head(ctx, sk, p, t) {
-    helm(ctx, sk, p, t);
-  },
-  offFront(ctx, sk, p) {
-    shield(ctx, sk, p);
-  },
-  armNear(ctx, sk, p) {
-    arm(ctx, sk.shN, sk.elN, sk.handN, false);
-    pauldron(ctx, sk.shN, p.lean, false);
-  },
-  weapon(ctx, sk, p) {
-    sword(ctx, sk.handN, p.wpn, p.fx);
-    fist(ctx, sk.handN, false);
+const HELM_RINGS: Ring[] = [
+  { h: 8.2, a: 1.6, b: 1.5 },
+  { h: 6.6, a: 5.2, b: 4.8 },
+  { h: 3, a: 6.8, b: 6 },
+  { h: -1.5, a: 7, b: 6.1, f: 0.3 },
+  { h: -5.2, a: 6.2, b: 5.6, f: 0.9 },
+  { h: -7.2, a: 4.2, b: 4.2, f: 1.4 },
+];
+
+function viewPlume(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const H = sk.skull;
+  const sway = Math.sin(t * Math.PI * 2) * 0.8 + p.flow * 3;
+  // Side-view plume points (x = forward, y = down) mapped onto the helm's
+  // mid-plane: a crest of feathers streaming back from the crown.
+  const src = [
+    vec(-1, -7.8), vec(2, -9.6), vec(-3, -10.4 - sway * 0.2), vec(-9 - sway, -8.5),
+    vec(-13 - sway * 1.4, -4 + sway * 0.3), vec(-9 - sway, -5.2), vec(-4, -6.2),
+  ];
+  const pts = src.map(q => H.at(-q.y * 1.08, 0, 0, 0, q.x * 1.15));
+  cel(ctx, () => blobPath(ctx, pts), CRIMSON, { band: 1.2 });
+}
+
+function viewHelm(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const H = sk.skull;
+  const plumeBehind = sk.rig.front;
+  if (plumeBehind) viewPlume(ctx, sk, p, t);
+  const shell = H.loft(HELM_RINGS);
+  cel(ctx, () => midpointPath(ctx, shell), STEEL, { band: 1.9, hi: 0.9 });
+  ctx.save();
+  ctx.beginPath();
+  midpointPath(ctx, shell);
+  ctx.clip();
+  // Brow band wraps the helm
+  for (const run of H.visibleArcs(ringAt(HELM_RINGS, 2.6), 0, Math.PI * 2, 30, -0.25)) {
+    strokeLine(ctx, run, GOLD.line, 1.9);
+    strokeLine(ctx, run, GOLD.base, 1.3);
+  }
+  if (H.vis(0) > -0.25) {
+    // T-visor slit with the ember behind it
+    const slit = ringAt(HELM_RINGS, 0.1);
+    for (const run of H.visibleArcs({ ...slit, a: slit.a + 0.1, b: slit.b + 0.1 }, -0.62, 0.95, 12, -0.1)) {
+      strokeLine(ctx, run, '#0c0a12', 1.7);
+    }
+    const bar: V[] = [];
+    for (let h = 0.1; h >= -4.6; h -= 1.1) {
+      const r = ringAt(HELM_RINGS, h);
+      bar.push(H.at(h, 0.12, r.a + 0.1, r.b + 0.1, r.f));
+    }
+    strokeLine(ctx, bar, '#0c0a12', 1.5);
+    const ember = H.visibleArcs({ ...slit, a: slit.a + 0.15, b: slit.b + 0.15 }, -0.25, 0.55, 6, 0);
+    for (const run of ember) {
+      strokeLine(ctx, run, `rgba(255,${150 + Math.round(p.fx * 60)},60,${0.75 + p.fx * 0.25})`, 0.8);
+    }
+    // Breaths on the near cheek
+    ctx.fillStyle = IRON.shade;
+    for (let i = 0; i < 3; i++) {
+      const r = ringAt(HELM_RINGS, -3 - i * 0.6);
+      const phi = 0.75 + i * 0.12;
+      if (H.vis(phi) > 0.1) {
+        const q = H.at(-3 - i * 0.6, phi, r.a, r.b, r.f);
+        ctx.fillRect(q.x - 0.3, q.y - 0.3, 0.6, 0.6);
+      }
+    }
+  } else {
+    // Back of the helm: a riveted seam down the nape
+    const seam: V[] = [];
+    for (let h = 6; h >= -6; h -= 1.5) {
+      const r = ringAt(HELM_RINGS, h);
+      seam.push(H.at(h, Math.PI, r.a, r.b, r.f));
+    }
+    strokeLine(ctx, seam, STEEL.shade, 0.7);
+    ctx.fillStyle = STEEL.light;
+    for (const h of [-1.5, -4]) {
+      const r = ringAt(HELM_RINGS, h);
+      for (const phi of [Math.PI - 0.5, Math.PI + 0.5]) {
+        if (H.vis(phi) > 0.1) {
+          const q = H.at(h, phi, r.a, r.b, r.f);
+          ctx.fillRect(q.x - 0.4, q.y - 0.4, 0.8, 0.8);
+        }
+      }
+    }
+  }
+  ctx.restore();
+  if (!plumeBehind) viewPlume(ctx, sk, p, t);
+}
+
+function viewSword(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  inItem(ctx, sk.rig, sk.handN, p.wpn, () => sword(ctx, vec(0, 0), 0, p.fx));
+  fist(ctx, sk.handN, false);
+}
+
+/** Shield plane: faces forward, turned in across the chest by `SHIELD_TURN`. */
+const SHIELD_TURN = 0.3;
+
+function shieldFrame(sk: ViewSkeleton, p: HumanPose): { at: (x: number, y: number) => V; faceUp: boolean; c: V } {
+  const n = v3(Math.cos(SHIELD_TURN), 0, Math.sin(SHIELD_TURN));
+  // In-plane horizontal axis (screen-right-ish in the front view) and up.
+  const w = v3(Math.sin(SHIELD_TURN), 0, -Math.cos(SHIELD_TURN));
+  const h = sk.j.handF;
+  const c = v3(h.x + 1.8 + n.x * 1.2, h.y + 1.2, h.z + n.z * 1.2);
+  const co = Math.cos(p.off);
+  const si = Math.sin(p.off);
+  const at = (x: number, y: number): V => {
+    const rx = x * co - y * si;
+    const ry = x * si + y * co;
+    return sk.rig.pt(c.x + w.x * rx, c.y + ry, c.z + w.z * rx);
+  };
+  return { at, faceUp: sk.rig.facing(n.x, n.y, n.z) > 0, c: sk.rig.p(c) };
+}
+
+function viewShield(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const { at, faceUp } = shieldFrame(sk, p);
+  const src = [
+    vec(-6.8, -8.6), vec(0, -9.8), vec(6.8, -8.6), vec(6.6, 0.5), vec(3.6, 6.6), vec(0, 10.2), vec(-3.6, 6.6), vec(-6.6, 0.5),
+  ];
+  const outline = src.map(q => at(q.x, q.y));
+  if (!faceUp) {
+    // Back of the shield: iron rim, wooden boards, leather arm straps
+    cel(ctx, () => blobPath(ctx, outline), IRON_FAR, { band: 1 });
+    const inner = src.map(q => at(q.x * 0.84, q.y * 0.86));
+    cel(ctx, () => blobPath(ctx, inner), LEATHER, { band: 1.2 });
+    strokeLine(ctx, [at(-4, -2), at(4, -2)], LEATHER.line, 1.4);
+    strokeLine(ctx, [at(-4, 3), at(4, 3)], LEATHER.line, 1.4);
+    return;
+  }
+  cel(ctx, () => blobPath(ctx, outline), GOLD, { band: 1.1 });
+  const inner = src.map(q => at(q.x * 0.8, q.y * 0.82 + 0.1));
+  cel(ctx, () => blobPath(ctx, inner), CRIMSON, { band: 1.5 });
+  // Flame emblem
+  const e = (x: number, y: number): V => at(x, y);
+  ctx.fillStyle = GOLD.base;
+  ctx.beginPath();
+  let q = e(0, -5.4); ctx.moveTo(q.x, q.y);
+  const quad = (cx: number, cy: number, x: number, y: number): void => {
+    const c1 = e(cx, cy); const p1 = e(x, y);
+    ctx.quadraticCurveTo(c1.x, c1.y, p1.x, p1.y);
+  };
+  quad(3.4, -1.2, 2.4, 2.4);
+  quad(1.6, 4.8, 0, 5.6);
+  quad(-1.6, 4.8, -2.4, 2.4);
+  quad(-2.8, -0.4, -1, -2.2);
+  quad(-0.6, 0.4, 0.4, 0.8);
+  quad(1.4, -2, 0, -5.4);
+  ctx.fill();
+  q = e(0.2, 2.8);
+  const r1 = e(1.2, 2.8);
+  ctx.fillStyle = '#ffcf6b';
+  ctx.beginPath();
+  ctx.ellipse(q.x, q.y, Math.max(0.4, Math.hypot(r1.x - q.x, r1.y - q.y)), 1.7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  strokeLine(ctx, [e(-5.6, -7.6), e(0, -8.6), e(5.6, -7.6)], 'rgba(255,240,210,0.45)', 0.7);
+}
+
+const WARRIOR_VIEW_SKIN: HumanViewSkin = {
+  prop: WARRIOR_PROP,
+  build: { hipW: 2.9, shW: 5.6, elbowOut: 1.3, footOut: 0.5 },
+  parts(ctx, sk, p, t) {
+    const d0 = sk.d.pelvis;
+    const rig = sk.rig;
+    const T = sk.torso;
+    const capeZ = T.depth(sk.torsoLen - 6, Math.PI, 5, 0) - d0;
+    const armZ = (near: boolean): number => (near
+      ? sk.d.elN * 0.6 + sk.d.handN * 0.4
+      : sk.d.elF * 0.6 + sk.d.handF * 0.4) - d0;
+    const legZ = (near: boolean): number => -0.6 + 0.02 * ((near ? sk.d.kneeN + sk.d.footN : sk.d.kneeF + sk.d.footF) / 2 - d0);
+    const headZ = Math.max(sk.d.head - d0 + 2.5, capeZ + 0.2);
+    const shield = shieldFrame(sk, p);
+    const shieldZ = Math.max(armZ(false) + 0.05, rig.d(sk.j.handF) - d0 + (shield.faceUp ? 1.5 : -0.5));
+    // Only the tabard panel on the camera side is drawn: the other one would
+    // just peek past the legs as an edge-on sliver.
+    const parts: ViewPart[] = [
+      { z: capeZ, draw: () => viewCape(ctx, sk, p, t) },
+      { z: T.depth(-4, Math.PI, 5, 5) - d0, draw: () => { if (!rig.front) viewTabard(ctx, sk, p, t, true); } },
+      { z: legZ(true), draw: () => viewLeg(ctx, sk, true) },
+      { z: legZ(false), draw: () => viewLeg(ctx, sk, false) },
+      { z: 0, draw: () => viewCuirass(ctx, sk) },
+      { z: T.depth(-4, 0, 5, 5) - d0, draw: () => { if (rig.front) viewTabard(ctx, sk, p, t, false); } },
+      { z: armZ(false), draw: () => viewArm(ctx, sk, false) },
+      { z: Math.max(armZ(false), sk.d.shF - d0) + 0.01, draw: () => viewPauldron(ctx, sk, false) },
+      { z: shieldZ, draw: () => viewShield(ctx, sk, p) },
+      { z: armZ(true), draw: () => viewArm(ctx, sk, true) },
+      { z: Math.max(armZ(true), sk.d.shN - d0, capeZ) + 0.01, draw: () => viewPauldron(ctx, sk, true) },
+      { z: headZ, draw: () => viewHelm(ctx, sk, p, t) },
+      { z: Math.max(armZ(true), sk.d.handN - d0) + 0.02, draw: () => viewSword(ctx, sk, p) },
+    ];
+    return parts;
   },
 };
 
@@ -383,6 +548,8 @@ const READY: HumanPose = basePose({
   wpn: 1.95,
   off: 0.08,
   flow: 0.12,
+  // 3/4 views: the shield is carried across the chest.
+  zF: 1.4,
 });
 
 function pose(over: Partial<HumanPose>): HumanPose {
@@ -544,28 +711,31 @@ function warriorPose(act: PlayerAction, t: number): HumanPose {
   }
 }
 
-function swordTip(p: HumanPose): { tip: V; base: V } {
-  const sk = solveSkeleton(p, WARRIOR_SKIN.prop);
-  const hand = spun(p, sk.handN, sk);
-  const ang = p.wpn + p.spin;
-  return { tip: along(hand, ang, BLADE_LEN), base: along(hand, ang, 5) };
+function swordTip(p: HumanPose, view: HumanView): { tip: V; base: V } {
+  const sk = solveViewSkeleton(p, WARRIOR_PROP, WARRIOR_VIEW_SKIN.build, view);
+  const { ang, k } = sk.rig.dir(p.wpn);
+  const d = vec(Math.sin(ang) * k, -Math.cos(ang) * k);
+  return {
+    tip: vec(sk.handN.x + d.x * BLADE_LEN, sk.handN.y + d.y * BLADE_LEN),
+    base: vec(sk.handN.x + d.x * 5, sk.handN.y + d.y * 5),
+  };
 }
 
-function drawFx(ctx: CanvasRenderingContext2D, act: PlayerAction, t: number, p: HumanPose): void {
+function drawFx(ctx: CanvasRenderingContext2D, act: PlayerAction, t: number, p: HumanPose, view: HumanView): void {
   const track = act === 'attack' ? ATTACK : act === 'cast' ? CAST : null;
   if (track && p.fx > 0.3) {
     const tips: V[] = [];
     const bases: V[] = [];
     for (let i = 6; i >= 0; i--) {
       const sp = samplePoseTrack(track, Math.max(0, t - i * 0.022));
-      const { tip, base } = swordTip(sp);
+      const { tip, base } = swordTip(sp, view);
       tips.push(tip);
       bases.push(base);
     }
     smear(ctx, tips, bases, act === 'cast' ? EMBER : 0xdfe8ff, 0.55 * p.fx);
   }
   if (act === 'cast' && p.fx > 0.05) {
-    const { tip, base } = swordTip(p);
+    const { tip, base } = swordTip(p, view);
     glow(ctx, lerpV(base, tip, 0.55), 11 * p.fx, EMBER, 0.55 * p.fx);
     glow(ctx, tip, 6 * p.fx, 0xffd08a, 0.8 * p.fx);
     // Embers spiralling up the blade
@@ -575,10 +745,13 @@ function drawFx(ctx: CanvasRenderingContext2D, act: PlayerAction, t: number, p: 
       glow(ctx, vec(pt.x + Math.sin(i * 2.1 + t * 9) * 2.6, pt.y - k * 2), 1.6, 0xffb060, 0.9 * p.fx);
     }
   }
-  // Visor ember
-  const sk = solveSkeleton(p, WARRIOR_SKIN.prop);
-  const visor = spun(p, along(sk.head, sk.headAng + Math.PI / 2, 4.4), sk);
-  if (act !== 'death' || t < 0.6) glow(ctx, vec(visor.x, visor.y - 0.2), 3.2, EMBER, 0.45 + p.fx * 0.3);
+  // Visor ember (only while the visor faces the camera)
+  const sk = solveViewSkeleton(p, WARRIOR_PROP, WARRIOR_VIEW_SKIN.build, view);
+  const H = sk.skull;
+  if (H.vis(0.2) > 0.1 && (act !== 'death' || t < 0.6)) {
+    const visor = H.at(0.1, 0.2, 7.2, 6.3, 0.3);
+    glow(ctx, visor, 3.2, EMBER, (0.45 + p.fx * 0.3) * Math.min(1, H.vis(0.2) * 2));
+  }
 }
 
 export const PlayerWarriorDrawer: EntityDrawer = {
@@ -586,10 +759,12 @@ export const PlayerWarriorDrawer: EntityDrawer = {
   // Wide frame leaves room for weapon reach at the contact pose.
   frameW: 96,
   frameH: 96,
-  totalFrames: PLAYER_TOTAL_FRAMES,
+  totalFrames: PLAYER_SHEET_FRAMES,
   inked: true,
+  views: PLAYER_VIEWS,
 
-  drawFrame(ctx, frame, action, w, h) {
+  drawFrame(ctx, frame, action, w, h, _utils, view?: PlayerView) {
+    const v: HumanView = view ?? 'se';
     const act = action as PlayerAction;
     const count = PLAYER_ACTION_FRAME_COUNTS[act];
     const loop = act === 'idle' || act === 'walk';
@@ -597,12 +772,13 @@ export const PlayerWarriorDrawer: EntityDrawer = {
     const p = warriorPose(act, t);
     const palette = getCurrentZonePalette();
     const lift = Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y));
+    let shadowX = p.root.x + 1;
     renderRigFrame(
       ctx, w, h,
-      c => { drawHumanoid(c, p, WARRIOR_SKIN, t); },
+      c => { shadowX = drawHumanoidView(c, p, WARRIOR_VIEW_SKIN, t, v).rig.pt(p.root.x + 1, GROUND_Y).x; },
       { glowColor: palette.playerOutlineColor, glowBlur: standardOutlineBlur(w, h), scale: WARRIOR_SCALE },
-      c => groundShadow(c, p.root.x + 1, 15, lift),
-      c => drawFx(c, act, t, p),
+      c => groundShadow(c, shadowX, 15, lift),
+      c => drawFx(c, act, t, p, v),
     );
   },
 };

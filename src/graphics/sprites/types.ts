@@ -48,6 +48,37 @@ export function getPlayerActionFrameRange(action: PlayerAction): {
   return { start: 0, end: 0 };
 }
 
+/**
+ * Isometric 3/4 views a player sheet carries. Sheets are authored facing
+ * right: `se` (front 3/4, walking toward screen right-down) and `ne` (back
+ * 3/4, walking toward screen right-up); sw / nw are the same frames flipped.
+ */
+export type PlayerView = 'se' | 'ne';
+export const PLAYER_VIEWS: readonly PlayerView[] = ['se', 'ne'];
+export const DEFAULT_PLAYER_VIEW: PlayerView = 'se';
+
+/** Frames in a full player sheet: every action, once per view (view-major). */
+export const PLAYER_SHEET_FRAMES = PLAYER_TOTAL_FRAMES * PLAYER_VIEWS.length;
+
+/** Sheet frame range of an action in one view. */
+export function getPlayerViewFrameRange(view: PlayerView, action: PlayerAction): {
+  start: number;
+  end: number;
+} {
+  const base = Math.max(0, PLAYER_VIEWS.indexOf(view)) * PLAYER_TOTAL_FRAMES;
+  const range = getPlayerActionFrameRange(action);
+  return { start: base + range.start, end: base + range.end };
+}
+
+/**
+ * Animation key for a player action in a view. The default (se) view keeps
+ * the plain `<key>_<action>` name so menus, portraits and anything else that
+ * plays `<key>_idle` keep working.
+ */
+export function playerAnimKey(key: string, view: PlayerView, action: string): string {
+  return view === DEFAULT_PLAYER_VIEW ? `${key}_${action}` : `${key}_${view}_${action}`;
+}
+
 export interface EntityDrawer {
   readonly key: string;
   readonly frameW: number;       // before TEXTURE_SCALE
@@ -58,6 +89,11 @@ export interface EntityDrawer {
    * characters). Otherwise the sheet generator runs the shared ink pass.
    */
   readonly inked?: boolean;
+  /**
+   * Views this drawer can paint (player heroes). When set, the sheet holds
+   * every action once per view and `drawFrame` receives the view.
+   */
+  readonly views?: readonly PlayerView[];
 
   drawFrame(
     ctx: CanvasRenderingContext2D,
@@ -66,6 +102,7 @@ export interface EntityDrawer {
     w: number,                   // scaled frame width
     h: number,                   // scaled frame height
     utils: DrawUtils,
+    view?: PlayerView,
   ): void;
 }
 
