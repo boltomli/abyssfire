@@ -2002,6 +2002,17 @@ const zhCN: LocaleData = {
   'zone.lore.discovered': '发现传说: {loreName}',
 
   // ─── Quest Explore / Investigate ───
+  'zone.dungeon.exitSealed': '出口已封印',
+  'zone.dungeon.sealedNag': '出口被封印着——击败 {keeper} 才能通过。',
+  'zone.dungeon.sealBroken': '守门者倒下，封印碎裂，通往下一层的出口开启了。',
+  'zone.dungeon.sealBrokenBoss': '深渊之主倒下了，归途已经开启。',
+  'zone.dungeon.floorTheme': '这一层是{theme}的回忆。',
+  'zone.dungeon.curseLog': '深渊诅咒：{curse}',
+  'zone.dungeon.boonTaken': '获得深渊恩赐：{boon}',
+  'dungeon.gatekeeper.crypt': '墓穴守门者',
+  'dungeon.gatekeeper.forge': '熔炉守门者',
+  'dungeon.gatekeeper.tomb': '陵寝守门者',
+  'dungeon.gatekeeper.rift': '裂隙守门者',
   'zone.soulEcho.left': '你的魂影留在了倒下的地方，带走了 {gold} 金币。回去取回它——再倒下一次，它就会消散。',
   'zone.soulEcho.faded': '上一个魂影消散了，{gold} 金币永远失去。',
   'zone.soulEcho.claimed': '你取回了魂影：+{gold} 金币。',

@@ -70,7 +70,10 @@ import { StoryDirector } from '../systems/StoryDirector';
 import { generateRewardChoices, isCollectObjective, questDropChance, FALLBACK_COLLECT_CHANCE } from '../systems/QuestRewards';
 import { huntsToSpawn, makeHuntDefinition } from '../systems/QuestHunts';
 import { computeDeathPenalty } from '../systems/SoulEcho';
-import type { SoulEchoData } from '../data/types';
+import { GATEKEEPER_ID } from '../systems/DungeonSystem';
+import { BOONS } from '../data/abyssRun';
+import type { DungeonHudPayload } from '../utils/EventBus';
+import type { SoulEchoData, MonsterDefinition } from '../data/types';
 
 const TILE_KEYS = ['tile_grass', 'tile_dirt', 'tile_stone', 'tile_water', 'tile_wall', 'tile_camp', 'tile_camp_wall'];
 const CAMPFIRE_RECOVERY_RADIUS = 5;
@@ -216,6 +219,12 @@ export class ZoneScene extends Phaser.Scene {
   private questHuntMonsters = new Map<string, Monster>();
   /** The ghost left at the hero's last death, if it lies in this zone. */
   private soulEchoVisual: Phaser.GameObjects.Container | null = null;
+  /** Labyrinth floor: the exit opens once its seal keeper falls. */
+  private dungeonSealOpen = false;
+  /** Labyrinth: a boon choice is on screen (the world waits). */
+  private dungeonChoosing = false;
+  private dungeonSealNagAt = 0;
+  private dungeonRegenTimer = 0;
   /** Quest-spawned monsters (hunts and their packs) never respawn. */
   private questSpawned = new WeakSet<Monster>();
   /** Set of mini-boss IDs whose pre-fight dialogue has been seen (persisted in save). */
@@ -321,6 +330,8 @@ export class ZoneScene extends Phaser.Scene {
     this.isInDungeon = !!data.dungeonRun;
     this.dungeonRunState = data.dungeonRun ?? null;
     this.dungeonFloorConfig = data.dungeonFloor ?? null;
+    this.dungeonSealOpen = false;
+    this.dungeonChoosing = false;
     if (data.dungeonRun && data.dungeonFloor) {
       // For random dungeon floors, generate the floor map procedurally
       this.mapData = DungeonSystem.generateFloorMap(data.dungeonFloor);
@@ -514,7 +525,8 @@ export class ZoneScene extends Phaser.Scene {
     // Lighting system — ambient darkness + point lights
     const renderQuality = profileForQuality(resolveRenderQuality());
     this.lighting = new LightingSystem(this, renderQuality);
-    this.lighting.setZone(this.currentMapId);
+    this.lighting.setZone(this.isInDungeon && this.dungeonFloorConfig ? DungeonSystem.getTheme(this.dungeonFloorConfig).mapTheme : this.currentMapId);
+    this.setupDungeonFloor();
     this.registerLightSources();
 
     // VFX Manager — camera effects, FX pipeline, combat juice
@@ -623,6 +635,8 @@ export class ZoneScene extends Phaser.Scene {
     this.subscriptions.on(EventBus, GameEvents.QUEST_ACCEPTED, this.updateNPCQuestMarkers, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_ACCEPTED, this.handleQuestAcceptedWorld, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_PROGRESS, this.handleQuestProgressWorld, this);
+    this.subscriptions.on(EventBus, GameEvents.DUNGEON_TIER_CHOSEN, this.handleDungeonTierChosen, this);
+    this.subscriptions.on(EventBus, GameEvents.DUNGEON_BOON_CHOSEN, this.handleDungeonBoonChosen, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_TURNED_IN, this.updateNPCQuestMarkers, this);
     // React to locale changes for persistent UI elements
     this.subscriptions.on(EventBus, GameEvents.LOCALE_CHANGED, this.handleLocaleChanged, this);
@@ -749,7 +763,7 @@ export class ZoneScene extends Phaser.Scene {
 
     // Random dungeon portal interaction
     if (this.findDungeonPortalAt(tile.col, tile.row) && distanceSq(this.player.tileCol, this.player.tileRow, ZoneScene.DUNGEON_PORTAL_COL, ZoneScene.DUNGEON_PORTAL_ROW) <= 9) {
-      this.enterDungeon();
+      this.openDungeonTierPicker();
       return;
     }
 
@@ -778,11 +792,7 @@ export class ZoneScene extends Phaser.Scene {
     const exit = this.findExitAt(tile.col, tile.row);
     if (exit) {
       if (this.isInDungeon) {
-        if (this.dungeonFloorConfig?.isBossFloor) {
-          this.exitDungeon();
-        } else {
-          this.advanceDungeonFloor();
-        }
+        this.tryLeaveDungeonFloor();
       } else if (this.isInSubDungeon) {
         this.exitSubDungeon();
       } else {
@@ -836,6 +846,7 @@ export class ZoneScene extends Phaser.Scene {
         const respawnRow = parentCamp?.row ?? parentMap?.playerStart?.row ?? 3;
 
         if (this.isInDungeon) {
+          this.finishDungeonRun('fallen');
           this.dungeonRunState = null;
           this.dungeonFloorConfig = null;
           this.isInDungeon = false;
@@ -861,6 +872,255 @@ export class ZoneScene extends Phaser.Scene {
         this.player.respawnAtCamp(camp.col, camp.row);
         this.cameras.main.fadeIn(300);
       }
+    });
+  }
+
+  // ── Abyss Labyrinth (Zone 6) ───────────────────────────────
+
+  /** A run's final result waits here until we are back in the rift and the UI can show it. */
+  private static pendingRunEnd: import('../utils/EventBus').DungeonRunEndPayload | null = null;
+
+  private openDungeonTierPicker(): void {
+    const rec = this.session?.abyss ?? { unlockedTier: 1, bestTier: 0 };
+    EventBus.emit(GameEvents.DUNGEON_TIER_PICK, { unlockedTier: rec.unlockedTier, bestTier: rec.bestTier, heroLevel: this.player.level });
+  }
+
+  private handleDungeonTierChosen(data: { tier: number }): void {
+    if (!data || !(data.tier > 0) || this.isInDungeon || this.isInSubDungeon) return;
+    const unlocked = this.session?.abyss.unlockedTier ?? 1;
+    this.enterDungeon(Math.min(unlocked, Math.max(1, Math.floor(data.tier))));
+  }
+
+  /** Floor setup after spawning: the seal keeper, curse lighting, HUD. Outside the labyrinth, show a finished run's summary. */
+  private setupDungeonFloor(): void {
+    if (!this.isInDungeon || !this.dungeonFloorConfig || !this.dungeonRunState) {
+      EventBus.emit(GameEvents.DUNGEON_HUD, null);
+      const ended = ZoneScene.pendingRunEnd;
+      if (ended) {
+        ZoneScene.pendingRunEnd = null;
+        this.time.delayedCall(700, () => EventBus.emit(GameEvents.DUNGEON_RUN_END, ended));
+        this.time.delayedCall(800, () => { void this.autoSave(); });
+      }
+      return;
+    }
+    const cfg = this.dungeonFloorConfig;
+    this.ensureSealKeeper();
+    const curse = DungeonSystem.getCurse(cfg);
+    if (curse?.visionMul) this.lighting.deepen(1 - curse.visionMul);
+    if (curse?.eliteChance) {
+      for (const m of this.monsters) {
+        if (m.definition.elite || Math.random() >= curse.eliteChance) continue;
+        const affixes = this.eliteAffixSystem.rollAffixes(this.currentMapId, true);
+        if (affixes.length > 0) m.applyEliteAffixes(affixes, this.eliteAffixSystem);
+      }
+    }
+    const themeName = t(`dungeon.theme.${cfg.themeId}`);
+    EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.dungeon.floorTheme', { theme: themeName }), type: 'system' });
+    if (curse) {
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.dungeon.curseLog', { curse: t(`dungeon.curse.${curse.id}.name`) }), type: 'system' });
+    }
+    this.dungeonSealOpen = !this.sealKeeperAlive();
+    this.time.delayedCall(120, () => this.emitDungeonHud());
+  }
+
+  /** Monster id holding this floor's exit seal. */
+  private sealKeeperId(): string {
+    const k = this.dungeonFloorConfig?.sealKeeper;
+    return k === 'boss' ? 'dungeon_abyss_lord' : k === 'mid_boss' ? 'dungeon_mid_boss' : GATEKEEPER_ID;
+  }
+
+  private sealKeeperAlive(): Monster | undefined {
+    const id = this.sealKeeperId();
+    return this.monsters.find(m => m.definition.id === id && m.isAlive());
+  }
+
+  /** Make sure the seal keeper stands near the exit (spawn lists can drop it on a wall). */
+  private ensureSealKeeper(): void {
+    const cfg = this.dungeonFloorConfig;
+    const run = this.dungeonRunState;
+    if (!cfg || !run) return;
+    const id = this.sealKeeperId();
+    for (const m of this.monsters) if (m.definition.id === id) this.questSpawned.add(m);
+    if (this.sealKeeperAlive()) return;
+    const exit = this.mapData.exits[0];
+    const start = this.mapData.playerStart;
+    const gc = Math.round(exit.col + (start.col - exit.col) * 0.22);
+    const gr = Math.round(exit.row + (start.row - exit.row) * 0.22);
+    const spot = this.mapData.collisions[gr]?.[gc] ? { col: gc, row: gr } : this.findWalkableNear(gc, gr, 10);
+    if (!spot) return;
+    let def: MonsterDefinition | undefined;
+    if (cfg.sealKeeper === 'gatekeeper') {
+      const base = getMonsterDef(DungeonSystem.getTheme(cfg).gatekeeper);
+      if (base) def = DungeonSystem.makeGatekeeper(cfg, base, run.difficulty);
+    } else {
+      const base = getMonsterDef(id);
+      if (base) def = DungeonSystem.scaleMonster(base, cfg, run.difficulty);
+    }
+    if (!def) return;
+    const keeper = new Monster(this, def, spot.col, spot.row);
+    const affixes = this.eliteAffixSystem.rollAffixes(this.currentMapId, true);
+    if (affixes.length > 0) keeper.applyEliteAffixes(affixes, this.eliteAffixSystem);
+    if (cfg.sealKeeper === 'gatekeeper') {
+      const body = keeper.sprite.list.find(o => o instanceof Phaser.GameObjects.Sprite) as Phaser.GameObjects.Sprite | undefined;
+      body?.setScale(body.scaleX * 1.3);
+    }
+    this.monsters.push(keeper);
+    this.monsterGrid.insert(keeper);
+    this.questSpawned.add(keeper);
+  }
+
+  private emitDungeonHud(): void {
+    const run = this.dungeonRunState;
+    const cfg = this.dungeonFloorConfig;
+    if (!this.isInDungeon || !run || !cfg) return;
+    const keeper = this.dungeonSealOpen ? undefined : this.sealKeeperAlive();
+    const payload: DungeonHudPayload = {
+      tier: run.tier ?? 1,
+      floor: cfg.floorNumber,
+      totalFloors: run.totalFloors,
+      theme: cfg.themeId,
+      curse: cfg.curseId,
+      boons: { ...(run.boons ?? {}) },
+      sealOpen: this.dungeonSealOpen,
+      sealKeeper: keeper ? getMonsterName(keeper.definition.id, keeper.definition.name) : null,
+      kills: run.kills ?? 0,
+      startedAt: run.startedAt ?? Date.now(),
+    };
+    EventBus.emit(GameEvents.DUNGEON_HUD, payload);
+  }
+
+  private onDungeonKill(monster: Monster): void {
+    const run = this.dungeonRunState;
+    if (!run) return;
+    run.kills = (run.kills ?? 0) + 1;
+    const curse = this.dungeonFloorConfig ? DungeonSystem.getCurse(this.dungeonFloorConfig) : null;
+    if (curse?.deathBurst) this.volatileBurst(monster, curse.deathBurst);
+    if (!this.dungeonSealOpen && monster.definition.id === this.sealKeeperId() && !this.sealKeeperAlive()) {
+      this.openDungeonSeal();
+    }
+    this.emitDungeonHud();
+  }
+
+  /** The keeper fell: the exit wakes. */
+  private openDungeonSeal(): void {
+    this.dungeonSealOpen = true;
+    const cfg = this.dungeonFloorConfig;
+    EventBus.emit(GameEvents.LOG_MESSAGE, { text: t(cfg?.isBossFloor ? 'zone.dungeon.sealBrokenBoss' : 'zone.dungeon.sealBroken'), type: 'system' });
+    audioManager.playSFX('quest_objective');
+    this.vfx?.cameraFlash(160, 0.35, 0x9fd8ff);
+    for (const [key, portal] of this.exitSprites) {
+      portal.clearTint().setAlpha(1);
+      const label = this.exitLabels.get(key);
+      if (label && cfg) {
+        label.setText(cfg.isBossFloor ? t('zone.returnToAbyssRift') : DungeonSystem.getFloorExitLabel(cfg.floorNumber + 1));
+      }
+      this.tweens.add({ targets: portal, scale: { from: portal.scale * 1.35, to: portal.scale }, duration: 500, ease: 'Back.easeOut' });
+    }
+  }
+
+  /** Called when the hero steps onto the floor exit. */
+  private tryLeaveDungeonFloor(): void {
+    const cfg = this.dungeonFloorConfig;
+    const run = this.dungeonRunState;
+    if (!cfg || !run || this.isTransitioning || this.dungeonChoosing) return;
+    if (!this.dungeonSealOpen) {
+      if (this.time.now - this.dungeonSealNagAt > 3000) {
+        this.dungeonSealNagAt = this.time.now;
+        const keeper = this.sealKeeperAlive();
+        EventBus.emit(GameEvents.LOG_MESSAGE, {
+          text: t('zone.dungeon.sealedNag', { keeper: keeper ? getMonsterName(keeper.definition.id, keeper.definition.name) : '?' }),
+          type: 'system',
+        });
+      }
+      return;
+    }
+    if (cfg.isBossFloor) {
+      this.finishDungeonRun('cleared');
+      this.exitDungeon();
+      return;
+    }
+    const options = DungeonSystem.rollBoonOffer(run.seed + cfg.floorNumber * 131, run.boons ?? {});
+    if (options.length === 0) {
+      this.advanceDungeonFloor();
+      return;
+    }
+    this.dungeonChoosing = true;
+    this.player.setPath([]);
+    EventBus.emit(GameEvents.DUNGEON_BOON_OFFER, { floor: cfg.floorNumber, options, held: { ...(run.boons ?? {}) } });
+  }
+
+  private handleDungeonBoonChosen(data: { boonId: string }): void {
+    const run = this.dungeonRunState;
+    if (!this.dungeonChoosing || !run) return;
+    this.dungeonChoosing = false;
+    if (data?.boonId && BOONS.some(b => b.id === data.boonId)) {
+      run.boons = { ...(run.boons ?? {}), [data.boonId]: (run.boons?.[data.boonId] ?? 0) + 1 };
+      this.invalidateEquipStats();
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('zone.dungeon.boonTaken', { boon: t(`dungeon.boon.${data.boonId}.name`) }), type: 'system' });
+    }
+    this.advanceDungeonFloor();
+  }
+
+  /** Record the run's result; the summary shows once back in the rift. */
+  private finishDungeonRun(result: 'cleared' | 'fallen' | 'abandoned'): void {
+    const run = this.dungeonRunState;
+    const cfg = this.dungeonFloorConfig;
+    if (!run || !cfg) return;
+    const tier = run.tier ?? 1;
+    const timeMs = Date.now() - (run.startedAt ?? Date.now());
+    let newBest = false;
+    if (result === 'cleared' && this.session) {
+      const r = DungeonSystem.recordClear(this.session.abyss, tier, timeMs);
+      this.session.abyss = r.record;
+      newBest = r.newBest;
+    }
+    ZoneScene.pendingRunEnd = {
+      result,
+      tier,
+      floorsCleared: result === 'cleared' ? run.totalFloors : cfg.floorNumber - 1,
+      totalFloors: run.totalFloors,
+      kills: run.kills ?? 0,
+      timeMs,
+      boons: { ...(run.boons ?? {}) },
+      newBest,
+      unlockedTier: this.session?.abyss.unlockedTier ?? tier,
+    };
+  }
+
+  /** Curses that act every frame: regenerating monsters. */
+  private updateDungeonCurse(delta: number): void {
+    const curse = this.dungeonFloorConfig ? DungeonSystem.getCurse(this.dungeonFloorConfig) : null;
+    if (!curse?.regenPerSec) return;
+    this.dungeonRegenTimer += delta;
+    if (this.dungeonRegenTimer < 500) return;
+    const dt = this.dungeonRegenTimer / 1000;
+    this.dungeonRegenTimer = 0;
+    const now = this.time.now;
+    for (const m of this.monsters) {
+      if (m.isAlive() && now - m.lastDamagedAt > 3000) m.heal(m.maxHp * curse.regenPerSec * dt);
+    }
+  }
+
+  /** Volatile curse: the corpse bursts after a short, visible fuse. */
+  private volatileBurst(monster: Monster, fraction: number): void {
+    const x = monster.sprite.x;
+    const y = monster.sprite.y;
+    const col = monster.tileCol;
+    const row = monster.tileRow;
+    const dmg = Math.round(monster.maxHp * fraction);
+    const ring = this.add.ellipse(x, y, 40, 20, 0xff3a2a, 0.25).setStrokeStyle(2, 0xff6040, 0.9).setDepth(y + 5);
+    this.tweens.add({ targets: ring, scaleX: 3.2, scaleY: 3.2, alpha: 0.55, duration: 650, ease: 'Quad.easeIn' });
+    this.time.delayedCall(650, () => {
+      ring.destroy();
+      this.vfx?.deathBurst(x, y - 10, 0xff5030);
+      if (this.player.hp <= 0) return;
+      if (Math.hypot(this.player.tileCol - col, this.player.tileRow - row) > 2) return;
+      this.player.hp = Math.max(0, this.player.hp - dmg);
+      this.showDamageText(this.player.sprite.x, this.player.sprite.y, dmg, false, false, true, 'fire');
+      EventBus.emit(GameEvents.COMBAT_DAMAGE, {
+        targetId: 'player', damage: dmg, isDodged: false, isCrit: false, isPlayerTarget: true, targetMaxHP: this.player.maxHp,
+      });
+      if (this.player.hp <= 0) this.player.die();
     });
   }
 
@@ -996,7 +1256,8 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
-    if (this.storyDirector?.cinematic) return;
+    if (this.storyDirector?.cinematic || this.dungeonChoosing) return;
+    if (this.isInDungeon) this.updateDungeonCurse(delta);
     const recovery = this.getPlayerRecoveryModifiers();
     this.handleKeyboardMovement(delta);
     this.handleSkillInput(time);
@@ -1348,15 +1609,18 @@ export class ZoneScene extends Phaser.Scene {
               const portal = this.add.image(pos.x, pos.y - 8, 'exit_portal').setScale(1 / TEXTURE_SCALE);
               portal.setDepth(pos.y + 2);
               this.exitSprites.set(exitKey, portal);
+              if (this.isInDungeon && !this.dungeonSealOpen) portal.setTint(0x6a2230).setAlpha(0.75);
               if (this.vfx) {
                 this.vfx.applyGlow(portal, 0x4488ff, 8, 0.1);
                 this.vfx.applyBloom(portal, 0.8);
               }
               // Add floor label for dungeon exit portals
               if (this.isInDungeon && this.dungeonFloorConfig) {
-                const labelText = this.dungeonFloorConfig.isBossFloor
-                  ? t('zone.returnToAbyssRift')
-                  : DungeonSystem.getFloorExitLabel(this.dungeonFloorConfig.floorNumber + 1);
+                const labelText = !this.dungeonSealOpen
+                  ? t('zone.dungeon.exitSealed')
+                  : this.dungeonFloorConfig.isBossFloor
+                    ? t('zone.returnToAbyssRift')
+                    : DungeonSystem.getFloorExitLabel(this.dungeonFloorConfig.floorNumber + 1);
                 const exitLabel = this.add.text(pos.x, pos.y - 30 * DPR, labelText, {
                   fontSize: fs(9),
                   color: this.dungeonFloorConfig.isBossFloor ? '#66CCFF' : '#FF9933',
@@ -2782,6 +3046,12 @@ export class ZoneScene extends Phaser.Scene {
           eq[stat as keyof EquipStats] += value;
         }
       }
+      // Abyss Labyrinth boons last the run.
+      if (this.isInDungeon && this.dungeonRunState?.boons) {
+        for (const [stat, value] of Object.entries(DungeonSystem.boonStats(this.dungeonRunState.boons))) {
+          if (stat in eq) eq[stat as keyof EquipStats] += value as number;
+        }
+      }
       this.cachedEquipStats = eq;
     }
     return this.cachedEquipStats;
@@ -3404,6 +3674,7 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   private onMonsterKilled(monster: Monster): void {
+    if (this.isInDungeon) this.onDungeonKill(monster);
     // Clear status effects on death
     this.statusEffects.clearEntity(monster.id);
     this.player.gainSpirit('kill');
@@ -3532,7 +3803,7 @@ export class ZoneScene extends Phaser.Scene {
     // Don't respawn mini-bosses
     if (this.miniBossMonster === monster) {
       this.miniBossMonster = null;
-    } else if (this.questSpawned.has(monster)) {
+    } else if (this.questSpawned.has(monster) || this.isInDungeon) {
       if (this.questHuntMonsters.get(monster.definition.id) === monster) this.questHuntMonsters.delete(monster.definition.id);
     } else {
       this.time.delayedCall(15000, () => this.respawnMonster(monster));
@@ -3819,11 +4090,7 @@ export class ZoneScene extends Phaser.Scene {
       if (dSq < 2.25) {
         if (this.isInDungeon) {
           // In dungeon: either advance to next floor or exit dungeon
-          if (this.dungeonFloorConfig?.isBossFloor) {
-            this.exitDungeon();
-          } else {
-            this.advanceDungeonFloor();
-          }
+          this.tryLeaveDungeonFloor();
         } else if (this.isInSubDungeon) {
           this.exitSubDungeon();
         } else {
@@ -3904,6 +4171,7 @@ export class ZoneScene extends Phaser.Scene {
         discoveredHiddenAreas: [...this.discoveredHiddenAreas],
         storySeen: this.session?.story.toSave(),
         soulEcho: this.session?.soulEcho.toSave() ?? null,
+        abyss: this.session ? { ...this.session.abyss } : undefined,
       });
     } catch (_e) { /* silent fail */ }
   }
@@ -3960,6 +4228,13 @@ export class ZoneScene extends Phaser.Scene {
     // Saves from before the story existed: don't replay the prologue for veterans.
     this.session?.story.load(save.storySeen ?? ['prologue']);
     this.session?.soulEcho.load(save.soulEcho);
+    if (save.abyss && this.session) {
+      this.session.abyss = {
+        unlockedTier: Math.max(1, save.abyss.unlockedTier ?? 1),
+        bestTier: Math.max(0, save.abyss.bestTier ?? 0),
+        bestTimeMs: save.abyss.bestTimeMs,
+      };
+    }
 
     // 4. Homestead
     if (save.homestead) {
@@ -4711,12 +4986,12 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   /** Enter the random dungeon from Abyss Rift. */
-  private enterDungeon(): void {
+  private enterDungeon(tier = 1): void {
     if (this.isTransitioning) return;
     this.isTransitioning = true;
     this.autoSave();
 
-    const run = DungeonSystem.createRun(this.difficulty);
+    const run = DungeonSystem.createRun(this.difficulty, undefined, tier);
     const floorConfig = DungeonSystem.getFloorConfig(run, 1);
 
     EventBus.emit(GameEvents.LOG_MESSAGE, {

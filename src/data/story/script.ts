@@ -312,6 +312,21 @@ export const CUTSCENES: Record<string, Cutscene> = {
       { kind: 'focus', target: 'player', ms: 600 },
     ],
   },
+  cs_boss_kassanor: {
+    id: 'cs_boss_kassanor',
+    steps: [
+      { kind: 'focus', target: { monster: 'dungeon_abyss_lord' }, ms: 1500 },
+      { kind: 'narrate', text: 'story.cs_boss_kassanor.1' },
+      { kind: 'title', title: 'story.boss.dungeon_abyss_lord.name', subtitle: 'story.boss.dungeon_abyss_lord.epithet' },
+      { kind: 'say', speaker: { monster: 'dungeon_abyss_lord' }, text: 'story.cs_boss_kassanor.2' },
+      { kind: 'say', speaker: { monster: 'dungeon_abyss_lord' }, text: 'story.cs_boss_kassanor.3' },
+      { kind: 'say', speaker: 'hero', text: 'story.cs_boss_kassanor.4' },
+      { kind: 'say', speaker: { monster: 'dungeon_abyss_lord' }, text: 'story.cs_boss_kassanor.5' },
+      { kind: 'shake', intensity: 0.01, ms: 600 },
+      { kind: 'flash', color: 0x5a2cff, ms: 450 },
+      { kind: 'focus', target: 'player', ms: 600 },
+    ],
+  },
 };
 
 // ─── Boss introductions (first sight of each zone boss) ───
@@ -321,6 +336,8 @@ export const BOSS_INTROS: BossIntro[] = [
   { monsterId: 'mountain_troll', name: 'story.boss.mountain_troll.name', epithet: 'story.boss.mountain_troll.epithet', cutscene: 'cs_boss_mountain_troll' },
   { monsterId: 'phoenix', name: 'story.boss.phoenix.name', epithet: 'story.boss.phoenix.epithet', cutscene: 'cs_boss_phoenix' },
   { monsterId: 'demon_lord', name: 'story.boss.demon_lord.name', epithet: 'story.boss.demon_lord.epithet', cutscene: 'cs_boss_demon_lord' },
+  // Post-game: the Abyss Labyrinth's last floor.
+  { monsterId: 'dungeon_abyss_lord', name: 'story.boss.dungeon_abyss_lord.name', epithet: 'story.boss.dungeon_abyss_lord.epithet', cutscene: 'cs_boss_kassanor' },
 ];
 
 // ─── When each beat plays ───

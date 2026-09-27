@@ -47,7 +47,7 @@ The full story bible (myth, the Oathburner Ignaroth, the hero's brand and prophe
 | 3 | Anvil Mountains (铁砧山脉) | Dwarven ruins, gargoyles | 20-30 |
 | 4 | Scorching Desert (灼热荒漠) | Fire elementals, sandworms | 30-40 |
 | 5 | Abyss Rift (深渊裂谷) | Demons, final bosses | 40-50 |
-| 6 | Random Dungeons | Roguelike (future) | Endgame |
+| 6 | Abyss Labyrinth (深渊迷宫) | Roguelike tier ladder: themed floors, curses, sealed exits, run boons | Endgame |
 
 ## Classes
 

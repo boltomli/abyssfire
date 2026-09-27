@@ -2057,6 +2057,17 @@ const en: LocaleData = {
   'zone.lore.discovered': 'Discovered lore: {loreName}',
 
   // ─── Quest Explore / Investigate ───
+  'zone.dungeon.exitSealed': 'Exit sealed',
+  'zone.dungeon.sealedNag': 'The exit is sealed. Defeat {keeper} to pass.',
+  'zone.dungeon.sealBroken': 'The gatekeeper falls and the seal shatters. The way down is open.',
+  'zone.dungeon.sealBrokenBoss': 'The Lord of the Abyss has fallen. The way home is open.',
+  'zone.dungeon.floorTheme': 'This floor remembers {theme}.',
+  'zone.dungeon.curseLog': 'Abyssal curse: {curse}',
+  'zone.dungeon.boonTaken': 'Abyssal boon gained: {boon}',
+  'dungeon.gatekeeper.crypt': 'Crypt Gatekeeper',
+  'dungeon.gatekeeper.forge': 'Forge Gatekeeper',
+  'dungeon.gatekeeper.tomb': 'Tomb Gatekeeper',
+  'dungeon.gatekeeper.rift': 'Rift Gatekeeper',
   'zone.soulEcho.left': 'Your soul echo lingers where you fell, holding {gold} gold. Go back for it; fall again and it fades.',
   'zone.soulEcho.faded': 'Your previous soul echo faded. {gold} gold is lost for good.',
   'zone.soulEcho.claimed': 'You reclaim your soul echo: +{gold} gold.',

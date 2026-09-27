@@ -136,6 +136,13 @@ export class LightingSystem {
     this.resizeViewport();
   }
 
+  /** Darken the scene beyond the zone mood (0..1 of the remaining light), e.g. a gloom curse. */
+  deepen(amount: number): void {
+    this.ambientAlpha = Math.min(0.92, this.ambientAlpha + (1 - this.ambientAlpha) * Math.max(0, Math.min(1, amount)));
+    this.ambient.setAlpha(this.ambientAlpha);
+    this.lightScale = Math.max(this.lightScale, this.ambientAlpha * 0.9);
+  }
+
   addLight(light: LightSource): void {
     this.lights.push(light);
     if (light.id && light.flicker) this.flickerSeeds.set(light.id, Math.random() * 1000);

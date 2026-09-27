@@ -26,10 +26,16 @@ const referenced = collectKeys([PROLOGUE, CHAPTERS, CUTSCENES, BOSS_INTROS, EPIL
 
 function npcsIn(zone: string): Set<string> {
   const map = AllMaps[zone];
+  if (!map) return new Set(); // the labyrinth has no NPCs
   return new Set([...map.camps.flatMap(c => c.npcs), ...(map.fieldNpcs ?? []).map(n => n.npcId)]);
 }
 
+/** Monsters that only live in the Abyss Labyrinth (Zone 6), whose floors are generated per run. */
+const LABYRINTH = 'abyss_labyrinth';
+const LABYRINTH_MONSTERS = new Set(['dungeon_abyss_lord', 'dungeon_mid_boss', 'dungeon_shade', 'dungeon_fiend']);
+
 function zonesWithMonster(monsterId: string): string[] {
+  if (LABYRINTH_MONSTERS.has(monsterId)) return [LABYRINTH];
   return Object.keys(AllMaps).filter(z => AllMaps[z].spawns.some(s => s.monsterId === monsterId));
 }
 
@@ -96,7 +102,7 @@ describe('story script', () => {
   });
 
   it('introduces each zone boss with a title card', () => {
-    const bosses = ['goblin_chief', 'werewolf_alpha', 'mountain_troll', 'phoenix', 'demon_lord'];
+    const bosses = ['goblin_chief', 'werewolf_alpha', 'mountain_troll', 'phoenix', 'demon_lord', 'dungeon_abyss_lord'];
     expect(BOSS_INTROS.map(b => b.monsterId).sort()).toEqual([...bosses].sort());
     for (const b of BOSS_INTROS) {
       const cs = CUTSCENES[b.cutscene];
