@@ -5,7 +5,7 @@
 // player, so their "working" loop is a combat-ready stance.
 import type { EntityDrawer } from '../types';
 import { glow, vec } from '../rig/Rig';
-import { npcDrawer } from '../rig/NpcKit';
+import { npcDrawer, propTip, STAFF_ORB } from '../rig/NpcKit';
 
 export const RescueLostTravelerDrawer = npcDrawer({
   key: 'npc_rescue_lost_traveler',
@@ -160,7 +160,7 @@ export const MercenaryHealerDrawer = npcDrawer({
   work: 'ready',
   ready: { wpn: 0.08, handN: { x: 55, y: 60 } },
   fx: (ctx, p, sk) => {
-    glow(ctx, vec(sk.handN.x + Math.sin(p.wpn) * 19.6, sk.handN.y - Math.cos(p.wpn) * 19.6), 4, 0xfff0a0, 0.6);
+    glow(ctx, propTip(sk, p.wpn, STAFF_ORB, true, 'staff'), 4, 0xfff0a0, 0.6);
   },
 });
 
@@ -177,7 +177,7 @@ export const MercenaryMageDrawer = npcDrawer({
   work: 'ready',
   ready: { handN: { x: 57, y: 60 }, wpn: 0.9, handF: { x: 52, y: 62 } },
   fx: (ctx, p, sk, _act, t) => {
-    glow(ctx, vec(sk.handN.x + Math.sin(p.wpn) * 11, sk.handN.y - Math.cos(p.wpn) * 11), 3 + Math.sin(t * Math.PI * 4), 0x9f78dc, 0.7);
+    glow(ctx, propTip(sk, p.wpn, 11), 3 + Math.sin(t * Math.PI * 4), 0x9f78dc, 0.7);
   },
 });
 

@@ -39,6 +39,9 @@ export class Player {
   isMoving: boolean = false;
   moveSpeed: number = 120;
   private currentSpeed = 0;
+  /** ms left of keyboard/stick movement grace: keeps the walk cycle alive between input frames. */
+  private directMoveMs = 0;
+  private directDustMs = 0;
   private readonly acceleration = 8;
   private readonly deceleration = 12;
 
@@ -186,6 +189,22 @@ export class Player {
     this.sprite.setDepth(worldPos.y + 100);
   }
 
+  /**
+   * Continuous movement from keyboard, joystick or gamepad: step to (col, row)
+   * and keep the walk cycle and facing in sync, like path movement does.
+   * (A bare moveTo() is a teleport — the hero would slide in its idle pose.)
+   */
+  moveDirect(col: number, row: number): void {
+    const fromX = this.sprite.x;
+    const fromY = this.sprite.y;
+    this.moveTo(col, row);
+    this.path = [];
+    this.isMoving = true;
+    this.directMoveMs = 120;
+    this.animator.setWalk();
+    this.animator.faceToward(this.sprite.x - fromX, this.sprite.y - fromY);
+  }
+
   setPath(newPath: { col: number; row: number }[]): void {
     this.path = newPath;
     this.isMoving = newPath.length > 0;
@@ -233,6 +252,16 @@ export class Player {
   private updateMovement(delta: number): void {
     const dt = delta / 1000;
 
+    if (this.path.length === 0 && this.directMoveMs > 0) {
+      // Keyboard/stick movement is driving the hero this frame.
+      this.directMoveMs -= delta;
+      this.directDustMs -= delta;
+      if (this.directDustMs <= 0) {
+        this.directDustMs = 320;
+        this.spawnFootDust(this.sprite.x, this.sprite.y);
+      }
+      return;
+    }
     if (this.path.length === 0) {
       // Decelerate to stop
       this.currentSpeed = this.currentSpeed * (1 - this.deceleration * dt);
@@ -253,8 +282,13 @@ export class Player {
     const dx = targetWorld.x - this.sprite.x;
     const dy = targetWorld.y - this.sprite.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    // Ignore sub-pixel jitter so the sprite doesn't flicker on vertical paths.
-    if (Math.abs(dx) > 1.5) this.animator.faceToward(dx);
+    // Face along the path a step ahead so 8-way zigzags (e.g. alternating
+    // right-down / right-up tiles) don't flip the front/back view each step.
+    const ahead = this.path[1] ? cartToIso(this.path[1].col, this.path[1].row) : targetWorld;
+    const fx = ahead.x - this.sprite.x;
+    const fy = ahead.y - this.sprite.y;
+    // Ignore sub-pixel jitter so the sprite doesn't flicker on arrival.
+    if (Math.hypot(fx, fy) > 1.5) this.animator.faceToward(fx, fy);
 
     const step = this.currentSpeed * dt;
 
@@ -424,9 +458,9 @@ export class Player {
     return this.animator.playAttack(targetX, targetY, { attackIntervalMs: this.attackSpeed });
   }
 
-  /** Returns ms until the spell releases. */
-  playCast(): number {
-    return this.animator.playCast();
+  /** Returns ms until the spell releases. Faces the target point when given. */
+  playCast(targetX?: number, targetY?: number): number {
+    return this.animator.playCast(targetX, targetY);
   }
 
   playHurt(sourceX: number, sourceY: number, strength: number = 1): void {

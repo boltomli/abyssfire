@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import type { MonsterAnimCategory } from '../data/types';
 import { attackSpeedScale, computeImpactDelay } from './HitFeedback';
+import { DEFAULT_PLAYER_VIEW, playerAnimKey, type PlayerView } from '../graphics/sprites/types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,37 @@ export interface AnimConfig {
   hurtFrameRate: number;
   dodgeFrameRate: number;
   deathFrameRate: number;
+}
+
+// ── Facing ─────────────────────────────────────────────────────────────────
+
+/** Which sheet view to show and whether to mirror it (sheets face right). */
+export interface Facing {
+  view: PlayerView;
+  left: boolean;
+}
+
+/**
+ * Below this |minor|/|major| ratio a movement counts as purely along the
+ * major screen axis, so the other half of the facing is kept. ~16°: near-
+ * horizontal moves keep the current front/back view and near-vertical moves
+ * keep the current mirroring, instead of flickering on every jittery step.
+ */
+export const FACING_HYSTERESIS = 0.28;
+
+/**
+ * Resolve a screen-space direction (dx right, dy down) into a 3/4 view:
+ * moving down-screen shows the front (se/sw), up-screen the back (ne/nw);
+ * dx picks the mirroring. Ambiguous components keep `prev`.
+ */
+export function resolveFacing(dx: number, dy: number, prev: Facing, hysteresis = FACING_HYSTERESIS): Facing {
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax < 0.01 && ay < 0.01) return prev;
+  const left = ax > 0.01 && ax >= ay * hysteresis ? dx < 0 : prev.left;
+  const view: PlayerView = ay > 0.01 && ay >= ax * hysteresis ? (dy > 0 ? 'se' : 'ne') : prev.view;
+  if (left === prev.left && view === prev.view) return prev;
+  return { view, left };
 }
 
 // ── Preset Configs ─────────────────────────────────────────────────────────
@@ -265,6 +297,11 @@ export class CharacterAnimator {
   private hitFreezeTimer = 0;
   private flashTimer: Phaser.Time.TimerEvent | null = null;
   private facingLeft = false;
+  /** Sheet view (front/back 3/4) for sheets that carry several. */
+  private view: PlayerView = DEFAULT_PLAYER_VIEW;
+  private readonly hasViews: boolean;
+  /** Action whose frame animation is currently playing. */
+  private frameAction: AnimState = 'idle';
 
   private static readonly TRANSITION_MS: Record<string, number> = {
     'idle->walk': 90,
@@ -296,6 +333,7 @@ export class CharacterAnimator {
     this.config = config;
     this.animPrefix = animPrefix ?? '';
     this.hasFrameAnims = !!animPrefix && scene.anims.exists(`${animPrefix}_idle`);
+    this.hasViews = this.hasFrameAnims && scene.anims.exists(playerAnimKey(this.animPrefix, 'ne', 'idle'));
     const sprite = this.getSpriteChild();
     if (sprite) {
       this.frameBaseX = sprite.x;
@@ -340,15 +378,43 @@ export class CharacterAnimator {
     if (sprite) sprite.setAlpha(1);
   }
 
+  private animKey(action: AnimState): string {
+    return this.hasViews ? playerAnimKey(this.animPrefix, this.view, action) : `${this.animPrefix}_${action}`;
+  }
+
   private playFrameAnim(action: AnimState): void {
     if (!this.hasFrameAnims) return;
     const spr = this.getSpriteChild();
     if (!spr) return;
-    const key = `${this.animPrefix}_${action}`;
+    const key = this.animKey(action);
     spr.anims.timeScale = 1;
+    this.frameAction = action;
     if (this.scene.anims.exists(key)) {
       spr.play(key, true);
     }
+  }
+
+  /**
+   * Switch the playing animation to the current view's sheet without
+   * restarting it: same frame, same speed, same paused state.
+   */
+  private swapViewAnim(): void {
+    const spr = this.getSpriteChild();
+    if (!spr || !this.hasFrameAnims) return;
+    const key = this.animKey(this.frameAction);
+    if (!this.scene.anims.exists(key) || spr.anims.currentAnim?.key === key) return;
+    const index = spr.anims.currentFrame?.index ?? 1;
+    const progress = spr.anims.isPlaying || spr.anims.isPaused;
+    const timeScale = spr.anims.timeScale;
+    const paused = spr.anims.isPaused;
+    spr.play({ key, startFrame: Math.max(0, index - 1), timeScale }, false);
+    spr.anims.timeScale = timeScale;
+    if (!progress || paused) spr.anims.pause();
+  }
+
+  /** Current view + mirroring (for tests and debugging). */
+  getFacing(): Facing {
+    return { view: this.view, left: this.facingLeft };
   }
 
   setIdle(): void {
@@ -432,21 +498,31 @@ export class CharacterAnimator {
     });
   }
 
-  /** Face the direction of travel. Sprites are authored facing right. */
-  faceToward(dx: number): void {
-    if (this.dead || Math.abs(dx) < 0.01) return;
+  /**
+   * Face the direction of travel (screen-space dx, dy). Sprites are authored
+   * facing right; multi-view sheets also pick front (moving down-screen) or
+   * back (moving up-screen) 3/4 art. Without dy only the mirroring changes.
+   */
+  faceToward(dx: number, dy = 0): void {
+    if (this.dead) return;
     // Actions own their facing until they finish.
     if (this.state !== 'idle' && this.state !== 'walk') return;
-    const left = dx < 0;
-    if (left === this.facingLeft) return;
-    this.facingLeft = left;
-    this.getSpriteChild()?.setFlipX(left);
+    this.setFacing(dx, dy);
   }
 
-  private setFacing(dx: number): void {
-    if (Math.abs(dx) < 0.01) return;
-    this.facingLeft = dx < 0;
-    this.getSpriteChild()?.setFlipX(this.facingLeft);
+  private setFacing(dx: number, dy = 0): void {
+    const prev: Facing = { view: this.view, left: this.facingLeft };
+    const next = this.hasViews
+      ? resolveFacing(dx, dy, prev)
+      : Math.abs(dx) < 0.01 ? prev : { view: prev.view, left: dx < 0 };
+    if (next.left !== prev.left) {
+      this.facingLeft = next.left;
+      this.getSpriteChild()?.setFlipX(next.left);
+    }
+    if (next.view !== prev.view) {
+      this.view = next.view;
+      this.swapViewAnim();
+    }
   }
 
   private startTransition(toState: string): void {
@@ -722,7 +798,7 @@ export class CharacterAnimator {
     const distance = Math.hypot(dx, dy) || 1;
     const nx = dx / distance;
     const ny = dy / distance;
-    this.setFacing(dx);
+    this.setFacing(dx, dy);
 
     const speed = attackSpeedScale(this.config.attackDuration, options.attackIntervalMs);
     // Frame playback keeps pace with the compressed tween timeline.
@@ -792,11 +868,14 @@ export class CharacterAnimator {
 
   // ── Cast Animation ────────────────────────────────────────────────────
 
-  /** Play a cast. Returns ms until the spell releases (the charge peak). */
-  playCast(): number {
+  /**
+   * Play a cast. Returns ms until the spell releases (the charge peak).
+   * With a target point the caster turns to face it first.
+   */
+  playCast(targetX?: number, targetY?: number): number {
     if (this.dead) return 0;
     if (this.hasFrameAnims) {
-      return this.playFrameCast();
+      return this.playFrameCast(targetX, targetY);
     }
     this.cancelTweens();
     this.prevState = this.state;
@@ -852,7 +931,7 @@ export class CharacterAnimator {
     return Math.round(chargeMs);
   }
 
-  private playFrameCast(): number {
+  private playFrameCast(targetX?: number, targetY?: number): number {
     const sprite = this.getSpriteChild();
     if (!sprite) return 0;
 
@@ -863,6 +942,9 @@ export class CharacterAnimator {
     this.state = 'cast';
     this.animTime = 0;
     this.playFrameAnim('cast');
+    if (targetX !== undefined && targetY !== undefined) {
+      this.setFacing(targetX - this.container.x, targetY - this.container.y);
+    }
 
     const total = this.config.castDuration;
     const chargeMs = total * 0.46;
@@ -927,7 +1009,7 @@ export class CharacterAnimator {
     const distance = Math.hypot(directionX, directionY) || 1;
     const nx = directionX / distance;
     const ny = directionY / distance;
-    this.setFacing(nx);
+    this.setFacing(nx, ny);
 
     const tuckMs = this.config.dodgeDuration * 0.3;
     const releaseMs = this.config.dodgeDuration - tuckMs;

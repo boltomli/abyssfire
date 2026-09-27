@@ -5,8 +5,9 @@
  *   - Five zone themes (emerald_plains, twilight_forest, anvil_mountains,
  *     scorching_desert, abyss_rift) defined as ZONE_THEMES constant.
  *   - Three music states: 'explore', 'combat', 'victory'.
- *   - Four procedural layers: pad (all), melody (explore+combat),
- *     rhythm (combat only), chime (explore only).
+ *   - A composed score per zone (ZONE_SCORES → ScorePlayer): chord
+ *     progression pad, light plucked bass, arpeggios, melodic phrases and a
+ *     breathing 16-bar section cycle; combat adds tempo and percussion.
  *   - External AudioBuffer override: if AudioLoader has a buffer keyed
  *     'bgm_{zoneId}_{state}' it is played instead of the procedural layers.
  *   - Crossfading: state transitions 1.5 s, zone transitions 2 s.
@@ -15,6 +16,7 @@
  */
 
 import { AudioLoader } from './AudioLoader';
+import { ScorePlayer, type ScoreSpec } from './ScorePlayer';
 import type { EffectsChainConfig, MusicState, ZoneTheme } from './types';
 
 // ---------------------------------------------------------------------------
@@ -104,6 +106,80 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
 };
 
 // ---------------------------------------------------------------------------
+// Scores — what each zone actually plays (see ScorePlayer / Composer)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-zone compositions. Registers are chosen so nothing sustains below the
+ * mid range: pads sit around G3–C5, the bass only plucks on strong beats.
+ */
+/** Output trim for the composed score (≈ −8 dB) so it matches the old mix level. */
+const SCORE_TRIM = 0.4;
+
+export const ZONE_SCORES: Record<string, ScoreSpec> = {
+  // Sunny, lilting: D major, I–V–vi–IV, flute melody over a harp arpeggio.
+  emerald_plains: {
+    tonic: 62, mode: 'major', progression: [0, 4, 5, 3], barsPerChord: 2, beatsPerBar: 4, tempo: 84,
+    pad: { wave: 'triangle', gain: 0.05, cutoff: 1800 },
+    bass: { gain: 0.05, beats: [0] },
+    lead: { wave: 'sine', gain: 0.07, low: 69, high: 86, density: 0.6, vibrato: 10 },
+    arp: { wave: 'triangle', gain: 0.035, low: 62, high: 79, perBeat: 2, decay: 0.5 },
+    bell: { gain: 0.02 },
+    combatTempo: 1.3,
+  },
+  // Hushed waltz: A dorian in 3/4, bell arpeggios and a soft wandering line.
+  twilight_forest: {
+    tonic: 57, mode: 'dorian', progression: [0, 3, 6, 4], barsPerChord: 2, beatsPerBar: 3, tempo: 76,
+    pad: { wave: 'sine', gain: 0.055, cutoff: 1400 },
+    bass: { gain: 0.04, beats: [0] },
+    lead: { wave: 'triangle', gain: 0.055, low: 64, high: 81, density: 0.45, vibrato: 6 },
+    arp: { wave: 'sine', gain: 0.03, low: 64, high: 83, perBeat: 1, decay: 1.2 },
+    bell: { gain: 0.025 },
+    combatTempo: 1.35,
+  },
+  // Dwarven march: D minor i–VI–III–VII, horn-like lead, measured bass.
+  anvil_mountains: {
+    tonic: 50, mode: 'minor', progression: [0, 5, 2, 6], barsPerChord: 2, beatsPerBar: 4, tempo: 76,
+    pad: { wave: 'sawtooth', gain: 0.035, cutoff: 1100 },
+    bass: { gain: 0.055, beats: [0, 2] },
+    lead: { wave: 'sawtooth', gain: 0.045, low: 62, high: 79, density: 0.5, vibrato: 8 },
+    arp: { wave: 'triangle', gain: 0.03, low: 57, high: 74, perBeat: 1, decay: 0.7 },
+    bell: null,
+    combatTempo: 1.3,
+  },
+  // Caravan song: E phrygian dominant, plucked oud arpeggios, ornamented line.
+  scorching_desert: {
+    tonic: 52, mode: 'phrygianDominant', progression: [0, 1, 0, 6], barsPerChord: 2, beatsPerBar: 4, tempo: 90,
+    pad: { wave: 'triangle', gain: 0.045, cutoff: 1500 },
+    bass: { gain: 0.05, beats: [0, 2] },
+    lead: { wave: 'sawtooth', gain: 0.04, low: 64, high: 83, density: 0.7, vibrato: 14 },
+    arp: { wave: 'sawtooth', gain: 0.022, low: 59, high: 76, perBeat: 2, decay: 0.35 },
+    bell: null,
+    combatTempo: 1.25,
+  },
+  // Dread and grandeur: C harmonic minor i–VI–iv–V, slow bells, sparse line.
+  abyss_rift: {
+    tonic: 48, mode: 'harmonicMinor', progression: [0, 5, 3, 4], barsPerChord: 2, beatsPerBar: 4, tempo: 66,
+    pad: { wave: 'sawtooth', gain: 0.035, cutoff: 950 },
+    bass: { gain: 0.045, beats: [0] },
+    lead: { wave: 'triangle', gain: 0.05, low: 60, high: 77, density: 0.35, vibrato: 6 },
+    arp: { wave: 'sine', gain: 0.028, low: 60, high: 79, perBeat: 1, decay: 1.5 },
+    bell: { gain: 0.02 },
+    combatTempo: 1.35,
+  },
+  // Title theme: A minor, slow and wistful.
+  menu: {
+    tonic: 57, mode: 'minor', progression: [0, 5, 2, 6], barsPerChord: 2, beatsPerBar: 4, tempo: 62,
+    pad: { wave: 'triangle', gain: 0.06, cutoff: 1300 },
+    bass: { gain: 0.035, beats: [0] },
+    lead: { wave: 'triangle', gain: 0.055, low: 64, high: 81, density: 0.4, vibrato: 5 },
+    arp: { wave: 'sine', gain: 0.022, low: 64, high: 83, perBeat: 1, decay: 1.6 },
+    bell: { gain: 0.02 },
+    combatTempo: 1.2,
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
 
@@ -119,47 +195,6 @@ interface LayerSet {
   masterGain: GainNode;
   nodes: ManagedNode[];
   timeouts: number[];
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Convert cents offset to a frequency multiplier. */
-function centsToRatio(cents: number): number {
-  return Math.pow(2, cents / 1200);
-}
-
-/** Return a random number in [min, max). */
-function rand(min: number, max: number): number {
-  return min + Math.random() * (max - min);
-}
-
-/** Pick a random element from an array. */
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-/** Lowpass filter cutoff in Hz based on mood. */
-function padCutoff(mood: ZoneTheme['mood']): number {
-  switch (mood) {
-    case 'pastoral':   return 500;
-    case 'mysterious': return 350;
-    case 'epic':       return 600;
-    case 'exotic':     return 450;
-    case 'dark':       return 300;
-  }
-}
-
-/** LFO rate in Hz based on mood. */
-function padLfoRate(mood: ZoneTheme['mood']): number {
-  switch (mood) {
-    case 'pastoral':   return 0.12;
-    case 'mysterious': return 0.06;
-    case 'epic':       return 0.18;
-    case 'exotic':     return 0.10;
-    case 'dark':       return 0.05;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +251,20 @@ function buildEffectsChain(
     inputGain.gain.value = 1;
     nodes.push(inputGain);
 
+    // Low cut: nothing in the score should rumble — trims sub-bass and mud.
+    const lowCut = ctx.createBiquadFilter();
+    lowCut.type = 'highpass';
+    lowCut.frequency.value = 75;
+    lowCut.Q.value = 0.7;
+    nodes.push(lowCut);
+    const lowShelf = ctx.createBiquadFilter();
+    lowShelf.type = 'lowshelf';
+    lowShelf.frequency.value = 180;
+    lowShelf.gain.value = -4;
+    nodes.push(lowShelf);
+    inputGain.connect(lowCut);
+    lowCut.connect(lowShelf);
+
     // Create reverb (convolver with generated IR)
     const reverbIR = generateReverbIR(ctx, config.reverb.decay + 0.2, config.reverb.decay);
     const convolver = ctx.createConvolver();
@@ -255,10 +304,10 @@ function buildEffectsChain(
     nodes.push(limiter);
 
     // Connect the chain:
-    // inputGain → dryGain ──────────────────┐
+    // inputGain → lowCut → lowShelf → dryGain ──────────┐
     //           → preDelay → convolver → wetGain → compressor → limiter → destination
-    inputGain.connect(dryGain);
-    inputGain.connect(preDelayNode);
+    lowShelf.connect(dryGain);
+    lowShelf.connect(preDelayNode);
     preDelayNode.connect(convolver);
     convolver.connect(wetGain);
     wetGain.connect(compressor);
@@ -423,7 +472,8 @@ export class MusicEngine {
       return;
     }
 
-    const theme = ZONE_THEMES[zoneId];
+    // Abyss Labyrinth floors are generated per run; they share the rift's score.
+    const theme = ZONE_THEMES[zoneId] ?? (zoneId.startsWith('dungeon_floor_') ? ZONE_THEMES.abyss_rift : undefined);
     if (!theme) {
       if (oldSet) this._fadeOutAndDestroy(ctx, oldSet, duration);
       return;
@@ -528,25 +578,23 @@ export class MusicEngine {
       return set;
     }
 
-    // Procedural layers.
-    this._buildPadLayer(ctx, set, theme);
-
-    if (state === 'explore' || state === 'combat') {
-      this._scheduleMelodyLayer(ctx, set, theme, state);
-    }
-
-    if (state === 'combat') {
-      this._scheduleRhythmLayer(ctx, set, theme);
-    }
-
-    if (state === 'explore') {
-      this._scheduleChimeLayer(ctx, set, theme);
-    }
-
     if (state === 'victory') {
       this._buildVictoryStinger(ctx, set, theme);
+      return set;
     }
 
+    // The composed score, scheduled with lookahead on the audio clock.
+    const score = ZONE_SCORES[theme.id] ?? ZONE_SCORES.menu;
+    // The score is fuller than the old drone; trim it to sit at the same level under the SFX.
+    const trim = ctx.createGain();
+    trim.gain.value = SCORE_TRIM;
+    trim.connect(set.masterGain);
+    set.nodes.push({ node: trim });
+    const player = new ScorePlayer(ctx, trim, score, state, ctx.currentTime + 0.1, Math.floor(Math.random() * 1e9));
+    const tick = (): void => player.scheduleUntil(ctx.currentTime + 0.4);
+    tick();
+    // clearTimeout() cancels intervals too, so the existing fade-out cleanup applies.
+    set.timeouts.push(window.setInterval(tick, 100));
     return set;
   }
 
@@ -565,346 +613,6 @@ export class MusicEngine {
     source.start();
 
     set.nodes.push({ node: source, stop: () => source.stop() });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Pad layer (all states)
-  // ---------------------------------------------------------------------------
-
-  private _buildPadLayer(ctx: AudioContext, set: LayerSet, theme: ZoneTheme): void {
-    const root = theme.baseKey;
-    const padGain = ctx.createGain();
-    padGain.gain.value = theme.padGain ?? 0.15;
-
-    // Lowpass filter.
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    const baseCutoff = theme.padFilterCutoff ?? padCutoff(theme.mood);
-    filter.frequency.setValueAtTime(baseCutoff, ctx.currentTime);
-    filter.Q.value = 0.8;
-
-    // LFO modulates filter cutoff.
-    const lfo = ctx.createOscillator();
-    const lfoGain = ctx.createGain();
-    lfo.type = 'sine';
-    lfo.frequency.value = theme.padLFORate ?? padLfoRate(theme.mood);
-    lfoGain.gain.value = baseCutoff * 0.3; // modulation depth ±30 % of cutoff
-    lfo.connect(lfoGain);
-    lfoGain.connect(filter.frequency);
-    lfo.start();
-
-    padGain.connect(filter);
-    filter.connect(set.masterGain);
-
-    set.nodes.push({ node: lfoGain });
-    set.nodes.push({ node: lfo, stop: () => { try { lfo.stop(); } catch (_) { /* ok */ } } });
-    set.nodes.push({ node: filter });
-    set.nodes.push({ node: padGain });
-
-    // Three detuned pad oscillators: root, fifth, octave.
-    const padFreqs = [root, root * 1.5, root * 2];
-    const detunesA = [rand(3, 8), rand(3, 8), rand(3, 8)];   // positive detune (cents)
-    const detunesB = [-rand(3, 8), -rand(3, 8), -rand(3, 8)]; // negative detune (cents)
-
-    for (let i = 0; i < padFreqs.length; i++) {
-      const freq = padFreqs[i];
-
-      // Voice A (slightly sharp).
-      const oscA = ctx.createOscillator();
-      const gainA = ctx.createGain();
-      oscA.type = theme.padWaveform;
-      oscA.frequency.value = freq * centsToRatio(detunesA[i]);
-      gainA.gain.value = 0.04 + Math.random() * 0.02;
-      oscA.connect(gainA);
-      gainA.connect(padGain);
-      oscA.start();
-      set.nodes.push({ node: gainA });
-      set.nodes.push({ node: oscA, stop: () => { try { oscA.stop(); } catch (_) { /* ok */ } } });
-
-      // Voice B (slightly flat).
-      const oscB = ctx.createOscillator();
-      const gainB = ctx.createGain();
-      oscB.type = theme.padWaveform;
-      oscB.frequency.value = freq * centsToRatio(detunesB[i]);
-      gainB.gain.value = 0.04 + Math.random() * 0.02;
-      oscB.connect(gainB);
-      gainB.connect(padGain);
-      oscB.start();
-      set.nodes.push({ node: gainB });
-      set.nodes.push({ node: oscB, stop: () => { try { oscB.stop(); } catch (_) { /* ok */ } } });
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Melody layer (explore + combat)
-  // ---------------------------------------------------------------------------
-
-  private _scheduleMelodyLayer(
-    ctx: AudioContext,
-    set: LayerSet,
-    theme: ZoneTheme,
-    state: 'explore' | 'combat',
-  ): void {
-    // Capture a generation counter so stale timeouts can detect invalidation.
-    const capturedSet = set;
-
-    const scheduleNext = (): void => {
-      // If this set is no longer active, stop scheduling.
-      if (capturedSet !== this.activeSet) return;
-      if (capturedSet.timeouts.length === 0 && capturedSet.nodes.length === 0) return;
-
-      const isMenu = theme.id === 'menu';
-      const intervalMin = state === 'combat' ? 0.5 : isMenu ? 6.0 : 2.0;
-      const intervalMax = state === 'combat' ? 2.0 : isMenu ? 15.0 : 8.0;
-      const intervalMs = rand(intervalMin, intervalMax) * 1000;
-
-      const id = window.setTimeout(() => {
-        // Remove this id from the set's timeout list.
-        const idx = capturedSet.timeouts.indexOf(id);
-        if (idx !== -1) capturedSet.timeouts.splice(idx, 1);
-
-        // Check the set is still active before playing.
-        if (capturedSet !== this.activeSet) return;
-
-        this._playMelodyNote(ctx, capturedSet, theme, state);
-        scheduleNext();
-      }, intervalMs);
-
-      capturedSet.timeouts.push(id);
-    };
-
-    scheduleNext();
-  }
-
-  private _playMelodyNote(
-    ctx: AudioContext,
-    set: LayerSet,
-    theme: ZoneTheme,
-    state: 'explore' | 'combat',
-  ): void {
-    const t = ctx.currentTime;
-    const isMenu = theme.id === 'menu';
-    const freq = isMenu ? pick(theme.scale) * 4 : pick(theme.scale); // two octaves up for menu
-    const waveform: OscillatorType = Math.random() < 0.5 ? 'sine' : 'triangle';
-    const duration = isMenu ? rand(2.0, 5.0) : rand(0.3, 1.5);
-    // Use theme-specific gain range if defined, otherwise use defaults
-    const melodyMin = theme.melodyPeakGainMin ?? (isMenu ? 0.06 : 0.04);
-    const melodyMax = theme.melodyPeakGainMax ?? (isMenu ? 0.10 : 0.08);
-    const peakGain = state === 'combat' ? rand(0.06, 0.12) : rand(melodyMin, melodyMax);
-
-    const osc = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    osc.type = waveform;
-    osc.frequency.setValueAtTime(freq, t);
-
-    // ADSR envelope.
-    const attack = isMenu ? 0.3 : 0.02;
-    const decay = duration * 0.2;
-    const sustain = 0.5;
-    const release = isMenu ? duration * 0.6 : duration * 0.4;
-    const sustainLevel = Math.max(sustain * peakGain, 0.001);
-
-    gainNode.gain.setValueAtTime(0, t);
-    gainNode.gain.linearRampToValueAtTime(peakGain, t + attack);
-    gainNode.gain.exponentialRampToValueAtTime(sustainLevel, t + attack + decay);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay + release);
-
-    osc.connect(gainNode);
-    gainNode.connect(set.masterGain);
-
-    osc.start(t);
-    osc.stop(t + duration);
-
-    // These are transient — we don't track them in set.nodes since they
-    // auto-stop and auto-GC, but we do need to handle forced cleanup.
-    // Add them briefly; they'll be stopped automatically by the browser.
-    const mn: ManagedNode = { node: osc, stop: () => { try { osc.stop(); } catch (_) { /* ok */ } } };
-    set.nodes.push(mn);
-    // Remove from tracking after the note finishes (avoid accumulation).
-    const cleanupId = window.setTimeout(() => {
-      const idx2 = set.timeouts.indexOf(cleanupId);
-      if (idx2 !== -1) set.timeouts.splice(idx2, 1);
-      const ni = set.nodes.indexOf(mn);
-      if (ni !== -1) set.nodes.splice(ni, 1);
-    }, Math.ceil(duration * 1000) + 100);
-    set.timeouts.push(cleanupId);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Rhythm layer (combat only)
-  // ---------------------------------------------------------------------------
-
-  private _scheduleRhythmLayer(
-    ctx: AudioContext,
-    set: LayerSet,
-    theme: ZoneTheme,
-  ): void {
-    const capturedSet = set;
-    const beatMs = (60 / theme.tempo) * 1000;
-    let beatCount = 0;
-
-    const scheduleBeat = (): void => {
-      if (capturedSet !== this.activeSet) return;
-
-      const id = window.setTimeout(() => {
-        const idx = capturedSet.timeouts.indexOf(id);
-        if (idx !== -1) capturedSet.timeouts.splice(idx, 1);
-
-        if (capturedSet !== this.activeSet) return;
-
-        this._playRhythmBeat(ctx, capturedSet, beatCount);
-        beatCount++;
-        scheduleBeat();
-      }, beatMs);
-
-      capturedSet.timeouts.push(id);
-    };
-
-    scheduleBeat();
-  }
-
-  private _playRhythmBeat(ctx: AudioContext, set: LayerSet, beatIndex: number): void {
-    const t = ctx.currentTime;
-    const isDownbeat = beatIndex % 2 === 0;
-
-    // Create a short noise burst — lowpass for kick feel on downbeats,
-    // highpass for hi-hat feel on upbeats.
-    const dur = isDownbeat ? 0.12 : 0.07;
-    const filterFreq = isDownbeat ? 200 : 4000;
-    const filterType: BiquadFilterType = isDownbeat ? 'lowpass' : 'highpass';
-    const peakGain = isDownbeat ? 0.18 : 0.10;
-
-    const sampleRate = ctx.sampleRate;
-    const frameCount = Math.ceil(sampleRate * dur);
-    const noiseBuffer = ctx.createBuffer(1, frameCount, sampleRate);
-    const data = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < frameCount; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
-
-    const source = ctx.createBufferSource();
-    source.buffer = noiseBuffer;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = filterType;
-    filter.frequency.setValueAtTime(filterFreq, t);
-
-    const gainNode = ctx.createGain();
-    gainNode.gain.setValueAtTime(0, t);
-    gainNode.gain.linearRampToValueAtTime(peakGain, t + 0.005);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-
-    source.connect(filter);
-    filter.connect(gainNode);
-    gainNode.connect(set.masterGain);
-
-    source.start(t);
-    source.stop(t + dur);
-
-    // Transient — auto-stops, track briefly for forced cleanup.
-    const mn: ManagedNode = { node: source, stop: () => { try { source.stop(); } catch (_) { /* ok */ } } };
-    set.nodes.push(mn);
-    const cleanupId = window.setTimeout(() => {
-      const idx = set.timeouts.indexOf(cleanupId);
-      if (idx !== -1) set.timeouts.splice(idx, 1);
-      const ni = set.nodes.indexOf(mn);
-      if (ni !== -1) set.nodes.splice(ni, 1);
-    }, Math.ceil(dur * 1000) + 100);
-    set.timeouts.push(cleanupId);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Chime layer (explore only)
-  // ---------------------------------------------------------------------------
-
-  private _scheduleChimeLayer(
-    ctx: AudioContext,
-    set: LayerSet,
-    theme: ZoneTheme,
-  ): void {
-    const capturedSet = set;
-
-    const isMenu = theme.id === 'menu';
-
-    const scheduleNext = (): void => {
-      if (capturedSet !== this.activeSet) return;
-
-      const intervalMs = rand(isMenu ? 15 : 4, isMenu ? 30 : 12) * 1000;
-
-      const id = window.setTimeout(() => {
-        const idx = capturedSet.timeouts.indexOf(id);
-        if (idx !== -1) capturedSet.timeouts.splice(idx, 1);
-
-        if (capturedSet !== this.activeSet) return;
-
-        this._playChime(ctx, capturedSet, theme);
-        scheduleNext();
-      }, intervalMs);
-
-      capturedSet.timeouts.push(id);
-    };
-
-    // Initial delay before first chime.
-    const initialId = window.setTimeout(() => {
-      const idx = capturedSet.timeouts.indexOf(initialId);
-      if (idx !== -1) capturedSet.timeouts.splice(idx, 1);
-      if (capturedSet !== this.activeSet) return;
-      this._playChime(ctx, capturedSet, theme);
-      scheduleNext();
-    }, rand(isMenu ? 5 : 2, isMenu ? 10 : 5) * 1000);
-
-    capturedSet.timeouts.push(initialId);
-  }
-
-  private _playChime(ctx: AudioContext, set: LayerSet, theme: ZoneTheme): void {
-    const t = ctx.currentTime;
-    const isMenu = theme.id === 'menu';
-    // Use top end of scale for ethereal feel.
-    const topScale = theme.scale.slice(Math.max(0, theme.scale.length - 3));
-    const freq = pick(topScale) * 2; // one octave up for chime brightness
-    const duration = isMenu ? rand(1.5, 3.0) : rand(0.6, 1.2);
-    // Use theme-specific gain range if defined, otherwise use defaults
-    const chimeMin = theme.chimePeakGainMin ?? (isMenu ? 0.025 : 0.02);
-    const chimeMax = theme.chimePeakGainMax ?? (isMenu ? 0.045 : 0.03);
-    const peakGain = rand(chimeMin, chimeMax);
-
-    const osc = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq, t);
-
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(3000, t);
-
-    const attack = 0.015;
-    const decay = duration * 0.25;
-    const sustain = 0.4;
-    const release = duration * 0.6;
-    const sustainLevel = Math.max(sustain * peakGain, 0.0001);
-
-    gainNode.gain.setValueAtTime(0, t);
-    gainNode.gain.linearRampToValueAtTime(peakGain, t + attack);
-    gainNode.gain.exponentialRampToValueAtTime(sustainLevel, t + attack + decay);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay + release);
-
-    osc.connect(gainNode);
-    gainNode.connect(filter);
-    filter.connect(set.masterGain);
-
-    osc.start(t);
-    osc.stop(t + duration);
-
-    const mn: ManagedNode = { node: osc, stop: () => { try { osc.stop(); } catch (_) { /* ok */ } } };
-    set.nodes.push(mn);
-    const cleanupId = window.setTimeout(() => {
-      const idx = set.timeouts.indexOf(cleanupId);
-      if (idx !== -1) set.timeouts.splice(idx, 1);
-      const ni = set.nodes.indexOf(mn);
-      if (ni !== -1) set.nodes.splice(ni, 1);
-    }, Math.ceil(duration * 1000) + 100);
-    set.timeouts.push(cleanupId);
   }
 
   // ---------------------------------------------------------------------------

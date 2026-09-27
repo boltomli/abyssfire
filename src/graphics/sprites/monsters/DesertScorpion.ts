@@ -27,6 +27,19 @@ import {
   type V,
 } from '../rig/Rig';
 import { rigMonster } from '../rig/MonsterKit';
+import { Section, ViewRig, v3, type HumanView } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  band,
+  clipTo,
+  decal,
+  groundX,
+  hull3,
+  loftFill,
+  profileRings,
+  sorted,
+  withAffine,
+} from '../rig/MonsterView';
 
 interface ScorpionPose {
   /** Body centre x and height of the body centre above the ground. */
@@ -463,6 +476,166 @@ function drawScorpion(ctx: CanvasRenderingContext2D, p: ScorpionPose): void {
   drawClaw(ctx, p, false);
 }
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const ABDOMEN = [vec(-19.5, -1.5), vec(-17.5, -5.8), vec(-10, -7.4), vec(-2, -7.6), vec(5, -6.8), vec(8.5, -3), vec(8.5, 2.6), vec(0, 4.2), vec(-10, 4), vec(-17.5, 2.6)];
+const PROSOMA = [vec(3, -7), vec(10, -6.8), vec(15.5, -4.6), vec(18.6, -1.2), vec(18, 2.2), vec(12, 4.2), vec(4, 4.2), vec(1.5, -1.5)];
+/** Rings along the body's length (h = forward x, f = up, b = half width). */
+const lengthRings = (pts: V[], widthK: number, n: number): ReturnType<typeof profileRings> =>
+  profileRings(pts.map(q => vec(-q.y, q.x)), y => y, a => a * widthK, n);
+const ABD_RINGS = lengthRings(ABDOMEN, 1.45, 9);
+const PRO_RINGS = lengthRings(PROSOMA, 1.25, 7);
+/** Screen draw lift so the splayed near legs stay inside the frame. */
+const VIEW_LIFT = 3.4;
+/** Lateral reach of the feet. */
+const FOOT_Z = [14, 16.5, 16.5, 14.5];
+
+function bodySection(rig: ViewRig, p: ScorpionPose): Section {
+  const c = Math.cos(p.tilt);
+  const s = Math.sin(p.tilt);
+  return new Section(rig, v3(p.x, bodyY(p), 0), v3(c, s, 0), v3(s, -c, 0));
+}
+
+/** One leg in 3D: hip on the body side, foot splayed out on the ground. */
+function viewLeg(ctx: CanvasRenderingContext2D, rig: ViewRig, p: ScorpionPose, i: number, side: 1 | -1): void {
+  const defs = side > 0 ? NEAR_LEGS : FAR_LEGS;
+  const def = defs[i];
+  const hipW = toWorld(p, def.hip.x, 1.4);
+  const hip = v3(hipW.x, hipW.y, side * 3.6);
+  let fx = p.x + (NEAR_LEGS[i].foot + FAR_LEGS[i].foot) / 2 * 0.8;
+  let fy = GROUND_Y;
+  if (p.stride > 0) {
+    const u = (p.gait + ((i + (side < 0 ? 1 : 0)) % 2) * 0.5 + i * 0.04) % 1;
+    if (u < 0.5) {
+      fx += p.stride * (1 - 4 * u);
+    } else {
+      const v = (u - 0.5) * 2;
+      const e = v * v * (3 - 2 * v);
+      fx += -p.stride + 2 * p.stride * e;
+      fy -= Math.sin(v * Math.PI) * 3.2;
+    }
+  }
+  let foot = v3(fx, fy, side * FOOT_Z[i]);
+  if (p.fold > 0) {
+    const k = p.fold * 0.8;
+    foot = v3(foot.x + (hip.x - foot.x) * k, foot.y + (hip.y + 1.5 - foot.y) * k, foot.z + (hip.z + side * 2 - foot.z) * k);
+  }
+  const knee = v3(hip.x + (foot.x - hip.x) * 0.55, Math.min(hip.y, foot.y) - 5.5 + p.fold * 2, hip.z + (foot.z - hip.z) * 0.45);
+  const t: Tone = side < 0 ? LEG_FAR : LEG;
+  const a = rig.p(hip);
+  const b = rig.p(knee);
+  const c = rig.p(foot);
+  limb(ctx, a, b, 1.7, 1.35, t);
+  limb(ctx, b, c, 1.35, 0.55, side < 0 ? LEG_FAR : LEG_TIP);
+  ctx.fillStyle = side < 0 ? 'rgba(40,20,10,0.35)' : 'rgba(255,236,190,0.45)';
+  ctx.beginPath();
+  ctx.arc(b.x - 0.3, b.y - 0.4, 0.7, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function viewBody(ctx: CanvasRenderingContext2D, rig: ViewRig, p: ScorpionPose): void {
+  const S = bodySection(rig, p);
+  // Abdomen with overlapping tergite plates
+  const abd = loftFill(ctx, S, ABD_RINGS, SHELL, { band: 1.8, hi: 0.8 });
+  clipTo(ctx, abd, () => {
+    for (const sx of [-14, -9, -4, 1]) {
+      band(ctx, S, ABD_RINGS, sx, { base: 'rgba(88,40,16,0.3)', line: 'rgba(0,0,0,0)', shade: SEAM, light: SEAM } as Tone, 1.2, 0.05);
+      band(ctx, S, ABD_RINGS, sx + 0.9, { base: PLATE.light, line: 'rgba(0,0,0,0)', shade: SEAM, light: SEAM } as Tone, 0.5, 0.1);
+      band(ctx, S, ABD_RINGS, sx - 0.5, { base: SEAM, line: 'rgba(0,0,0,0)', shade: SEAM, light: SEAM } as Tone, 0.45, 0.1);
+    }
+    for (const kx of [-15.5, -11, -6, -1, 3.5]) {
+      decal(ctx, S, ABD_RINGS, kx, 0, () => {
+        ctx.fillStyle = 'rgba(120,58,22,0.55)';
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }, { lift: 0.1 });
+    }
+  });
+  // Cephalothorax shield, chelicerae, eyes
+  hull3(ctx, S, [[17, -1, -1.4], [17, -1, 1.4], [20.6, -1.6, -1], [20.6, -1.6, 1], [19, -3, 0]], BARB, { band: 0.4, stroke: 0.35 });
+  const head = loftFill(ctx, S, PRO_RINGS, HEAD, { band: 1.5, hi: 0.8 });
+  clipTo(ctx, head, () => {
+    decal(ctx, S, PRO_RINGS, 9, 0, () => {
+      ctx.fillStyle = 'rgba(255,238,196,0.4)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 1.6, 4.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    decal(ctx, S, PRO_RINGS, 11.5, 0, () => {
+      if (p.eyes > 0.05) {
+        ctx.fillStyle = '#1a0a06';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 2.2, 1.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(255,${150 + 80 * p.eyes},60,${0.5 + 0.5 * p.eyes})`;
+        for (const dx of [-0.85, 0.85]) {
+          ctx.beginPath();
+          ctx.arc(dx, 0, 0.62 * (0.5 + 0.5 * p.eyes), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        ctx.strokeStyle = '#2a0e06';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(-1.4, -0.8);
+        ctx.lineTo(1.4, 0.8);
+        ctx.moveTo(1.4, -0.8);
+        ctx.lineTo(-1.4, 0.8);
+        ctx.stroke();
+      }
+    });
+    for (const phi of [-1, 1]) {
+      decal(ctx, S, PRO_RINGS, 16.4, phi, () => {
+        ctx.fillStyle = '#1a0a06';
+        for (const [x, y] of [[0, 0], [0.9, 0.5], [-0.8, 0.6]] as const) {
+          ctx.beginPath();
+          ctx.arc(x, y, 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }, { minVis: 0.05 });
+    }
+  });
+}
+
+/** Side-view art (tail, pincers) laid in the vertical plane at lateral z. */
+function onPlane(ctx: CanvasRenderingContext2D, rig: ViewRig, z: number, fn: () => void): void {
+  withAffine(ctx, q => rig.pt(q.x, q.y, z), fn);
+}
+
+function drawScorpionView(ctx: CanvasRenderingContext2D, p: ScorpionPose, view: HumanView): void {
+  const rig = new ViewRig(view, 0, vec(p.x, bodyY(p)), p.x);
+  ctx.save();
+  ctx.translate(0, -VIEW_LIFT);
+  const items: { d: number; draw: () => void }[] = [];
+  for (let i = 0; i < 4; i++) {
+    for (const side of [1, -1] as const) {
+      const hip = toWorld(p, NEAR_LEGS[i].hip.x, 1.4);
+      items.push({ d: rig.depth(hip.x, hip.y, side * 7) + (side > 0 ? 2 : -2), draw: () => viewLeg(ctx, rig, p, i, side) });
+    }
+  }
+  const bodyD = rig.depth(p.x, bodyY(p), 0);
+  items.push({ d: bodyD, draw: () => viewBody(ctx, rig, p) });
+  const tail = tailChain(p);
+  const tm = tail.joints[2];
+  items.push({ d: rig.depth(tm.x, tm.y, 0) + (rig.front ? 0 : 4), draw: () => onPlane(ctx, rig, 0, () => drawTail(ctx, tail)) });
+  for (const far of [true, false]) {
+    const sh = far ? toWorld(p, 12, -2) : toWorld(p, 13.5, 1.5);
+    const z = far ? -5.2 : 5.2;
+    items.push({ d: rig.depth(sh.x + 8, sh.y, z) + 1, draw: () => onPlane(ctx, rig, z, () => drawClaw(ctx, p, far)) });
+  }
+  sorted(items);
+  ctx.restore();
+}
+
+function scorpionFxView(ctx: CanvasRenderingContext2D, p: ScorpionPose, act: MonsterAction, t: number, view: HumanView): void {
+  const rig = new ViewRig(view, 0, vec(p.x, bodyY(p)), p.x);
+  ctx.save();
+  ctx.translate(0, -VIEW_LIFT);
+  onPlane(ctx, rig, 0, () => scorpionFx(ctx, p, act, t));
+  ctx.restore();
+}
+
 function scorpionFx(ctx: CanvasRenderingContext2D, p: ScorpionPose, act: MonsterAction, t: number): void {
   const tail = tailChain(p);
   if (act === 'attack' && t > 0.5) {
@@ -504,10 +677,11 @@ export const DesertScorpionDrawer = rigMonster<ScorpionPose>({
   frameW: 72,
   frameH: 44,
   scale: 1.92,
+  views: MONSTER_VIEWS,
   pose: scorpionPose,
-  draw: (ctx, p) => drawScorpion(ctx, p),
-  shadow: (p) => ({ x: p.x - 1, r: 21, lift: Math.max(0, p.h - 9) }),
-  fx: scorpionFx,
+  draw: (ctx, p, _act, _t, view) => (view ? drawScorpionView(ctx, p, view) : drawScorpion(ctx, p)),
+  shadow: (p, _act, _t, view) => ({ x: groundX(view, p.x - 1), r: 21, lift: Math.max(0, p.h - 9) }),
+  fx: (ctx, p, act, t, view) => (view ? scorpionFxView(ctx, p, act, t, view) : scorpionFx(ctx, p, act, t)),
   rim: 'rgba(255,238,200,0.6)',
   ink: '#1e0e08',
 });

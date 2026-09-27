@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
 import { BASE_STASH_SLOTS } from '../systems/InventorySystem';
-import { GAME_WIDTH, GAME_HEIGHT, DPR } from '../config';
+import { GAME_WIDTH, GAME_HEIGHT, DPR, RENDER_SCALE } from '../config';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import { DisposableScope } from '../utils/DisposableScope';
 import { getItemBase, GEM_STAT_MAP } from '../data/items/bases';
+import { AVG_DAMAGE, BASE_DEFENSE, compareTarget, statDeltas, type CompareTarget } from '../systems/ItemCompare';
 import { STAT_DISPLAY } from '../data/items/affixes';
 import { SetDefinitions } from '../data/items/sets';
 import { DUNGEON_EXCLUSIVE_SETS } from '../data/dungeonData';
@@ -24,6 +25,7 @@ import {
 import { QUEST_TYPE_LABELS } from '../systems/QuestSystem';
 import { gatherNpcQuests, buildQuestCardData, formatRewardSummary, buildToastMessage } from '../ui/QuestCardUI';
 import { buildTrackerState, buildTrackerSignature, MAX_VISIBLE_QUESTS } from '../ui/QuestTrackerHUD';
+import { AbyssRunUI } from '../ui/AbyssRunUI';
 import type { TrackerQuestEntry, TrackerState } from '../ui/QuestTrackerHUD';
 import type { NpcQuestEntry, QuestCardData } from '../ui/QuestCardUI';
 import type { MercenaryState } from '../systems/MercenarySystem';
@@ -33,18 +35,22 @@ import { t, getLocale } from '../i18n';
 import { isMobileDevice } from '../systems/MobileControlsSystem';
 import { ensureItemIcon, ensureItemIconFor } from '../graphics/icons/ItemIcons';
 import {
+  CraftingSystem, CRAFT_ACTIONS, MATERIAL_IDS, craftCost, itemSocketCapacity, lootCraftRoller, materialCounts,
+  salvageYield, upgradeTarget, type CraftAction, type CraftCheck, type MaterialBag, type MaterialId,
+} from '../systems/CraftingSystem';
+import {
   addFrame, addCloseButton, addButton, addTitleFlourishes, addDivider, addVDivider, addSectionHeader,
   addSlot, wireSlotHover, frameTexture, drawCard, drawWell, drawBarFill, tabTexture, backdropTexture, orbTextures,
   skillSlotTexture, keyBadgeTexture, hudPlateTexture, minimapFrameTexture, coinTexture, pipTexture,
   barFrameTexture, barFillTexture, barTicksTexture, qualityHex, qualityNum, UI_COLORS,
-  type UiButton, type ButtonOptions, type CardStyle,
+  UiButton, type ButtonOptions, type CardStyle,
 } from '../ui/UiKit';
 import { getItemDisplayName, getItemBaseName, getItemBaseDesc, getAffixName, getStatLabel, isStatPercent, getQualityLabel, getSetName, getSetBonusDesc, getClassName, getDirection as getLocalizedDirection, getSkillName, getSkillDesc, getSkillTreeName, getDamageTypeName, getQuestName, getQuestDesc, getZoneName, getMercenaryName, getMercenaryDesc, getMercenaryTypeLabel, getBuildingName, getBuildingDesc, getPetName, getPetDesc, getAchievementName, getAchievementDesc, getAchievementTitle, getLoreName, getLoreText, getNpcName, getQuestTargetName, getPetStatLabel } from '../i18n/gameAccessors';
+import { applyScreenCamera } from '../rendering/RenderScalePhaser';
 
 const FONT = '"Noto Sans SC", sans-serif';
 const TITLE_FONT = '"Cinzel", "Noto Sans SC", serif';
 const LOG_MAX_LINES = 8;
-const GLOBE_R = Math.round(44 * DPR);
 
 /** Unified panel styling config used by ALL panels for visual consistency. */
 const PANEL_STYLE = {
@@ -107,9 +113,37 @@ function frameTextureKey(scene: Phaser.Scene, w: number, h: number, alpha = 1): 
 }
 
 const MINIMAP_SIZE = px(104);
-/** Mobile shows a row of panel buttons along the top-right edge; push the HUD cluster below it. */
+/**
+ * Touch devices: the fixed 1280×720 canvas is scaled down to roughly 0.52–0.55 CSS px per
+ * game px on a phone in landscape, so the HUD uses bigger fonts and a layout that leaves the
+ * corners to the touch controls (MobileControlsSystem: toggles top-left, panel buttons
+ * top-right, joystick bottom-left, skill fan bottom-right).
+ */
 const IS_MOBILE = isMobileDevice();
-const TOP_RIGHT_OFFSET = IS_MOBILE ? px(48) : 0;
+/** Globe radius (bigger on touch devices so the HP/MP numbers stay legible). */
+const GLOBE_R = IS_MOBILE ? px(50) : Math.round(44 * DPR);
+/** Push the top-right HUD cluster below the mobile panel-button row. */
+const TOP_RIGHT_OFFSET = IS_MOBILE ? px(118) : 0;
+/** Lines of the collapsed mobile combat log (no frame, faded). */
+const MOBILE_LOG_LINES = 3;
+/** Quests listed in the mobile tracker (it shares the left edge with the combat log). */
+const MOBILE_TRACKER_QUESTS = 3;
+/** Upscale factor for transient HUD widgets (loot notices, tooltips) on touch devices. */
+const MOBILE_POP_SCALE = 1.45;
+/** Upper bound for the mobile panel fit scale. */
+const MOBILE_PANEL_MAX_SCALE = 2;
+/** Mobile close buttons are scaled up to at least this size (game px ≈ 44 CSS px on a phone). */
+const MOBILE_CLOSE_SIZE = px(84);
+/** Edge of UiKit's close-button texture (game px at scale 1). */
+const CLOSE_BTN_TEX = 30;
+
+/**
+ * HUD font size. On touch devices small HUD text is raised so that body text stays at about
+ * 11 CSS px after the canvas is scaled down; desktop sizes are unchanged.
+ */
+function hfs(basePx: number): string {
+  return IS_MOBILE ? fs(Math.max(Math.round(basePx * 1.6), 18)) : fs(basePx);
+}
 
 /** Fixed HUD layout (logical px). */
 const HUD = (() => {
@@ -124,25 +158,45 @@ const HUD = (() => {
   const plateTop = rowY - slot / 2 - px(26);
   const orbY = H - px(52);
   const spiritH = px(6);
-  const infoW = px(210), infoH = px(46);
+  const infoW = px(210), infoH = IS_MOBILE ? px(56) : px(46);
   const info = { x: W - px(12) - infoW, y: px(12) + TOP_RIGHT_OFFSET, w: infoW, h: infoH };
   const mmPad = px(9);
   const minimap = { x: W - px(12) - mmPad - MINIMAP_SIZE, y: info.y + infoH + px(10) + mmPad };
-  return {
+  const desktop = {
     slot, gap, startX, rowY, barW,
     utilX: startX + skillsW + sepGap, utilW, utilGap,
     plateL, plateR, plateTop,
     orbY, hpX: plateL - GLOBE_R + px(16), mpX: plateR + GLOBE_R - px(16),
     spiritX: startX + px(40), spiritW: skillsW - px(40), spiritH, spiritY: rowY - slot / 2 - px(12),
     expX: startX, expW: barW, expH: px(8), expY: H - px(11),
-    // On touch devices the joystick owns the bottom-left corner, so the log moves up
-    log: { x: px(12), y: IS_MOBILE ? H - px(330) : H - px(12) - px(150), w: px(290), h: px(150) },
+    log: { x: px(12), y: H - px(12) - px(150), w: px(290), h: px(150) },
+    logCollapsedBottom: 0,
     info,
     minimap,
-    tracker: { x: W - px(222), y: minimap.y + MINIMAP_SIZE + mmPad + px(14) },
-    loot: IS_MOBILE
-      ? { x: Math.round(W / 2 - px(118)), y: plateTop - px(44) }
-      : { x: W - px(12) - px(236), y: H - px(12) - px(34) },
+    tracker: { x: W - px(222), y: minimap.y + MINIMAP_SIZE + mmPad + px(14), w: px(218) },
+    loot: { x: W - px(12) - px(236), y: H - px(12) - px(34) },
+  };
+  if (!IS_MOBILE) return desktop;
+  // Touch layout: no skill row (the touch fan owns skills), a slim plate between the orbs,
+  // shifted left of centre to clear the skill fan in the bottom-right corner.
+  const hpX = px(350), mpX = px(768);
+  const mPlateL = hpX, mPlateR = mpX, mPlateTop = H - px(84);
+  const barL = hpX + GLOBE_R + px(12), barR = mpX - GLOBE_R - px(12);
+  const spiritX = barL + px(44);
+  const spiritTextW = px(58);
+  const lootW = Math.round(px(236) * MOBILE_POP_SCALE);
+  return {
+    ...desktop,
+    startX: barL, barW: barR - barL,
+    plateL: mPlateL, plateR: mPlateR, plateTop: mPlateTop,
+    orbY: H - px(58), hpX, mpX,
+    spiritX, spiritW: barR - spiritTextW - spiritX, spiritH: px(8), spiritY: H - px(62),
+    expX: barL, expW: barR - barL, expH: px(12), expY: H - px(24),
+    // Collapsed log sits above the joystick; expanded it opens as a framed panel top-left.
+    log: { x: px(16), y: px(130), w: px(470), h: px(300) },
+    logCollapsedBottom: H - px(262),
+    tracker: { x: px(26), y: px(134), w: px(330) },
+    loot: { x: Math.round((hpX + mpX) / 2 - lootW / 2), y: mPlateTop - px(64) },
   };
 })();
 
@@ -188,7 +242,7 @@ export class UIScene extends Phaser.Scene {
   private expShown = -1;
   private levelText!: Phaser.GameObjects.Text;
   private goldText!: Phaser.GameObjects.Text;
-  private autoCombatText!: Phaser.GameObjects.Text;
+  private autoCombatText: Phaser.GameObjects.Text | null = null;
   private skillLoadout: Player['classData']['skills'] = [];
   private skillSlots: Phaser.GameObjects.Container[] = [];
   private skillCooldownOverlays: Phaser.GameObjects.Graphics[] = [];
@@ -198,7 +252,11 @@ export class UIScene extends Phaser.Scene {
   private skillCdActive: boolean[] = [];
   private lootNotices: Phaser.GameObjects.Container[] = [];
   private logTexts: Phaser.GameObjects.Text[] = [];
-  private logMessages: { text: string; type: string }[] = [];
+  private logMessages: { text: string; type: string; at: number }[] = [];
+  /** Mobile: the combat log is collapsed to a few faded lines until toggled open. */
+  private logExpanded = !IS_MOBILE;
+  private logFrame: Phaser.GameObjects.Image | null = null;
+  private nextLogFadeAt = 0;
   private questTracker!: Phaser.GameObjects.Container;
   private questTrackerTexts: Phaser.GameObjects.Text[] = [];
   /** Set of quest IDs that the player has expanded in the tracker. */
@@ -216,6 +274,15 @@ export class UIScene extends Phaser.Scene {
   private inventoryPanel: Phaser.GameObjects.Container | null = null;
   private shopPanel: Phaser.GameObjects.Container | null = null;
   private shopNpcId: string | null = null;
+  /** Blacksmith panel: merchant wares or the forge (锻造) tab. */
+  private shopTab: 'buy' | 'forge' = 'buy';
+  /** Bag item currently on the anvil. */
+  private forgeItemUid: string | null = null;
+  /** Feedback to play once the rebuilt shop panel is up. */
+  private forgeFx: { action: CraftAction; quality: string; yields?: MaterialBag } | null = null;
+  /** Anvil slot centre in shop-panel coordinates (for the spark burst). */
+  private forgeSlotPos: { x: number; y: number; size: number } | null = null;
+  private crafting: CraftingSystem | null = null;
   private stashPanel: Phaser.GameObjects.Container | null = null;
   private logHeader: Phaser.GameObjects.GameObject[] = [];
   private inventoryBtnText: Phaser.GameObjects.Text | null = null;
@@ -236,7 +303,7 @@ export class UIScene extends Phaser.Scene {
   private tooltipContainer: Phaser.GameObjects.Container | null = null;
   private inventoryPage = 0;
   private shopInventoryPage = 0;
-  private autoLootText!: Phaser.GameObjects.Text;
+  private autoLootText: Phaser.GameObjects.Text | null = null;
   private contextPopup: Phaser.GameObjects.Container | null = null;
   private audioPanel: Phaser.GameObjects.Container | null = null;
   private audioPanelInputCleanup: Array<() => void> = [];
@@ -262,6 +329,10 @@ export class UIScene extends Phaser.Scene {
   /** Compact quest card panel. */
   private questCardPanel: Phaser.GameObjects.Container | null = null;
   private questCardBackdrop: Phaser.GameObjects.Image | null = null;
+  /** Abyss Labyrinth panels (tier picker, boon choice, run summary) and run widget. */
+  private abyssUI: AbyssRunUI | null = null;
+  /** Extra downward shift of the desktop quest tracker while the labyrinth widget sits above it. */
+  private trackerShift = 0;
 
   constructor() {
     super({ key: 'UIScene' });
@@ -274,6 +345,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   create(): void {
+    applyScreenCamera(this);
     this.subscriptions = new DisposableScope();
     this.skillSlots = [];
     this.skillCooldownOverlays = [];
@@ -290,6 +362,9 @@ export class UIScene extends Phaser.Scene {
     this.logTexts = [];
     this.logHeader = [];
     this.logMessages = [];
+    this.logExpanded = !IS_MOBILE;
+    this.logFrame = null;
+    this.nextLogFadeAt = 0;
     this.questTrackerTexts = [];
     this.questTrackerExpanded = new Set();
     this.questTrackerScrollOffset = 0;
@@ -308,6 +383,7 @@ export class UIScene extends Phaser.Scene {
     this.createQuestTracker();
     this.createMinimap();
     this.setupEventListeners();
+    this.createAbyssUI();
     this.events.once('shutdown', this.shutdown, this);
   }
 
@@ -362,7 +438,7 @@ export class UIScene extends Phaser.Scene {
     this.add.image(cx, cy, tex.rim).setDepth(d + 2);
 
     const text = this.add.text(cx, cy + px(2), '', {
-      fontSize: fs(13), color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
+      fontSize: hfs(13), color: '#ffffff', fontFamily: FONT, fontStyle: 'bold',
       stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5).setDepth(d + 3);
 
@@ -377,8 +453,8 @@ export class UIScene extends Phaser.Scene {
     this.expBar.setCrop(0, 0, 0, HUD.expH);
     this.add.image(HUD.expX, HUD.expY - HUD.expH / 2, barTicksTexture(this, HUD.expW, HUD.expH, 10))
       .setOrigin(0, 0).setDepth(3002);
-    this.levelText = this.add.text(W / 2, HUD.expY, '', {
-      fontSize: fs(10), color: '#ecd9ff', fontFamily: FONT, fontStyle: 'bold',
+    this.levelText = this.add.text(HUD.expX + HUD.expW / 2, HUD.expY, '', {
+      fontSize: hfs(10), color: '#ecd9ff', fontFamily: FONT, fontStyle: 'bold',
       stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5, 0.5).setDepth(3003);
   }
@@ -388,7 +464,7 @@ export class UIScene extends Phaser.Scene {
     const barX = HUD.spiritX;
     const barY = HUD.spiritY;
     this.spiritLabel = this.add.text(HUD.startX, barY, t('ui.hud.spirit'), {
-      fontSize: fs(10),
+      fontSize: hfs(10),
       color: '#f0b060',
       fontFamily: FONT,
       fontStyle: 'bold',
@@ -402,13 +478,13 @@ export class UIScene extends Phaser.Scene {
     ).setOrigin(0, 0).setDepth(3001);
     this.spiritBar.setCrop(0, 0, 0, HUD.spiritH);
     this.spiritText = this.add.text(barX + HUD.spiritW + px(8), barY, '', {
-      fontSize: fs(10),
+      fontSize: hfs(10),
       color: '#f0c080',
       fontFamily: FONT,
       stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0, 0.5).setDepth(3002);
-    this.resonanceText = this.add.text(barX + HUD.spiritW / 2, barY - px(14), '', {
-      fontSize: fs(11),
+    this.resonanceText = this.add.text(barX + HUD.spiritW / 2, barY - (IS_MOBILE ? px(22) : px(14)), '', {
+      fontSize: hfs(11),
       color: '#ffd27a',
       fontFamily: FONT,
       fontStyle: 'bold',
@@ -416,11 +492,12 @@ export class UIScene extends Phaser.Scene {
     }).setOrigin(0.5, 0.5).setDepth(3002);
 
     // Target frame (top centre) — hidden until something is targeted
-    const tfW = px(280), tfH = px(44);
-    this.targetFrame = this.add.container(W / 2, px(10)).setDepth(3000).setVisible(false);
+    // Mobile: narrower and centred in the gap between the top-left toggles and the panel buttons.
+    const tfW = IS_MOBILE ? px(260) : px(280), tfH = IS_MOBILE ? px(52) : px(44);
+    this.targetFrame = this.add.container(IS_MOBILE ? px(544) : W / 2, px(10)).setDepth(3000).setVisible(false);
     this.targetFrame.add(addFrame(this, -tfW / 2, 0, tfW, tfH, { variant: 'plate', accent: 0xc0503c }));
-    this.targetText = this.add.text(0, px(13), t('ui.hud.targetNone'), {
-      fontSize: fs(12),
+    this.targetText = this.add.text(0, IS_MOBILE ? px(17) : px(13), t('ui.hud.targetNone'), {
+      fontSize: hfs(12),
       color: '#777788',
       fontFamily: FONT,
       fontStyle: 'bold',
@@ -429,17 +506,19 @@ export class UIScene extends Phaser.Scene {
     }).setOrigin(0.5, 0.5);
     this.targetFrame.add(this.targetText);
     const thW = tfW - px(36), thH = px(8);
+    const thY = IS_MOBILE ? px(38) : px(29);
     const thFrame = barFrameTexture(this, thW, thH);
-    this.targetFrame.add(this.add.image(-thW / 2 - thFrame.pad, px(29) - thH / 2 - thFrame.pad, thFrame.key).setOrigin(0, 0));
-    this.targetHpFill = this.add.image(-thW / 2, px(29) - thH / 2, barFillTexture(this, thW, thH, 0xc0281e)).setOrigin(0, 0);
+    this.targetFrame.add(this.add.image(-thW / 2 - thFrame.pad, thY - thH / 2 - thFrame.pad, thFrame.key).setOrigin(0, 0));
+    this.targetHpFill = this.add.image(-thW / 2, thY - thH / 2, barFillTexture(this, thW, thH, 0xc0281e)).setOrigin(0, 0);
     this.targetHpW = thW;
     this.targetHpFill.setCrop(0, 0, thW, thH);
     this.targetFrame.add(this.targetHpFill);
 
-    // Dodge indicator (top-left plate)
+    // Dodge indicator (top-left plate). Touch devices show the cooldown on the dodge button
+    // instead (and the plate's keyboard hint means nothing there), so it stays hidden.
     const dpW = px(158), dpH = px(26);
     this.add.image(0, 0, frameTextureKey(this, dpW, dpH)).setOrigin(0, 0)
-      .setPosition(px(12) - px(8), px(12) - px(8)).setDepth(2999);
+      .setPosition(px(12) - px(8), px(12) - px(8)).setDepth(2999).setVisible(!IS_MOBILE);
     this.dodgeText = this.add.text(px(24), px(12) + dpH / 2, t('ui.hud.dodgeReady'), {
       fontSize: fs(11),
       color: '#9bd7ff',
@@ -447,11 +526,13 @@ export class UIScene extends Phaser.Scene {
       fontStyle: 'bold',
       stroke: '#000000',
       strokeThickness: Math.round(2 * DPR),
-    }).setOrigin(0, 0.5).setDepth(3000);
-    this.dodgeDot = this.add.circle(px(17), px(12) + dpH / 2, px(3), 0x9bd7ff).setDepth(3000);
+    }).setOrigin(0, 0.5).setDepth(3000).setVisible(!IS_MOBILE);
+    this.dodgeDot = this.add.circle(px(17), px(12) + dpH / 2, px(3), 0x9bd7ff).setDepth(3000).setVisible(!IS_MOBILE);
   }
 
   private createSkillBar(): void {
+    // Touch devices use the skill fan + toggles of MobileControlsSystem instead of this row.
+    if (IS_MOBILE) return;
     const slotSize = HUD.slot, gap = HUD.gap;
     const skills = this.getSkillLoadout();
     const startX = HUD.startX;
@@ -549,37 +630,50 @@ export class UIScene extends Phaser.Scene {
     for (const o of this.logHeader) o.destroy();
     const { x, y, w } = HUD.log;
     this.logHeader = addSectionHeader(this, x + px(10), y + px(12), w - px(20), t('ui.hud.combatLog'));
-    for (const o of this.logHeader) (o as unknown as Phaser.GameObjects.Components.Depth).setDepth(3000);
+    for (const o of this.logHeader) {
+      (o as unknown as Phaser.GameObjects.Components.Depth).setDepth(3000);
+      (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(this.logExpanded);
+    }
   }
 
   private createLogPanel(): void {
     this.logTexts = [];
     const { x, y, w, h } = HUD.log;
-    this.add.image(0, 0, frameTextureKey(this, w, h, 0.9)).setOrigin(0, 0)
-      .setPosition(x - px(8), y - px(8)).setDepth(2999);
+    this.logFrame = this.add.image(0, 0, frameTextureKey(this, w, h, 0.9)).setOrigin(0, 0)
+      .setPosition(x - px(8), y - px(8)).setDepth(2999).setVisible(this.logExpanded);
     this.buildLogHeader();
     for (let i = 0; i < LOG_MAX_LINES; i++) {
       this.logTexts.push(
         this.add.text(x + px(10), y + px(24) + i * px(14), '', {
-          fontSize: fs(12), color: '#aaa', fontFamily: FONT, lineSpacing: px(1),
+          fontSize: hfs(12), color: '#aaa', fontFamily: FONT, lineSpacing: px(1),
           wordWrap: { width: w - px(20), useAdvancedWrap: true },
-          stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+          stroke: '#000000', strokeThickness: Math.round((IS_MOBILE ? 3 : 2) * DPR),
         }).setDepth(3000)
       );
     }
+    if (IS_MOBILE) this.subscriptions.on(EventBus, 'ui:toggleCombatLog', this.toggleCombatLog, this);
+  }
+
+  /** Mobile: switch the combat log between the collapsed faded lines and the framed panel. */
+  private toggleCombatLog(): void {
+    this.logExpanded = !this.logExpanded;
+    this.logFrame?.setVisible(this.logExpanded);
+    for (const o of this.logHeader) (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(this.logExpanded);
+    this.updateLogDisplay();
   }
 
   private createInfoDisplay(): void {
     const { x, y, w, h } = HUD.info;
     this.add.image(0, 0, frameTextureKey(this, w, h)).setOrigin(0, 0)
       .setPosition(x - px(8), y - px(8)).setDepth(2999);
-    this.zoneLabel = this.add.text(x + w / 2, y + px(14), '', {
-      fontSize: fs(13), color: UI_COLORS.parchment, fontFamily: TITLE_FONT, fontStyle: 'bold',
+    this.zoneLabel = this.add.text(x + w / 2, y + (IS_MOBILE ? px(16) : px(14)), '', {
+      fontSize: hfs(13), color: UI_COLORS.parchment, fontFamily: TITLE_FONT, fontStyle: 'bold',
       stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0.5, 0.5).setDepth(3000);
-    this.add.image(x + w / 2 - px(34), y + px(33), coinTexture(this, px(13))).setDepth(3000);
-    this.goldText = this.add.text(x + w / 2 - px(24), y + px(33), '', {
-      fontSize: fs(13), color: '#ffd35a', fontFamily: FONT, fontStyle: 'bold',
+    const goldY = y + (IS_MOBILE ? px(41) : px(33));
+    this.add.image(x + w / 2 - px(34), goldY, coinTexture(this, IS_MOBILE ? px(18) : px(13))).setDepth(3000);
+    this.goldText = this.add.text(x + w / 2 - px(24), goldY, '', {
+      fontSize: hfs(13), color: '#ffd35a', fontFamily: FONT, fontStyle: 'bold',
       stroke: '#000000', strokeThickness: Math.round(3 * DPR),
     }).setOrigin(0, 0.5).setDepth(3000);
   }
@@ -593,20 +687,20 @@ export class UIScene extends Phaser.Scene {
     this.questTracker = this.add.container(trackerX, trackerY).setDepth(3000);
 
     // Framed background (re-baked only when the tracker's height changes)
-    this.questTrackerBg = this.add.image(0, 0, frameTextureKey(this, px(218), px(24), 0.9))
+    this.questTrackerBg = this.add.image(0, 0, frameTextureKey(this, HUD.tracker.w, px(24), 0.9))
       .setOrigin(0, 0).setDepth(2999);
     this.questTrackerBg.setVisible(false);
 
     // Header text
     const header = this.add.text(0, 0, t('ui.questTracker.header'), {
-      fontFamily: TITLE_FONT, fontSize: fs(12), color: UI_COLORS.heading, fontStyle: 'bold',
+      fontFamily: TITLE_FONT, fontSize: hfs(12), color: UI_COLORS.heading, fontStyle: 'bold',
       stroke: '#000000', strokeThickness: Math.round(2 * DPR),
     }).setOrigin(0, 0);
     this.questTracker.add(header);
 
     // Scroll indicator text (hidden by default)
     this.questTrackerScrollText = this.add.text(0, 0, '', {
-      fontFamily: FONT, fontSize: fs(10), color: '#888888',
+      fontFamily: FONT, fontSize: hfs(10), color: '#888888',
     }).setOrigin(0, 0).setVisible(false);
     this.questTracker.add(this.questTrackerScrollText);
   }
@@ -616,7 +710,8 @@ export class UIScene extends Phaser.Scene {
     const item = data?.item;
     if (!item) return;
     const nW = px(236), nH = px(34);
-    const notice = this.add.container(HUD.loot.x, HUD.loot.y).setDepth(3050).setAlpha(0);
+    const notice = this.add.container(HUD.loot.x, HUD.loot.y).setDepth(3050).setAlpha(0)
+      .setScale(IS_MOBILE ? MOBILE_POP_SCALE : 1);
     notice.add(addFrame(this, 0, 0, nW, nH, { variant: 'tooltip', accent: qualityNum(item.quality) }));
     const slot = this.createItemSlot(px(18), nH / 2, px(26), item, { interactive: false, showCount: false });
     notice.add(slot.objects);
@@ -649,7 +744,7 @@ export class UIScene extends Phaser.Scene {
 
   private layoutLootNotices(): void {
     this.lootNotices.forEach((n, i) => {
-      const targetY = HUD.loot.y - i * px(40);
+      const targetY = HUD.loot.y - i * px(40) * (IS_MOBILE ? MOBILE_POP_SCALE : 1);
       if (i === 0) n.y = targetY;
       else this.tweens.add({ targets: n, y: targetY, duration: 150 });
     });
@@ -673,12 +768,13 @@ export class UIScene extends Phaser.Scene {
     this.subscriptions.on(EventBus, GameEvents.QUEST_COMPLETED, this.handleQuestTrackerDirty, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_PROGRESS, this.handleQuestTrackerDirty, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_TRACKED_CHANGED, this.handleQuestTrackerDirty, this);
+    this.subscriptions.on(EventBus, GameEvents.BOSS_BAR, this.handleBossBar, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_TURNED_IN, this.handleQuestTrackerDirty, this);
     this.subscriptions.on(EventBus, GameEvents.QUEST_FAILED, this.handleQuestTrackerDirty, this);
   }
 
   private handleLogMessage(data: { text: string; type: string }): void {
-    this.logMessages.push(data);
+    this.logMessages.push({ text: data.text, type: data.type, at: this.time.now });
     if (this.logMessages.length > LOG_MAX_LINES) this.logMessages.shift();
     this.updateLogDisplay();
   }
@@ -741,6 +837,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   private handlePanelToggle(data: { panel: string; npcId?: string }): void {
+    if (this.abyssUI?.blocksPanels()) return; // the boon choice is mandatory
     if (data.panel === 'inventory') this.toggleInventory();
     if (data.panel === 'map') this.toggleMap();
     if (data.panel === 'skills') this.toggleSkillTree();
@@ -831,18 +928,29 @@ export class UIScene extends Phaser.Scene {
     const colors: Record<string, string> = { system: '#e8c77a', combat: '#ff8a72', loot: '#7ed36a', info: '#7fb6ff' };
     // Newest message sits at the bottom; older ones stack upward and wrapped lines
     // push earlier entries up instead of overlapping them.
-    const top = HUD.log.y + px(22);
-    let bottom = HUD.log.y + HUD.log.h - px(6);
+    // Collapsed (mobile): only the last few recent lines, frameless and fading with age.
+    const collapsed = !this.logExpanded;
+    const top = collapsed ? HUD.logCollapsedBottom - px(120) : HUD.log.y + px(22);
+    let bottom = collapsed ? HUD.logCollapsedBottom : HUD.log.y + HUD.log.h - px(6);
     const msgs = this.logMessages;
+    const now = this.time.now;
     for (let i = 0; i < LOG_MAX_LINES; i++) {
       const txt = this.logTexts[i];
       if (!txt || !txt.active) continue;
       const msg = msgs[msgs.length - 1 - i];
-      if (!msg) { if (txt.text !== '') txt.setText(''); txt.setVisible(false); continue; }
+      const age = msg ? now - msg.at : 0;
+      if (!msg || (collapsed && (i >= MOBILE_LOG_LINES || age > 12000))) {
+        if (txt.text !== '') txt.setText('');
+        txt.setVisible(false);
+        continue;
+      }
       txt.setText(msg.text).setColor(colors[msg.type] ?? '#b8b0a4');
       const y = bottom - txt.height;
       if (y < top) { txt.setVisible(false); bottom = top; continue; }
-      txt.setY(y).setVisible(true).setAlpha(i === 0 ? 1 : Math.max(0.55, 1 - i * 0.07));
+      const alpha = collapsed
+        ? Math.max(0, Math.min(1, (12000 - age) / 3000)) * (i === 0 ? 0.95 : i === 1 ? 0.75 : 0.55)
+        : (i === 0 ? 1 : Math.max(0.55, 1 - i * 0.07));
+      txt.setY(y).setVisible(true).setAlpha(alpha);
       bottom = y - px(1);
     }
   }
@@ -919,11 +1027,25 @@ export class UIScene extends Phaser.Scene {
         }
         const slot = def.slot;
         slotBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
-          this.showItemTooltip(eq, pointer.x, pointer.y);
+          this.showItemTooltip(eq, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
         });
-        slotBg.on('pointerout', () => this.hideItemTooltip());
-        slotBg.on('pointerdown', () => {
+        slotBg.on('pointerout', () => this.hideHoverTooltip());
+        slotBg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
           const ms = this.zone.inventorySystem.getMaxSockets(slot as any);
+          if (IS_MOBILE) {
+            // Touch: show the item first; unequip / sockets are explicit buttons.
+            this.hideItemTooltip();
+            const actions: { label: string; callback: () => void; variant?: ButtonOptions['variant'] }[] = [];
+            if (ms > 0) actions.push({ label: t('ui.socket.title'), callback: () => { this.hideContextPopup(); this.openSocketPanel(slot as any); } });
+            actions.push({ label: btnLabel(t('ui.socket.unequip')), callback: () => {
+              this.hideContextPopup();
+              this.zone.inventorySystem.unequip(slot as any);
+              this.zone.invalidateEquipStats();
+              this.refreshInventory();
+            } });
+            this.showContextPopup(eq, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE), actions);
+            return;
+          }
           if (ms > 0) {
             this.hideItemTooltip();
             this.openSocketPanel(slot as any);
@@ -969,12 +1091,12 @@ export class UIScene extends Phaser.Scene {
       const { slot: itemBg, objects } = this.createItemSlot(cx, cy, slotSize, item);
       panel.add(objects);
       itemBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
-        this.showItemTooltip(item, pointer.x, pointer.y);
+        this.showItemTooltip(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
       });
-      itemBg.on('pointerout', () => this.hideItemTooltip());
+      itemBg.on('pointerout', () => this.hideHoverTooltip());
       itemBg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
         this.hideItemTooltip();
-        this.showContextPopup(item, pointer.x, pointer.y);
+        this.showContextPopup(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
       });
     }
 
@@ -1025,8 +1147,15 @@ export class UIScene extends Phaser.Scene {
   private openShop(data: { npcId: string; shopItems: string[]; type: string }, keepPage = false): void {
     this.closeAllPanels();
     this.shopNpcId = data.npcId;
-    audioManager.playSFX('click');
-    if (!keepPage) this.shopInventoryPage = 0;
+    const isSmith = data.type === 'blacksmith';
+    if (!keepPage) {
+      audioManager.playSFX('click');
+      this.shopInventoryPage = 0;
+      this.shopTab = 'buy';
+      this.forgeItemUid = null;
+    }
+    if (!isSmith) this.shopTab = 'buy';
+    const forging = this.shopTab === 'forge';
 
     // Backdrop for outside-click dismiss
     this.dialogueBackdrop = this.createBackdrop(0.6);
@@ -1040,9 +1169,11 @@ export class UIScene extends Phaser.Scene {
     const dividerX = px(356);
     this.shopPanel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     const shop = this.shopPanel;
-    this.animatePanelOpen(shop);
+    // Rebuilds (buy / sell / craft) swap the panel in place instead of popping it again.
+    if (keepPage) shop.setData('noPop', true);
+    else this.animatePanelOpen(shop);
     shop.add(this.createPanelBg(pw, ph));
-    const title = data.type === 'blacksmith' ? t('ui.shop.blacksmith') : t('ui.shop.shop');
+    const title = isSmith ? t('ui.shop.blacksmith') : t('ui.shop.shop');
     shop.add(this.createPanelTitle(pw, title));
     shop.add(this.createPanelCloseBtn(pw, () => {
       this.hideItemTooltip();
@@ -1055,12 +1186,35 @@ export class UIScene extends Phaser.Scene {
 
     // --- LEFT: Merchant items ---
     const leftX = px(18), leftW = dividerX - px(34);
-    shop.add(addSectionHeader(this, leftX, px(54), leftW, t('ui.shop.itemList')));
-    const rowH = px(40), rowStart = px(68);
-    const iconSz = px(32);
     const listBottom = ph - px(54);
+    if (isSmith) {
+      // Tabs: wares | forge
+      const tabW = Math.floor((leftW - px(6)) / 2), tabH = px(26), tabY = px(44);
+      (['buy', 'forge'] as const).forEach((tab, ti) => {
+        const tx = leftX + ti * (tabW + px(6));
+        const active = this.shopTab === tab;
+        shop.add(this.add.image(tx, tabY, tabTexture(this, tabW, tabH, active, tab === 'forge' ? 0xff8a2a : 0xd4a54a)).setOrigin(0, 0));
+        shop.add(this.add.text(tx + tabW / 2, tabY + tabH / 2, t(tab === 'buy' ? 'ui.shop.tabBuy' : 'ui.shop.tabForge'), {
+          fontSize: fs(13), color: active ? UI_COLORS.parchment : '#8a8290', fontFamily: FONT, fontStyle: 'bold',
+          stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+        }).setOrigin(0.5));
+        const hit = this.add.rectangle(tx + tabW / 2, tabY + tabH / 2, tabW, tabH, 0x000000, 0).setInteractive({ useHandCursor: true });
+        hit.on('pointerdown', () => {
+          if (this.shopTab === tab) return;
+          this.shopTab = tab;
+          audioManager.playSFX('click');
+          this.reopenShop(data);
+        });
+        shop.add(hit);
+      });
+    } else {
+      shop.add(addSectionHeader(this, leftX, px(54), leftW, t('ui.shop.itemList')));
+    }
+    const rowH = px(40), rowStart = isSmith ? px(76) : px(68);
+    const iconSz = px(32);
 
-    data.shopItems.forEach((itemId, i) => {
+    if (forging) this.drawForgePane(shop, data, leftX, px(78), leftW, listBottom);
+    else data.shopItems.forEach((itemId, i) => {
       const base = getItemBase(itemId);
       if (!base) return;
       const iy = rowStart + i * rowH;
@@ -1094,7 +1248,7 @@ export class UIScene extends Phaser.Scene {
 
     // --- Buyback section ---
     const buybackItems = this.zone.inventorySystem.buybackItems;
-    if (buybackItems.length > 0) {
+    if (!forging && buybackItems.length > 0) {
       const buybackStartY = rowStart + data.shopItems.length * rowH + px(12);
       shop.add(addSectionHeader(this, leftX, buybackStartY, leftW, t('ui.shop.buyback')));
       buybackItems.forEach((entry, i) => {
@@ -1105,8 +1259,8 @@ export class UIScene extends Phaser.Scene {
         const cy = by + px(14);
         const slot = this.createItemSlot(leftX + px(14), cy, px(26), entry.item, { showCount: false });
         shop.add(slot.objects);
-        slot.slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(entry.item, pointer.x, pointer.y));
-        slot.slot.on('pointerout', () => this.hideItemTooltip());
+        slot.slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(entry.item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE)));
+        slot.slot.on('pointerout', () => this.hideHoverTooltip());
         const nameT = this.add.text(leftX + px(34), cy, getItemDisplayName(entry.item), {
           fontSize: fs(12), color: canAfford ? qualColor : UI_COLORS.dim, fontFamily: FONT,
         }).setOrigin(0, 0.5);
@@ -1161,14 +1315,45 @@ export class UIScene extends Phaser.Scene {
       if (!item) { shop.add(addSlot(this, cx, cy, shopSlotSize, null).setAlpha(0.7)); continue; }
       const { slot: itemBg, objects } = this.createItemSlot(cx, cy, shopSlotSize, item);
       shop.add(objects);
+      if (forging) {
+        // Forge tab: gear is what goes on the anvil; everything else is dimmed.
+        const forgeable = !!getItemBase(item.baseId)?.slot;
+        if (!forgeable) for (const o of objects) (o as Phaser.GameObjects.Image).setAlpha?.(0.4);
+        if (item.uid === this.forgeItemUid) {
+          const sel = this.add.graphics();
+          sel.lineStyle(px(2), 0xffb040, 1);
+          sel.strokeRoundedRect(cx - shopSlotSize / 2 - px(2), cy - shopSlotSize / 2 - px(2), shopSlotSize + px(4), shopSlotSize + px(4), px(4));
+          shop.add(sel);
+        }
+      }
       itemBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
-        this.showItemTooltip(item, pointer.x, pointer.y);
+        if (forging && IS_MOBILE) return; // touch: the tap puts it on the anvil, whose card shows it
+        this.showItemTooltip(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
       });
-      itemBg.on('pointerout', () => this.hideItemTooltip());
+      itemBg.on('pointerout', () => this.hideHoverTooltip());
       itemBg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
         this.hideItemTooltip();
         const isRightClick = pointer.rightButtonDown();
         const isHighValue = item.quality === 'legendary' || item.quality === 'set';
+        if (forging && !(isRightClick && !IS_MOBILE)) {
+          this.placeOnAnvil(item, data);
+          return;
+        }
+        if (IS_MOBILE) {
+          // Touch: a tap shows the item + a Sell button instead of selling on the spot.
+          const price = (getItemBase(item.baseId)?.sellPrice ?? 1) * item.quantity;
+          this.showContextPopup(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE), [{
+            label: t('ui.shop.sellAction', { price: String(price) }), variant: 'primary',
+            callback: () => {
+              this.hideContextPopup();
+              if (isHighValue) { this.showSellConfirm(item, data); return; }
+              this.player.gold += this.zone.inventorySystem.sellItem(item.uid);
+              audioManager.playSFX('click');
+              this.reopenShop(data);
+            },
+          }]);
+          return;
+        }
 
         if (isRightClick && !isHighValue) {
           // Right-click quick-sell for rare and below
@@ -1207,9 +1392,18 @@ export class UIScene extends Phaser.Scene {
 
     // Hint for right-click selling
     shop.add(addDivider(this, rightX + rightW / 2, ph - px(40), rightW));
-    shop.add(this.add.text(rightX + rightW / 2, ph - px(22), t('ui.shop.sellHint'), {
-      fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
+    const hintKey = forging
+      ? (IS_MOBILE ? 'ui.forge.bagHintTouch' : 'ui.forge.bagHint')
+      : (IS_MOBILE ? 'ui.shop.sellHintTouch' : 'ui.shop.sellHint');
+    shop.add(this.add.text(rightX + rightW / 2, ph - px(22), t(hintKey), {
+      fontSize: fs(11), color: forging ? '#e8b070' : UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5, 0.5));
+
+    if (forging && this.forgeFx && this.forgeSlotPos) {
+      const fx = this.forgeFx;
+      this.forgeFx = null;
+      this.playForgeFx(shop, fx);
+    }
   }
 
   private showSellConfirm(item: ItemInstance, shopData: { npcId: string; shopItems: string[]; type: string }): void {
@@ -1234,6 +1428,365 @@ export class UIScene extends Phaser.Scene {
       this.reopenShop(shopData);
     }, { variant: 'primary', fontSize: 13 }));
     this.contextPopup.add(this.makeButton(popW / 2 + px(62), popH - px(26), px(100), px(28), btnLabel(t('ui.shop.cancel')), () => this.hideContextPopup(), { fontSize: 13 }));
+  }
+
+  // --- Blacksmith forge (锻造) ---
+
+  private getCrafting(): CraftingSystem {
+    if (!this.crafting) this.crafting = new CraftingSystem(lootCraftRoller(this.zone.lootSystem));
+    return this.crafting;
+  }
+
+  /** Forge tab, bag click: put a piece of gear on the anvil (tap again to take it off). */
+  private placeOnAnvil(item: ItemInstance, data: { npcId: string; shopItems: string[]; type: string }): void {
+    if (!getItemBase(item.baseId)?.slot) {
+      audioManager.playSFX('error');
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.forge.notEquipment'), type: 'system' });
+      return;
+    }
+    this.forgeItemUid = this.forgeItemUid === item.uid ? null : item.uid;
+    audioManager.playSFX(this.forgeItemUid ? 'equip' : 'click');
+    this.reopenShop(data);
+  }
+
+  private materialLabel(id: MaterialId, qty: number): string {
+    return t('ui.forge.qty', { name: getItemBaseName(id), qty: String(qty) });
+  }
+
+  private materialList(bag: MaterialBag): string {
+    return MATERIAL_IDS.filter(id => (bag[id] ?? 0) > 0).map(id => this.materialLabel(id, bag[id]!)).join(' ');
+  }
+
+  /** Left pane of the blacksmith panel in forge mode: anvil card, materials, four actions. */
+  private drawForgePane(
+    shop: Phaser.GameObjects.Container, data: { npcId: string; shopItems: string[]; type: string },
+    x: number, y: number, w: number, bottom: number,
+  ): void {
+    const inv = this.zone.inventorySystem;
+    const crafting = this.getCrafting();
+    const item = this.forgeItemUid ? inv.inventory.find(i => i.uid === this.forgeItemUid) ?? null : null;
+    if (!item) this.forgeItemUid = null;
+
+    // ── Anvil card ──
+    const cardH = px(86);
+    const accent = item ? qualityNum(item.quality) : 0x4a4250;
+    const card = this.add.graphics();
+    drawCard(card, x, y, w, cardH, { border: accent, strip: item ? accent : undefined, glow: item ? accent : undefined });
+    shop.add(card);
+    const slotSize = px(62);
+    const scx = x + px(12) + slotSize / 2, scy = y + cardH / 2;
+    // Ember glow behind the anvil slot
+    const ember = this.add.graphics();
+    ember.fillStyle(0xff7a2a, item ? 0.22 : 0.1);
+    ember.fillEllipse(scx, scy + slotSize * 0.28, slotSize * 1.3, slotSize * 0.5);
+    shop.add(ember);
+    const slot = this.createItemSlot(scx, scy, slotSize, item, { showCount: false });
+    shop.add(slot.objects);
+    this.forgeSlotPos = { x: scx, y: scy, size: slotSize };
+    const textX = scx + slotSize / 2 + px(12);
+    const textW = x + w - px(10) - textX;
+    if (item) {
+      slot.slot.on('pointerover', (p: Phaser.Input.Pointer) => this.showItemTooltip(item, (p.x / RENDER_SCALE), (p.y / RENDER_SCALE)));
+      slot.slot.on('pointerout', () => this.hideHoverTooltip());
+      const nameT = this.add.text(textX, y + px(10), getItemDisplayName(item), {
+        fontSize: fs(14), color: qualityHex(item.quality), fontFamily: FONT, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+      });
+      if (nameT.width > textW) nameT.setScale(textW / nameT.width, 1);
+      shop.add(nameT);
+      const cap = itemSocketCapacity(item);
+      let info = t('ui.forge.itemInfo', { quality: getQualityLabel(item.quality), level: String(item.level) });
+      if (cap > 0) info += '  ·  ' + t('ui.forge.sockets', { filled: String(item.sockets.length), max: String(cap) });
+      shop.add(this.add.text(textX, y + px(31), info, { fontSize: fs(11), color: '#9a8f80', fontFamily: FONT }));
+      const affixText = !item.identified && item.quality !== 'normal'
+        ? t('ui.tooltip.unidentified')
+        : item.affixes.length === 0
+          ? t('ui.forge.noAffixes')
+          : item.affixes.map(a => `+${a.value}${isStatPercent(a.stat) ? '%' : ''} ${getStatLabel(a.stat)}`).join('  ');
+      shop.add(this.add.text(textX, y + px(48), affixText, {
+        fontSize: fs(11), color: item.affixes.length ? '#7fb0ff' : UI_COLORS.dim, fontFamily: FONT, lineSpacing: px(1),
+        wordWrap: { width: textW, useAdvancedWrap: true }, maxLines: 2,
+      }));
+    } else {
+      shop.add(this.add.text(scx, scy, t('ui.forge.slotEmpty'), {
+        fontSize: fs(11), color: UI_COLORS.dim, fontFamily: FONT, align: 'center',
+        wordWrap: { width: slotSize - px(8), useAdvancedWrap: true },
+      }).setOrigin(0.5));
+      shop.add(this.add.text(textX, scy, t('ui.forge.pickHint'), {
+        fontSize: fs(12), color: '#e8b070', fontFamily: FONT, lineSpacing: px(2),
+        wordWrap: { width: textW, useAdvancedWrap: true },
+      }).setOrigin(0, 0.5));
+    }
+
+    // ── Materials owned ──
+    const owned = materialCounts(inv);
+    const matY = y + cardH + px(16);
+    const chipW = w / 3;
+    MATERIAL_IDS.forEach((id, i) => {
+      const cx = x + i * chipW;
+      shop.add(this.add.image(cx + px(12), matY, ensureItemIcon(this, id)).setDisplaySize(px(22), px(22)));
+      const txt = this.add.text(cx + px(26), matY, `${getItemBaseName(id)} ${owned[id]}`, {
+        fontSize: fs(12), color: owned[id] > 0 ? UI_COLORS.text : UI_COLORS.dim, fontFamily: FONT,
+      }).setOrigin(0, 0.5);
+      if (txt.width > chipW - px(28)) txt.setScale((chipW - px(28)) / txt.width, 1);
+      shop.add(txt);
+    });
+
+    // ── Actions ──
+    const rowsTop = matY + px(16);
+    const rowH = Math.floor((bottom - rowsTop) / CRAFT_ACTIONS.length);
+    const ACTION_COLOR: Record<CraftAction, number> = { salvage: 0xc0503c, reforge: 0x4f8cff, upgrade: 0xffd84a, socket: 0x8be9fd };
+    CRAFT_ACTIONS.forEach((action, i) => {
+      const ry = rowsTop + i * rowH;
+      const rh = rowH - px(6);
+      const chk: CraftCheck | null = item ? crafting.check(action, item, inv, this.player) : null;
+      const applies = !!chk?.cost;
+      const g = this.add.graphics();
+      drawCard(g, x, ry, w, rh, chk?.ok
+        ? { border: 0x6a5a3a, strip: ACTION_COLOR[action] }
+        : { border: 0x2e2a32, fill: 0x100e12 });
+      shop.add(g);
+      const btnW = px(70), btnH = Math.min(px(32), rh - px(10));
+      const contentW = w - btnW - px(26);
+      const titleT = this.add.text(x + px(12), ry + px(14), t(`ui.forge.action.${action}`), {
+        fontSize: fs(14), color: applies ? UI_COLORS.parchment : UI_COLORS.dim, fontFamily: FONT, fontStyle: 'bold',
+      }).setOrigin(0, 0.5);
+      shop.add(titleT);
+      // Preview (what the action will do)
+      if (item && applies) {
+        const prev = this.forgePreview(action, item);
+        const pt = this.add.text(titleT.x + titleT.width + px(8), ry + px(14), prev.text, {
+          fontSize: fs(11), color: prev.color, fontFamily: FONT,
+        }).setOrigin(0, 0.5);
+        const maxW = contentW - titleT.width - px(8);
+        if (pt.width > maxW) pt.setScale(maxW / pt.width, 1);
+        shop.add(pt);
+      }
+      // Cost line (red where short) or why the action is unavailable
+      const ly = ry + px(35);
+      if (item && chk) {
+        if (!chk.cost) {
+          const why = action === 'upgrade' && chk.reason === 'quality' ? 'upgradeQuality' : chk.reason ?? 'quality';
+          shop.add(this.add.text(x + px(12), ly, t(`ui.forge.block.${why}`), {
+            fontSize: fs(11), color: '#8a6a60', fontFamily: FONT,
+          }).setOrigin(0, 0.5));
+        } else {
+          let cx = x + px(12);
+          const cost = chk.cost;
+          const addChip = (icon: string, label: string, ok: boolean): void => {
+            shop.add(this.add.image(cx + px(7), ly, icon).setDisplaySize(px(16), px(16)).setAlpha(ok ? 1 : 0.6));
+            const tt = this.add.text(cx + px(17), ly, label, {
+              fontSize: fs(12), color: ok ? '#f0dcae' : '#ff6b5a', fontFamily: FONT, fontStyle: 'bold',
+            }).setOrigin(0, 0.5);
+            shop.add(tt);
+            cx += px(17) + tt.width + px(10);
+          };
+          if (cost.gold > 0) addChip(coinTexture(this, px(14)), String(cost.gold), this.player.gold >= cost.gold);
+          for (const id of MATERIAL_IDS) {
+            const need = cost.materials[id] ?? 0;
+            if (need > 0) addChip(ensureItemIcon(this, id), `${owned[id]}/${need}`, owned[id] >= need);
+          }
+          if (cost.gold === 0 && MATERIAL_IDS.every(id => !(cost.materials[id] ?? 0))) {
+            shop.add(this.add.text(cx, ly, t('ui.forge.free'), { fontSize: fs(12), color: '#7fd07a', fontFamily: FONT }).setOrigin(0, 0.5));
+            cx += px(40);
+          }
+          if (!chk.ok && (chk.reason === 'maxSockets' || chk.reason === 'bagFull' || chk.reason === 'notInBag')) {
+            const rt = this.add.text(cx, ly, t(`ui.forge.block.${chk.reason}`), { fontSize: fs(11), color: '#ff6b5a', fontFamily: FONT }).setOrigin(0, 0.5);
+            if (rt.x + rt.width > x + contentW) rt.setScale(Math.max(0.5, (x + contentW - rt.x) / rt.width), 1);
+            shop.add(rt);
+          }
+        }
+      }
+      shop.add(this.makeButton(x + w - px(10) - btnW / 2, ry + rh / 2, btnW, btnH, t(`ui.forge.action.${action}`), () => {
+        if (item) this.doForge(action, item, data);
+      }, { variant: action === 'salvage' ? 'danger' : 'primary', disabled: !chk?.ok, fontSize: 13, bold: true }));
+    });
+  }
+
+  /** One-line "what happens" for an action (deterministic parts shown as before → after). */
+  private forgePreview(action: CraftAction, item: ItemInstance): { text: string; color: string } {
+    switch (action) {
+      case 'salvage': {
+        let text = t('ui.forge.preview.salvage', { list: this.materialList(salvageYield(item)) });
+        if (item.sockets.length > 0) text += ' · ' + t('ui.forge.preview.salvageGems');
+        return { text, color: '#d8c8a8' };
+      }
+      case 'reforge': {
+        const [min, max] = item.quality === 'rare' ? [3, 4] : [1, 2];
+        return { text: t('ui.forge.preview.reforge', { min: String(min), max: String(max) }), color: '#9fc0ff' };
+      }
+      case 'upgrade': {
+        const to = upgradeTarget(item.quality) ?? item.quality;
+        return { text: t('ui.forge.preview.upgrade', { from: getQualityLabel(item.quality), to: getQualityLabel(to) }), color: qualityHex(to) };
+      }
+      case 'socket': {
+        const cap = itemSocketCapacity(item);
+        return { text: t('ui.forge.preview.socket', { from: String(cap), to: String(cap + 1) }), color: '#8be9fd' };
+      }
+    }
+  }
+
+  private doForge(action: CraftAction, item: ItemInstance, data: { npcId: string; shopItems: string[]; type: string }, confirmed = false): void {
+    this.hideItemTooltip();
+    const valuable = item.quality === 'rare' || item.quality === 'legendary' || item.quality === 'set' || item.sockets.length > 0;
+    if (action === 'salvage' && valuable && !confirmed) {
+      this.showForgeConfirm(item, () => this.doForge(action, item, data, true));
+      return;
+    }
+    const inv = this.zone.inventorySystem;
+    const name = getItemDisplayName(item);
+    const res = this.getCrafting().perform(action, item, inv, this.player);
+    if (!res.ok) {
+      audioManager.playSFX('error');
+      if (res.reason) EventBus.emit(GameEvents.LOG_MESSAGE, { text: t(`ui.forge.block.${res.reason}`), type: 'system' });
+      this.reopenShop(data);
+      return;
+    }
+    audioManager.playSFX('anvil');
+    if (action === 'salvage') {
+      this.forgeItemUid = null;
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.forge.log.salvage', { name, list: this.materialList(res.yields ?? {}) }), type: 'loot' });
+    } else {
+      const newName = getItemDisplayName(item);
+      EventBus.emit(GameEvents.LOG_MESSAGE, { text: t(`ui.forge.log.${action}`, { name: action === 'socket' ? name : newName }), type: 'loot' });
+      if (action === 'upgrade') this.time.delayedCall(140, () => audioManager.playSFX(item.quality === 'rare' ? 'loot_rare' : 'loot_magic'));
+    }
+    this.forgeFx = { action, quality: item.quality, yields: res.yields };
+    this.reopenShop(data);
+  }
+
+  private showForgeConfirm(item: ItemInstance, onConfirm: () => void): void {
+    this.hideContextPopup();
+    const popW = px(280);
+    this.contextPopup = this.add.container(0, 0).setDepth(PANEL_STYLE.depth.confirmDialog);
+    const msg = this.add.text(popW / 2, px(20), t('ui.forge.salvageConfirm', { name: getItemDisplayName(item) }), {
+      fontSize: fs(13), color: UI_COLORS.text, fontFamily: FONT, align: 'center',
+      wordWrap: { width: popW - px(36), useAdvancedWrap: true },
+    }).setOrigin(0.5, 0);
+    const btnH = IS_MOBILE ? px(40) : px(28);
+    const popH = msg.y + msg.height + btnH + px(30);
+    const scale = IS_MOBILE ? MOBILE_POP_SCALE : 1;
+    this.contextPopup.setPosition((W - popW * scale) / 2, (H - popH * scale) / 2).setScale(scale);
+    this.contextPopup.add(addFrame(this, 0, 0, popW, popH, { variant: 'tooltip', accent: qualityNum(item.quality) }));
+    this.contextPopup.add(msg);
+    const by = popH - px(14) - btnH / 2;
+    this.contextPopup.add(this.makeButton(popW / 2 - px(62), by, px(108), btnH, t('ui.forge.action.salvage'), () => {
+      this.hideContextPopup();
+      onConfirm();
+    }, { variant: 'danger', fontSize: 13, bold: true }));
+    this.contextPopup.add(this.makeButton(popW / 2 + px(62), by, px(108), btnH, btnLabel(t('ui.shop.cancel')), () => this.hideContextPopup(), { fontSize: 13 }));
+  }
+
+  /** Hammer-strike feedback on the anvil slot: white flash, spark spray, icon punch, material pops. */
+  private playForgeFx(shop: Phaser.GameObjects.Container, fx: { action: CraftAction; quality: string; yields?: MaterialBag }): void {
+    const pos = this.forgeSlotPos;
+    if (!pos) return;
+    const { x, y, size } = pos;
+    const flash = this.add.circle(x, y, size * 0.45, 0xfff2d0, 0.95).setBlendMode(Phaser.BlendModes.ADD);
+    shop.add(flash);
+    this.tweens.add({ targets: flash, scale: 2.1, alpha: 0, duration: 280, ease: 'Cubic.easeOut', onComplete: () => flash.destroy() });
+    if (fx.action === 'upgrade' || fx.action === 'reforge') {
+      const ring = this.add.circle(x, y, size * 0.5).setStrokeStyle(px(3), qualityNum(fx.quality), 1);
+      shop.add(ring);
+      this.tweens.add({ targets: ring, scale: 1.9, alpha: 0, duration: 520, ease: 'Cubic.easeOut', onComplete: () => ring.destroy() });
+    }
+    const colors = [0xfff3b0, 0xffd060, 0xffa030, 0xff6a20];
+    const count = fx.action === 'upgrade' ? 30 : 22;
+    for (let i = 0; i < count; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.6;
+      const d = px(30 + Math.random() * 60);
+      const spark = this.add.rectangle(x, y + size * 0.1, px(3), px(7 + Math.random() * 8), colors[i % colors.length])
+        .setRotation(a + Math.PI / 2).setBlendMode(Phaser.BlendModes.ADD);
+      shop.add(spark);
+      this.tweens.add({
+        targets: spark, x: x + Math.cos(a) * d, y: y + Math.sin(a) * d + px(16), alpha: 0, scaleY: 0.4,
+        duration: 360 + Math.random() * 320, ease: 'Quad.easeOut', onComplete: () => spark.destroy(),
+      });
+    }
+    // Punch the item icon (the slot image's sibling added right after it).
+    if (fx.action !== 'salvage') {
+      const icon = shop.list.find(o => o instanceof Phaser.GameObjects.Image && Math.abs(o.x - x) < 1 && Math.abs(o.y - y) < 1
+        && o.displayWidth < size) as Phaser.GameObjects.Image | undefined;
+      if (icon) {
+        const sx = icon.scaleX, sy = icon.scaleY;
+        icon.setScale(sx * 1.3, sy * 1.3);
+        this.tweens.add({ targets: icon, scaleX: sx, scaleY: sy, duration: 260, ease: 'Back.easeOut' });
+      }
+    }
+    // Salvage: the materials float up out of the anvil.
+    if (fx.action === 'salvage' && fx.yields) {
+      MATERIAL_IDS.filter(id => (fx.yields![id] ?? 0) > 0).forEach((id, i) => {
+        const c = this.add.container(x + (i - 1) * px(34), y);
+        c.add(this.add.image(0, 0, ensureItemIcon(this, id)).setDisplaySize(px(24), px(24)));
+        c.add(this.add.text(px(12), px(6), `+${fx.yields![id]}`, {
+          fontSize: fs(12), color: '#ffe7a0', fontFamily: FONT, fontStyle: 'bold', stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+        }).setOrigin(0, 0.5));
+        c.setAlpha(0);
+        shop.add(c);
+        this.tweens.add({ targets: c, alpha: 1, y: y - px(26), duration: 260, delay: 80 + i * 90, ease: 'Back.easeOut' });
+        this.tweens.add({ targets: c, alpha: 0, y: y - px(44), duration: 420, delay: 900 + i * 90, onComplete: () => c.destroy() });
+      });
+    }
+  }
+
+  // --- Boss bar ---
+
+  private bossBar: Phaser.GameObjects.Container | null = null;
+  private bossBarFill: Phaser.GameObjects.Rectangle | null = null;
+  private bossBarShine: Phaser.GameObjects.Rectangle | null = null;
+  private bossBarHp: (() => { hp: number; maxHp: number } | null) | null = null;
+  private bossBarShown = -1;
+
+  /** Big named health bar across the top while a story boss is near. */
+  private handleBossBar(state: { name: string; epithet: string; hp: () => { hp: number; maxHp: number } | null } | null): void {
+    this.bossBar?.destroy(true);
+    this.bossBar = null;
+    this.bossBarFill = null;
+    this.bossBarShine = null;
+    this.bossBarHp = null;
+    if (!state) return;
+    const bw = px(560), bh = px(14);
+    // Sits below the target frame at the top of the screen.
+    const c = this.add.container(W / 2, px(88)).setDepth(2900).setAlpha(0);
+    const frame = this.add.graphics();
+    frame.fillStyle(0x0a0604, 0.9);
+    frame.fillRoundedRect(-bw / 2 - px(6), -px(4), bw + px(12), bh + px(8), px(4));
+    frame.lineStyle(px(2), 0xc9a45a, 1);
+    frame.strokeRoundedRect(-bw / 2 - px(6), -px(4), bw + px(12), bh + px(8), px(4));
+    // Diamond end caps
+    for (const sx of [-1, 1]) {
+      frame.fillStyle(0xc9a45a, 1);
+      frame.fillTriangle(sx * (bw / 2 + px(6)), bh / 2 - px(8), sx * (bw / 2 + px(16)), bh / 2, sx * (bw / 2 + px(6)), bh / 2 + px(8));
+    }
+    const back = this.add.rectangle(-bw / 2, 0, bw, bh, 0x2a0606).setOrigin(0, 0);
+    const fill = this.add.rectangle(-bw / 2, 0, bw, bh, 0xb3121e).setOrigin(0, 0);
+    const shine = this.add.rectangle(-bw / 2, 0, bw, bh / 3, 0xff6a5a, 0.35).setOrigin(0, 0);
+    const name = this.add.text(0, -px(20), state.name, {
+      fontSize: fs(18), color: '#ffe2a8', fontFamily: '"Noto Serif SC", "Noto Sans SC", serif', fontStyle: 'bold',
+      stroke: '#1a0802', strokeThickness: Math.round(4 * DPR),
+    }).setOrigin(0.5);
+    const epithet = this.add.text(0, bh + px(12), state.epithet, {
+      fontSize: fs(12), color: '#d9b98a', fontFamily: '"Noto Serif SC", "Noto Sans SC", serif',
+      stroke: '#000000', strokeThickness: Math.round(3 * DPR),
+    }).setOrigin(0.5);
+    c.add([frame, back, fill, shine, name, epithet]);
+    this.tweens.add({ targets: c, alpha: 1, duration: 400 });
+    this.bossBar = c;
+    this.bossBarFill = fill;
+    this.bossBarHp = state.hp;
+    this.bossBarShine = shine;
+    this.bossBarShown = -1;
+  }
+
+  private updateBossBar(): void {
+    if (!this.bossBar || !this.bossBarFill || !this.bossBarHp) return;
+    const s = this.bossBarHp();
+    const frac = s ? Math.max(0, Math.min(1, s.hp / Math.max(1, s.maxHp))) : 0;
+    if (Math.abs(frac - this.bossBarShown) < 0.001) return;
+    this.bossBarShown = frac;
+    const full = px(560);
+    this.bossBarFill.width = full * frac;
+    if (this.bossBarShine) this.bossBarShine.width = full * frac;
   }
 
   // --- Stash ---
@@ -1280,7 +1833,20 @@ export class UIScene extends Phaser.Scene {
     const dividerX = px(420);
     const panel = this.add.container(panelX, panelY).setDepth(PANEL_STYLE.depth.panel);
     this.stashPanel = panel;
-    if (!rebuild) this.animatePanelOpen(panel);
+    if (rebuild) panel.setData('noPop', true);
+    else this.animatePanelOpen(panel);
+    /**
+     * Desktop: a click moves the item straight across. Touch: a tap shows the item card with a
+     * 存入 / 取出 button (like the bag), so browsing the stash never moves things by accident.
+     */
+    const pick = (item: ItemInstance, pointer: Phaser.Input.Pointer, label: string, move: () => void): void => {
+      if (!IS_MOBILE) { move(); return; }
+      this.hideItemTooltip();
+      this.showContextPopup(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE), [{
+        label, variant: 'primary',
+        callback: () => { this.hideContextPopup(); move(); },
+      }]);
+    };
     panel.add(this.createPanelBg(pw, ph));
     panel.add(this.createPanelTitle(pw, t('ui.stash.title')));
     panel.add(this.createPanelCloseBtn(pw, () => { this.hideItemTooltip(); this.closeStash(); }));
@@ -1289,7 +1855,7 @@ export class UIScene extends Phaser.Scene {
     const cols = 8, rows = 5, perPage = cols * rows, gap = px(5), gridY = px(72);
     const drawGrid = (
       x: number, w: number, items: ItemInstance[], page: number, slotsTotal: number,
-      onPick: (item: ItemInstance) => void, setPage: (p: number) => void,
+      onPick: (item: ItemInstance, pointer: Phaser.Input.Pointer) => void, setPage: (p: number) => void,
     ): void => {
       const size = Math.floor((w - gap * (cols - 1)) / cols);
       const pages = Math.max(1, Math.ceil(slotsTotal / perPage));
@@ -1306,9 +1872,9 @@ export class UIScene extends Phaser.Scene {
         }
         const { slot, objects } = this.createItemSlot(cx, cy, size, item);
         panel.add(objects);
-        slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(item, pointer.x, pointer.y));
-        slot.on('pointerout', () => this.hideItemTooltip());
-        slot.on('pointerdown', () => onPick(item));
+        slot.on('pointerover', (pointer: Phaser.Input.Pointer) => this.showItemTooltip(item, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE)));
+        slot.on('pointerout', () => this.hideHoverTooltip());
+        slot.on('pointerdown', (pointer: Phaser.Input.Pointer) => onPick(item, pointer));
       }
       if (pages > 1) {
         const pageY = gridY + rows * (size + gap) + px(12);
@@ -1327,11 +1893,11 @@ export class UIScene extends Phaser.Scene {
     panel.add(this.makeButton(leftX + leftW - px(30), px(54), px(56), px(22), t('ui.stash.sort'), () => {
       inv.sortStash(); audioManager.playSFX('click'); refresh();
     }, { fontSize: 11 }));
-    drawGrid(leftX, leftW, inv.stash, this.stashPage, Math.max(cap, inv.stash.length), item => {
+    drawGrid(leftX, leftW, inv.stash, this.stashPage, Math.max(cap, inv.stash.length), (item, pointer) => pick(item, pointer, t('ui.stash.withdraw'), () => {
       if (inv.moveFromStash(item.uid)) audioManager.playSFX('click');
       else EventBus.emit(GameEvents.LOG_MESSAGE, { text: t('ui.stash.bagFull'), type: 'system' });
       refresh();
-    }, p => { this.stashPage = p; });
+    }), p => { this.stashPage = p; });
 
     // --- RIGHT: bag ---
     const rightX = dividerX + px(16), rightW = pw - rightX - px(18);
@@ -1339,13 +1905,13 @@ export class UIScene extends Phaser.Scene {
     panel.add(this.makeButton(rightX + rightW - px(30), px(54), px(56), px(22), t('ui.stash.sort'), () => {
       inv.sortInventory(); audioManager.playSFX('click'); refresh();
     }, { fontSize: 11 }));
-    drawGrid(rightX, rightW, inv.inventory, this.stashBagPage, Math.max(perPage, inv.inventory.length), item => {
+    drawGrid(rightX, rightW, inv.inventory, this.stashBagPage, Math.max(perPage, inv.inventory.length), (item, pointer) => pick(item, pointer, t('ui.stash.deposit'), () => {
       if (inv.moveToStash(item.uid, cap)) audioManager.playSFX('click');
       refresh();
-    }, p => { this.stashBagPage = p; });
+    }), p => { this.stashBagPage = p; });
 
     panel.add(addDivider(this, pw / 2, ph - px(40), pw - px(36)));
-    panel.add(this.add.text(pw / 2, ph - px(22), t('ui.stash.hint'), {
+    panel.add(this.add.text(pw / 2, ph - px(22), t(IS_MOBILE ? 'ui.stash.hintTouch' : 'ui.stash.hint'), {
       fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5, 0.5));
   }
@@ -1408,7 +1974,7 @@ export class UIScene extends Phaser.Scene {
       }
     });
     panel.add(addDivider(this, pw / 2, ph - px(40), pw - px(80)));
-    panel.add(this.add.text(pw / 2, ph - px(22), t('ui.worldMap.closeHint'), {
+    panel.add(this.add.text(pw / 2, ph - px(22), IS_MOBILE ? '' : t('ui.worldMap.closeHint'), {
       fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
@@ -1523,9 +2089,42 @@ export class UIScene extends Phaser.Scene {
     const iconSize = px(42);
     const cardGap = px(12);
 
-    // Scrollable content container
+    // Scrollable content container (+ an unmasked scrollbar layer above it)
     const scrollContainer = this.add.container(0, 0);
     this.skillPanel.add(scrollContainer);
+    const scrollbar = this.add.graphics();
+    this.skillPanel.add(scrollbar);
+    const treeContentH = (tabIndex: number): number =>
+      (treeSkillsMap.get(treeNames[tabIndex])?.length ?? 0) * (cardH + cardGap) + px(30);
+    /** Scroll the active tree: move the card layer, redraw the thumb, and disable input on off-screen cards. */
+    const applySkillScroll = (tabIndex: number, value: number): void => {
+      const totalContentH = treeContentH(tabIndex);
+      const maxScrollY = Math.max(0, totalContentH - contentH);
+      const v = Phaser.Math.Clamp(value, 0, maxScrollY);
+      this.skillTreeScrollY[tabIndex] = v;
+      scrollContainer.y = -v;
+      scrollbar.clear();
+      if (totalContentH > contentH) {
+        const sbX = pw - px(16);
+        const sbTrackH = contentH - px(8);
+        const sbTrackY = contentTop + px(4);
+        scrollbar.fillStyle(0x060508, 1);
+        scrollbar.fillRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
+        scrollbar.lineStyle(1, 0x4a4250, 1);
+        scrollbar.strokeRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
+        const thumbH = Math.max(px(20), sbTrackH * Math.min(1, contentH / totalContentH));
+        const thumbY = sbTrackY + (maxScrollY > 0 ? (v / maxScrollY) * (sbTrackH - thumbH) : 0);
+        scrollbar.fillStyle(0xd4a54a, 0.85);
+        scrollbar.fillRoundedRect(sbX + px(1), thumbY, px(4), thumbH, px(2));
+      }
+      // Input ignores the geometry mask, so cards scrolled out of view must not take taps.
+      for (const child of scrollContainer.list) {
+        const target = child instanceof UiButton ? child.bg : child as Phaser.GameObjects.Rectangle;
+        if (!target.input) continue;
+        const cy = (child as Phaser.GameObjects.Rectangle).y - v;
+        target.input.enabled = cy > contentTop && cy < contentTop + contentH;
+      }
+    };
 
     // Clip mask for scroll area
     const clipMask = this.make.graphics({});
@@ -1533,6 +2132,54 @@ export class UIScene extends Phaser.Scene {
     clipMask.fillRect(panelX + px(10), panelY + contentTop, pw - px(20), contentH);
     const mask = clipMask.createGeometryMask();
     scrollContainer.setMask(mask);
+    this.skillPanel.setData('fitMasks', [clipMask]);
+
+    /**
+     * Touch: drag the card list to scroll. Buttons fire on pointerdown, so on touch the "+"
+     * action is deferred to pointerup and dropped if the finger moved past the drag threshold.
+     */
+    let pendingTap: (() => void) | null = null;
+    const deferTap = (fn: () => void) => (): void => {
+      if (IS_MOBILE) pendingTap = fn;
+      else fn();
+    };
+    if (IS_MOBILE) {
+      const DRAG_THRESHOLD = px(12);
+      let drag: { startY: number; startScroll: number; active: boolean } | null = null;
+      const panel = this.skillPanel;
+      const onDown = (p: Phaser.Input.Pointer): void => {
+        const k = panel.scaleY || 1;
+        const lx = ((p.x / RENDER_SCALE) - panel.x) / k, ly = ((p.y / RENDER_SCALE) - panel.y) / k;
+        drag = lx >= 0 && lx <= pw && ly >= contentTop && ly <= contentTop + contentH
+          ? { startY: (p.y / RENDER_SCALE), startScroll: this.skillTreeScrollY[this.skillTreeActiveTab] ?? 0, active: false }
+          : null;
+      };
+      const onMove = (p: Phaser.Input.Pointer): void => {
+        if (!drag || !p.isDown || !this.skillPanel) return;
+        const dy = (p.y / RENDER_SCALE) - drag.startY;
+        if (!drag.active && Math.abs(dy) > DRAG_THRESHOLD) {
+          drag.active = true;
+          pendingTap = null;
+          this.skillTooltip?.destroy(); this.skillTooltip = null;
+        }
+        if (drag.active) applySkillScroll(this.skillTreeActiveTab, drag.startScroll - dy / (panel.scaleY || 1));
+      };
+      const onUp = (): void => {
+        const tap = pendingTap;
+        const dragged = !!drag?.active;
+        pendingTap = null;
+        drag = null;
+        if (tap && !dragged) tap();
+      };
+      this.input.on('pointerdown', onDown);
+      this.input.on('pointermove', onMove);
+      this.input.on('pointerup', onUp);
+      panel.once(Phaser.GameObjects.Events.DESTROY, () => {
+        this.input.off('pointerdown', onDown);
+        this.input.off('pointermove', onMove);
+        this.input.off('pointerup', onUp);
+      });
+    }
 
     // Render active tab content
     const renderTab = (tabIndex: number) => {
@@ -1544,30 +2191,7 @@ export class UIScene extends Phaser.Scene {
       const treeColor = TREE_COLORS[treeName] ?? 0x888888;
       const sortedSkills = [...treeSkills].sort((a, b) => a.tier - b.tier);
 
-      const scrollY = this.skillTreeScrollY[tabIndex] ?? 0;
-      const totalContentH = sortedSkills.length * (cardH + cardGap) + px(30);
-      const maxScrollY = Math.max(0, totalContentH - contentH);
-
-      // Scrollbar
-      if (totalContentH > contentH) {
-        const sbX = pw - px(16);
-        const sbTrackH = contentH - px(8);
-        const sbTrackY = contentTop + px(4);
-        const sbTrack = this.add.graphics();
-        sbTrack.fillStyle(0x060508, 1);
-        sbTrack.fillRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
-        sbTrack.lineStyle(1, 0x4a4250, 1);
-        sbTrack.strokeRoundedRect(sbX, sbTrackY, px(6), sbTrackH, px(3));
-        scrollContainer.add(sbTrack);
-
-        const thumbRatio = Math.min(1, contentH / totalContentH);
-        const thumbH = Math.max(px(20), sbTrackH * thumbRatio);
-        const thumbY = sbTrackY + (maxScrollY > 0 ? (scrollY / maxScrollY) * (sbTrackH - thumbH) : 0);
-        const sbThumb = this.add.graphics();
-        sbThumb.fillStyle(0xd4a54a, 0.85);
-        sbThumb.fillRoundedRect(sbX + px(1), thumbY, px(4), thumbH, px(2));
-        scrollContainer.add(sbThumb);
-      }
+      // Cards are laid out unscrolled; scrolling moves the container (see applySkillScroll).
 
       // Prerequisite lines (behind cards)
       const skillStartY = contentTop + px(10);
@@ -1581,8 +2205,8 @@ export class UIScene extends Phaser.Scene {
         const lineColor = isLearned ? treeColor : 0x3a3a4e;
 
         const cx = cardStartX + cardW / 2;
-        const curCardY = skillStartY + si * (cardH + cardGap) - scrollY;
-        const nextCardY = skillStartY + (si + 1) * (cardH + cardGap) - scrollY;
+        const curCardY = skillStartY + si * (cardH + cardGap);
+        const nextCardY = skillStartY + (si + 1) * (cardH + cardGap);
         const startLineY = curCardY + cardH;
         const endLineY = nextCardY;
 
@@ -1621,7 +2245,7 @@ export class UIScene extends Phaser.Scene {
         const isLearned = level > 0;
         const isMaxed = level >= skill.maxLevel;
         const cardX = cardStartX;
-        const cardY = skillStartY + si * (cardH + cardGap) - scrollY;
+        const cardY = skillStartY + si * (cardH + cardGap);
         const dmgColor = DMG_COLORS[skill.damageType] ?? 0xcccccc;
         const dmgColorHex = '#' + dmgColor.toString(16).padStart(6, '0');
 
@@ -1774,11 +2398,14 @@ export class UIScene extends Phaser.Scene {
         cardHit.on('pointerover', () => {
           cardGfx.clear();
           drawCard(cardGfx, cardX, cardY, cardW, cardH, hoverStyle);
-          this.showSkillTooltip(skill, panelX + cardX, panelY + cardY, cardW, DMG_NAMES, TREE_NAMES);
+          // Screen-space card bounds (the panel may be scaled up on touch devices).
+          const cb = cardHit.getBounds();
+          this.showSkillTooltip(skill, cb.x, cb.y, cb.width, DMG_NAMES, TREE_NAMES);
         });
         cardHit.on('pointerout', () => {
           cardGfx.clear();
           drawCard(cardGfx, cardX, cardY, cardW, cardH, cardStyle);
+          if (IS_MOBILE) return; // no hover on touch: the tooltip stays until the next tap
           this.skillTooltip?.destroy(); this.skillTooltip = null;
         });
         scrollContainer.add(cardHit);
@@ -1786,7 +2413,7 @@ export class UIScene extends Phaser.Scene {
         // + Button
         if (canLevel) {
           const btnSize = px(26);
-          const plusBtn = this.makeButton(cardX + cardW - btnSize / 2 - px(10), cardY + btnSize / 2 + px(8), btnSize, btnSize, '+', () => {
+          const plusBtn = this.makeButton(cardX + cardW - btnSize / 2 - px(10), cardY + btnSize / 2 + px(8), btnSize, btnSize, '+', deferTap(() => {
             const result = investSkillPoint(
               skill,
               this.player.classData.skills,
@@ -1803,10 +2430,11 @@ export class UIScene extends Phaser.Scene {
               });
               this.toggleSkillTree(); this.toggleSkillTree();
             }
-          }, { variant: 'success', fontSize: 17, bold: true });
+          }), { variant: 'success', fontSize: 17, bold: true });
           scrollContainer.add(plusBtn);
         }
       });
+      applySkillScroll(tabIndex, this.skillTreeScrollY[tabIndex] ?? 0);
     };
 
     // Draw tab buttons
@@ -1857,15 +2485,7 @@ export class UIScene extends Phaser.Scene {
     this.skillTreeWheelHandler = (_pointer: Phaser.Input.Pointer, _gos: Phaser.GameObjects.GameObject[], _dx: number, dy: number) => {
       if (!this.skillPanel) return;
       const tabIndex = this.skillTreeActiveTab;
-      const treeSkills = treeSkillsMap.get(treeNames[tabIndex]) ?? [];
-      const totalContentH = treeSkills.length * (cardH + cardGap) + px(30);
-      const maxScrollY = Math.max(0, totalContentH - contentH);
-      const scroll = this.skillTreeScrollY[tabIndex] ?? 0;
-      const newScroll = Phaser.Math.Clamp(scroll + dy * 0.5, 0, maxScrollY);
-      if (newScroll !== scroll) {
-        this.skillTreeScrollY[tabIndex] = newScroll;
-        renderTab(tabIndex);
-      }
+      applySkillScroll(tabIndex, (this.skillTreeScrollY[tabIndex] ?? 0) + dy * 0.5);
     };
     this.input.on('wheel', this.skillTreeWheelHandler);
 
@@ -1873,7 +2493,7 @@ export class UIScene extends Phaser.Scene {
     renderTab(this.skillTreeActiveTab);
 
     // Footer
-    this.skillPanel.add(this.add.text(pw / 2, ph - px(16), t('ui.skillTree.footer'), {
+    this.skillPanel.add(this.add.text(pw / 2, ph - px(16), t(IS_MOBILE ? 'ui.skillTree.footerTouch' : 'ui.skillTree.footer'), {
       fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
@@ -1916,7 +2536,7 @@ export class UIScene extends Phaser.Scene {
         const synLv = this.player.getSkillLevel(syn.skillId);
         if (synSkill) {
           const bonus = Math.round(syn.damagePerLevel * synLv * 100);
-          lines.push(t('ui.skillTree.tooltip.synergyLine', { name: getSkillName(synSkill.id, synSkill.name), perLevel: String(syn.damagePerLevel * 100), bonus: String(bonus) }));
+          lines.push(t('ui.skillTree.tooltip.synergyLine', { name: getSkillName(synSkill.id, synSkill.name), perLevel: String(Math.round(syn.damagePerLevel * 1000) / 10), bonus: String(Math.round(bonus * 10) / 10) }));
         }
       }
     }
@@ -1968,6 +2588,18 @@ export class UIScene extends Phaser.Scene {
     this.skillTooltip.add(tipHeader);
     this.skillTooltip.add(addDivider(this, tipW / 2, headerBottom - px(3), tipW - tipPad * 2));
     this.skillTooltip.add(textObj);
+    if (IS_MOBILE) {
+      // Touch: enlarged, pinned to the screen's right edge, dismissed by the next tap.
+      const tip = this.skillTooltip;
+      const sc = Math.min(MOBILE_POP_SCALE, (H - px(12)) / finalH);
+      tip.setScale(sc).setPosition(W - tipW * sc - px(6), Phaser.Math.Clamp(cardWorldY, px(6), H - finalH * sc - px(6)));
+      this.time.delayedCall(0, () => {
+        if (this.skillTooltip !== tip) return;
+        this.input.once('pointerdown', () => {
+          if (this.skillTooltip === tip) { tip.destroy(); this.skillTooltip = null; }
+        });
+      });
+    }
   }
 
   // --- Character Stats Panel (C) ---
@@ -2405,7 +3037,7 @@ export class UIScene extends Phaser.Scene {
     });
 
     // Footer
-    panel.add(this.add.text(pw / 2, footerY, t('ui.homestead.footer'), {
+    panel.add(this.add.text(pw / 2, footerY, t(IS_MOBILE ? 'ui.homestead.footerTouch' : 'ui.homestead.footer'), {
       fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
@@ -2777,8 +3409,8 @@ export class UIScene extends Phaser.Scene {
           const cx = (pw - rowW) / 2 + i * (bigSz + gap) + bigSz / 2;
           const { slot, objects } = this.createItemSlot(cx, curY + bigSz / 2, bigSz, item);
           card.add(objects);
-          slot.on('pointerover', (p: Phaser.Input.Pointer) => this.showItemTooltip(item, p.x, p.y));
-          slot.on('pointerout', () => this.hideItemTooltip());
+          slot.on('pointerover', (p: Phaser.Input.Pointer) => this.showItemTooltip(item, (p.x / RENDER_SCALE), (p.y / RENDER_SCALE)));
+          slot.on('pointerout', () => this.hideHoverTooltip());
           slot.on('pointerdown', () => { selectedChoice = i; audioManager.playSFX('click'); drawHighlight(); });
           const label = cardData.choiceLabels[i] ?? '';
           card.add(this.add.text(cx, curY + bigSz + px(6), label, {
@@ -2834,8 +3466,21 @@ export class UIScene extends Phaser.Scene {
         const npcQuestIds = NPCDefinitions[rawData.npcId]?.quests ?? [];
         const next = gatherNpcQuests(npcQuestIds, questSystem.quests, questSystem.progress, this.player.level);
         if (next.length > 0) {
-          this.time.delayedCall(450, () => {
+          const offer = (): void => {
             if (!this.questCardPanel && !this.dialoguePanel) this.openQuestCard(next, npcName, hasDialogueTree, rawData);
+          };
+          // If the turn-in starts a cutscene, offer the next chapter once it ends.
+          this.time.delayedCall(900, () => {
+            if (this.zone?.storyDirector?.busy) {
+              const onStory = (d: { active: boolean }): void => {
+                if (d.active) return;
+                EventBus.off(GameEvents.STORY_STATE, onStory);
+                this.time.delayedCall(300, offer);
+              };
+              EventBus.on(GameEvents.STORY_STATE, onStory);
+            } else {
+              offer();
+            }
           });
         }
       });
@@ -3041,6 +3686,7 @@ export class UIScene extends Phaser.Scene {
     const textContainer = this.add.container(px(18), textAreaY + px(4));
     textContainer.setMask(textMask);
     this.dialoguePanel.add(textContainer);
+    this.dialoguePanel.setData('fitMasks', [maskGraphics]);
 
     const npcText = this.add.text(0, -this.dialogueScrollY, displayText, {
       fontSize: fs(13), color: UI_COLORS.text, fontFamily: FONT,
@@ -3068,9 +3714,28 @@ export class UIScene extends Phaser.Scene {
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.input.on('wheel', scrollHandler as any);
+      // Touch: drag the text area to scroll.
+      let dragLastY: number | null = null;
+      const dragMove = (p: Phaser.Input.Pointer): void => {
+        if (dragLastY === null || !p.isDown) return;
+        const k = this.dialoguePanel?.scaleY || 1;
+        this.dialogueScrollY = Math.max(0, Math.min(maxScroll, this.dialogueScrollY - ((p.y / RENDER_SCALE) - dragLastY) / k));
+        npcText.y = -this.dialogueScrollY;
+        dragLastY = (p.y / RENDER_SCALE);
+      };
+      const dragEnd = (): void => { dragLastY = null; };
+      if (IS_MOBILE) {
+        const dragZone = this.add.rectangle(pw / 2, textAreaY + textAreaH / 2, pw - px(28), textAreaH, 0x000000, 0).setInteractive();
+        dragZone.on('pointerdown', (p: Phaser.Input.Pointer) => { dragLastY = (p.y / RENDER_SCALE); });
+        this.dialoguePanel.add(dragZone);
+        this.input.on('pointermove', dragMove);
+        this.input.on('pointerup', dragEnd);
+      }
       // Cleanup on panel destroy
       const originalDestroy = this.dialoguePanel.destroy.bind(this.dialoguePanel);
       this.dialoguePanel.destroy = (...args: Parameters<typeof originalDestroy>) => {
+        this.input.off('pointermove', dragMove);
+        this.input.off('pointerup', dragEnd);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.input.off('wheel', scrollHandler as any);
         maskGraphics.destroy();
@@ -3196,7 +3861,7 @@ export class UIScene extends Phaser.Scene {
     }
 
     // Footer hint
-    this.dialoguePanel.add(this.add.text(pw / 2, ph - px(16), needsScroll ? t('ui.dialogue.scrollHint') : '', {
+    this.dialoguePanel.add(this.add.text(pw / 2, ph - px(16), needsScroll ? t(IS_MOBILE ? 'ui.dialogue.scrollHintTouch' : 'ui.dialogue.scrollHint') : '', {
       fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
 
@@ -3503,8 +4168,44 @@ export class UIScene extends Phaser.Scene {
   }
 
   // --- Item Tooltip ---
+  /**
+   * Item tooltip. Equipment not being worn also shows what wearing it would
+   * change, and (desktop) the worn item's card beside it for a side-by-side look.
+   */
   private showItemTooltip(item: ItemInstance, screenX: number, screenY: number): void {
     this.hideItemTooltip();
+    const compare = compareTarget(item, this.zone.inventorySystem.equipment);
+    const main = this.buildItemTooltip(item, compare);
+    if (IS_MOBILE) {
+      this.tooltipContainer = main.container;
+      this.placeMobileTooltip(main.container, main.tipW, main.tipH, screenX, screenY);
+      return;
+    }
+    const worn = compare?.equipped ? this.buildItemTooltip(compare.equipped, null, t('ui.compare.equippedTag')) : null;
+    const gap = px(8);
+    const tagH = worn ? px(18) : 0;
+    const totalW = main.tipW + (worn ? worn.tipW + gap : 0);
+    const totalH = Math.max(main.tipH, worn ? worn.tipH + tagH : 0);
+    // Clamp to screen: the pair sits right of the cursor, or left of it when there is no room.
+    let tx = screenX + px(16);
+    let ty = screenY - px(10);
+    if (tx + totalW > W - px(4)) tx = screenX - totalW - px(16);
+    if (ty + totalH > H - px(4)) ty = H - totalH - px(4);
+    if (ty < px(4)) ty = px(4);
+    if (tx < px(4)) tx = px(4);
+    const outer = this.add.container(tx, ty).setDepth(PANEL_STYLE.depth.tooltip);
+    outer.add(main.container);
+    if (worn) {
+      // The worn item sits on the far side from the cursor, main card nearest the item.
+      const wornLeft = tx >= screenX;
+      main.container.setPosition(wornLeft ? worn.tipW + gap : 0, 0);
+      worn.container.setPosition(wornLeft ? 0 : main.tipW + gap, tagH);
+      outer.add(worn.container);
+    }
+    this.tooltipContainer = outer;
+  }
+
+  private buildItemTooltip(item: ItemInstance, compare: CompareTarget | null, tag?: string): { container: Phaser.GameObjects.Container; tipW: number; tipH: number } {
     const base = getItemBase(item.baseId);
     const tipW = px(256);
     const pad = px(PANEL_STYLE.tooltip.padding) + px(2);
@@ -3564,8 +4265,8 @@ export class UIScene extends Phaser.Scene {
       }
     }
     // Socket count (if base has sockets)
-    if (base && 'sockets' in base) {
-      const maxSock = (base as WeaponBase | ArmorBase).sockets;
+    if (base) {
+      const maxSock = itemSocketCapacity(item);
       if (maxSock > 0) {
         const filled = item.sockets?.length ?? 0;
         statLines.push({ text: t('ui.tooltip.socketCount', { filled: String(filled), max: String(maxSock) }), color: '#8a8290', size: 11 });
@@ -3625,6 +4326,18 @@ export class UIScene extends Phaser.Scene {
       container.add(txt);
       ly += txt.height + px(3);
     }
+    if (compare) {
+      container.add(addDivider(this, tipW / 2, ly + px(3), tipW - pad * 4, false));
+      ly += px(9);
+      for (const line of this.compareLines(item, compare)) {
+        const txt = this.add.text(pad, ly, line.text, {
+          fontSize: fs(line.size), color: line.color, fontFamily: PANEL_STYLE.tooltip.font,
+          fontStyle: line.bold ? 'bold' : 'normal', wordWrap: { width: tipW - pad * 2, useAdvancedWrap: true },
+        });
+        container.add(txt);
+        ly += txt.height + px(3);
+      }
+    }
     if (base) {
       ly += px(4);
       container.add(this.add.image(pad + px(7), ly + px(8), coinTexture(this, px(12))));
@@ -3635,28 +4348,101 @@ export class UIScene extends Phaser.Scene {
     }
     const tipH = Math.ceil((ly + pad) / px(4)) * px(4);
 
-    // Clamp to screen
-    let tx = screenX + px(16);
-    let ty = screenY - px(10);
-    if (tx + tipW > W - px(4)) tx = screenX - tipW - px(16);
-    if (ty + tipH > H - px(4)) ty = H - tipH - px(4);
-    if (ty < px(4)) ty = px(4);
-    if (tx < px(4)) tx = px(4);
-    container.setPosition(tx, ty);
     container.addAt(addFrame(this, 0, 0, tipW, tipH, { variant: 'tooltip', accent: qualityNum(item.quality) }), 0);
-    this.tooltipContainer = container;
+    if (tag) {
+      container.add(this.add.text(px(4), -px(17), tag, {
+        fontSize: fs(11), color: '#d8b56a', fontFamily: PANEL_STYLE.tooltip.font, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+      }));
+    }
+    return { container, tipW, tipH };
+  }
+
+  /** "If you wear this": per-stat gains (green) and losses (red) against the worn item. */
+  private compareLines(item: ItemInstance, compare: CompareTarget): { text: string; color: string; size: number; bold?: boolean }[] {
+    const slotLabel = t(`ui.tooltip.slot.${compare.slot}`);
+    const lines: { text: string; color: string; size: number; bold?: boolean }[] = [
+      { text: t('ui.compare.header', { slot: slotLabel }), color: '#d8b56a', size: 11, bold: true },
+    ];
+    if (!compare.equipped) {
+      lines.push({ text: t('ui.compare.emptySlot'), color: '#7ee07e', size: 12 });
+      return lines;
+    }
+    if (!item.identified && item.quality !== 'normal') {
+      lines.push({ text: t('ui.compare.unidentified'), color: '#8f8676', size: 11 });
+    }
+    const deltas = statDeltas(item, compare.equipped);
+    if (deltas.length === 0) lines.push({ text: t('ui.compare.same'), color: '#8f8676', size: 12 });
+    for (const d of deltas) {
+      const label = d.stat === AVG_DAMAGE ? t('ui.compare.avgDamage')
+        : d.stat === BASE_DEFENSE ? t('ui.compare.defense')
+          : getStatLabel(d.stat);
+      const suffix = d.stat !== AVG_DAMAGE && d.stat !== BASE_DEFENSE && isStatPercent(d.stat) ? '%' : '';
+      const sign = d.delta > 0 ? '+' : '−';
+      lines.push({
+        text: `${d.delta > 0 ? '▲' : '▼'} ${sign}${Math.abs(d.delta)}${suffix} ${label}`,
+        color: d.delta > 0 ? '#7ee07e' : '#ff6b5a', size: 12,
+      });
+    }
+    return lines;
+  }
+
+  /**
+   * Touch devices: tooltips are enlarged, sit beside the item's action popup (when one is
+   * open) instead of under the finger, and stay up until the next tap — there is no hover.
+   */
+  private placeMobileTooltip(container: Phaser.GameObjects.Container, tipW: number, tipH: number, screenX: number, screenY: number): void {
+    const m = px(6);
+    const s = Math.min(MOBILE_POP_SCALE, (H - m * 2) / tipH);
+    const sw = tipW * s, sh = tipH * s;
+    container.setScale(s);
+    let tx: number;
+    let ty: number;
+    const pop = this.contextPopup;
+    if (pop?.active) {
+      const pb = pop.getBounds();
+      tx = pb.x - sw - px(8);
+      if (tx < m) tx = pb.right + px(8);
+      if (tx + sw > W - m) tx = Math.max(m, pb.x - sw - px(8));
+      ty = pb.y - px(10);
+    } else {
+      tx = screenX + px(28);
+      if (tx + sw > W - m) tx = screenX - sw - px(28);
+      ty = screenY - sh / 3;
+    }
+    container.setPosition(Phaser.Math.Clamp(tx, m, W - m - sw), Phaser.Math.Clamp(ty, m, H - m - sh));
+    // Dismiss (with its action popup) on the next tap anywhere — registered next frame so
+    // this tap doesn't count. A tap on another item has already replaced both by then.
+    const popAtShow = pop?.active ? pop : null;
+    this.time.delayedCall(0, () => {
+      if (this.tooltipContainer !== container) return;
+      this.input.once('pointerdown', () => {
+        if (this.tooltipContainer === container) this.hideItemTooltip();
+        if (popAtShow && this.contextPopup === popAtShow) this.hideContextPopup();
+      });
+    });
   }
 
   private hideItemTooltip(): void {
     if (this.tooltipContainer) { this.tooltipContainer.destroy(); this.tooltipContainer = null; }
   }
 
+  /** Hover-out handler: touch has no hover, so tooltips stay until the next tap there. */
+  private hideHoverTooltip(): void {
+    if (!IS_MOBILE) this.hideItemTooltip();
+  }
+
   // --- Context Popup ---
-  private showContextPopup(item: ItemInstance, screenX: number, screenY: number): void {
+  private showContextPopup(
+    item: ItemInstance, screenX: number, screenY: number,
+    actionsOverride?: { label: string; callback: () => void; variant?: ButtonOptions['variant'] }[],
+  ): void {
     this.hideContextPopup();
     const base = getItemBase(item.baseId);
-    const actions: { label: string; callback: () => void }[] = [];
-    if (base && base.slot) {
+    const actions: { label: string; callback: () => void; variant?: ButtonOptions['variant'] }[] = [];
+    if (actionsOverride) {
+      actions.push(...actionsOverride);
+    } else if (base && base.slot) {
       actions.push({ label: t('ui.context.equip'), callback: () => {
         this.zone.inventorySystem.equip(item.uid);
         this.zone.invalidateEquipStats();
@@ -3675,7 +4461,7 @@ export class UIScene extends Phaser.Scene {
       }});
     }
     const needsConfirm = item.quality === 'rare' || item.quality === 'legendary' || item.quality === 'set';
-    actions.push({ label: t('ui.context.discard'), callback: () => {
+    if (!actionsOverride) actions.push({ label: t('ui.context.discard'), callback: () => {
       if (needsConfirm) {
         this.showDiscardConfirm(item);
       } else {
@@ -3685,26 +4471,33 @@ export class UIScene extends Phaser.Scene {
       }
     }});
 
-    const popW = px(108), btnH = px(28), padY = px(9);
+    // Touch: thumb-sized buttons, placed beside the finger rather than under it.
+    const popW = IS_MOBILE ? px(190) : px(108), btnH = IS_MOBILE ? px(80) : px(28), padY = px(9);
     const popH = actions.length * btnH + padY * 2;
-    let popX = screenX;
-    let popY = screenY;
+    let popX = IS_MOBILE ? screenX + px(36) : screenX;
+    let popY = IS_MOBILE ? screenY - popH / 2 : screenY;
+    if (IS_MOBILE && popX + popW > W - px(4)) popX = screenX - px(36) - popW;
     if (popX + popW > W) popX = W - popW - px(4);
     if (popY + popH > H) popY = H - popH - px(4);
+    if (IS_MOBILE) { popX = Math.max(px(4), popX); popY = Math.max(px(4), popY); }
 
     this.contextPopup = this.add.container(popX, popY).setDepth(PANEL_STYLE.depth.contextMenu);
     this.contextPopup.add(addFrame(this, 0, 0, popW, popH, { variant: 'tooltip', accent: qualityNum(item.quality) }));
     actions.forEach((action, i) => {
       const by = padY + i * btnH + btnH / 2;
       const isDiscard = action.label === t('ui.context.discard');
-      this.contextPopup!.add(this.makeButton(popW / 2, by, popW - px(16), btnH - px(4), action.label, () => action.callback(), {
-        variant: isDiscard ? 'danger' : 'secondary', fontSize: 13,
+      this.contextPopup!.add(this.makeButton(popW / 2, by, popW - px(16), btnH - (IS_MOBILE ? px(10) : px(4)), action.label, () => action.callback(), {
+        variant: action.variant ?? (isDiscard ? 'danger' : 'secondary'), fontSize: IS_MOBILE ? 24 : 13,
       }));
     });
   }
 
   private hideContextPopup(): void {
-    if (this.contextPopup) { this.contextPopup.destroy(); this.contextPopup = null; }
+    if (this.contextPopup) {
+      this.contextPopup.destroy(); this.contextPopup = null;
+      // On touch the tooltip belongs to the popup (both open on the same tap).
+      if (IS_MOBILE) this.hideItemTooltip();
+    }
   }
 
   private showDiscardConfirm(item: ItemInstance): void {
@@ -3893,9 +4686,9 @@ export class UIScene extends Phaser.Scene {
 
         // Tooltip on hover
         gemBg.on('pointerover', (pointer: Phaser.Input.Pointer) => {
-          this.showItemTooltip(gemItem, pointer.x, pointer.y);
+          this.showItemTooltip(gemItem, (pointer.x / RENDER_SCALE), (pointer.y / RENDER_SCALE));
         });
-        gemBg.on('pointerout', () => this.hideItemTooltip());
+        gemBg.on('pointerout', () => this.hideHoverTooltip());
 
         // Click to socket
         if (hasEmptySlots) {
@@ -3992,7 +4785,7 @@ export class UIScene extends Phaser.Scene {
     this.renderPetSection(pw, ph);
 
     // Footer
-    panel.add(this.add.text(pw / 2, ph - px(18), t('ui.companion.footer'), {
+    panel.add(this.add.text(pw / 2, ph - px(18), IS_MOBILE ? '' : t('ui.companion.footer'), {
       fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
@@ -4636,7 +5429,7 @@ export class UIScene extends Phaser.Scene {
     }
 
     // Footer
-    panel.add(this.add.text(pw / 2, ph - px(18), t('ui.achievement.footer'), {
+    panel.add(this.add.text(pw / 2, ph - px(18), IS_MOBILE ? '' : t('ui.achievement.footer'), {
       fontSize: fs(11), color: UI_COLORS.muted, fontFamily: FONT,
     }).setOrigin(0.5));
   }
@@ -4759,15 +5552,17 @@ export class UIScene extends Phaser.Scene {
 
       let dragging = false;
       const updateSlider = (pointerX: number) => {
-        const localX = Math.max(0, Math.min(pointerX - panelX - sliderX, sliderW));
+        const ap = this.audioPanel;
+        const panelLocalX = ap ? (pointerX - ap.x) / (ap.scaleX || 1) : pointerX - panelX;
+        const localX = Math.max(0, Math.min(panelLocalX - sliderX, sliderW));
         const v = localX / sliderW;
         handle.x = sliderX + localX;
         fill.width = localX;
         pctText.setText(`${Math.round(v * 100)}%`);
         onVolume(v);
       };
-      hitArea.on('pointerdown', (p: Phaser.Input.Pointer) => { dragging = true; updateSlider(p.x); });
-      const pointerMoveHandler = (p: Phaser.Input.Pointer) => { if (dragging) updateSlider(p.x); };
+      hitArea.on('pointerdown', (p: Phaser.Input.Pointer) => { dragging = true; updateSlider((p.x / RENDER_SCALE)); });
+      const pointerMoveHandler = (p: Phaser.Input.Pointer) => { if (dragging) updateSlider((p.x / RENDER_SCALE)); };
       const pointerUpHandler = () => { dragging = false; };
       this.input.on('pointermove', pointerMoveHandler);
       this.input.on('pointerup', pointerUpHandler);
@@ -5007,7 +5802,50 @@ export class UIScene extends Phaser.Scene {
 
   /** Create the unified opaque panel frame (carved iron, gold filigree, header band). */
   private createPanelBg(pw: number, ph: number, header: number = px(PANEL_STYLE.header.height), opts: { accent?: number; gem?: number } = {}): Phaser.GameObjects.Image {
-    return addFrame(this, 0, 0, pw, ph, { variant: 'panel', header, accent: opts.accent, gem: opts.gem });
+    const bg = addFrame(this, 0, 0, pw, ph, { variant: 'panel', header, accent: opts.accent, gem: opts.gem });
+    if (IS_MOBILE) {
+      // Swallow taps on the panel body so they don't walk the hero around underneath it.
+      bg.setInteractive();
+      // Scale the whole panel up to fill the phone screen once its contents are built
+      // (panel builders add children after this call, so wait for the frame's render).
+      this.events.once(Phaser.Scenes.Events.PRE_RENDER, () => {
+        const panel = bg.parentContainer;
+        if (panel && panel.active && bg.active) this.fitPanelForMobile(panel, pw, ph);
+      });
+    }
+    return bg;
+  }
+
+  /**
+   * Touch devices: scale a panel up as far as the screen allows (text in 1280×720 panels is
+   * tiny on a phone), keep it on screen, grow its close button to a thumb-sized target and
+   * move any geometry masks registered under the panel's `fitMasks` data along with it.
+   */
+  private fitPanelForMobile(panel: Phaser.GameObjects.Container, pw: number, ph: number): void {
+    if (panel.getData('noFit') || panel.getData('fitScale')) return;
+    const m = px(12);
+    const s = Math.max(1, Math.min(MOBILE_PANEL_MAX_SCALE, (W - m * 2) / pw, (H - m * 2) / ph));
+    const ox = panel.x, oy = panel.y;
+    const sw = pw * s, sh = ph * s;
+    const nx = Phaser.Math.Clamp(ox + pw / 2, m + sw / 2, W - m - sw / 2) - sw / 2;
+    const ny = Phaser.Math.Clamp(oy + ph / 2, m + sh / 2, H - m - sh / 2) - sh / 2;
+    panel.setData('fitScale', s);
+    this.tweens.killTweensOf(panel);
+    if (panel.getData('noPop')) {
+      panel.setPosition(nx, ny).setScale(s).setAlpha(1);
+    } else {
+      panel.setPosition(nx, ny).setScale(s * 0.94).setAlpha(0.3);
+      this.tweens.add({ targets: panel, scaleX: s, scaleY: s, alpha: 1, duration: 140, ease: 'Back.easeOut' });
+    }
+    const masks = panel.getData('fitMasks') as Phaser.GameObjects.Graphics[] | undefined;
+    for (const g of masks ?? []) g.setScale(s).setPosition(nx - ox * s, ny - oy * s);
+    const closeScale = Math.max(1, MOBILE_CLOSE_SIZE / (CLOSE_BTN_TEX * s));
+    for (const child of panel.list) {
+      if (!(child instanceof Phaser.GameObjects.Image) || !child.getData('closeBtn')) continue;
+      const half = (CLOSE_BTN_TEX * closeScale) / 2;
+      child.setScale(closeScale).setPosition(pw - half - px(2), Math.max(px(PANEL_STYLE.header.height) / 2 + px(1), half - px(4)));
+      child.setData('baseScale', closeScale);
+    }
   }
 
   /** Create a unified panel header title (centred in the header band, flanked by gold flourishes). */
@@ -5027,7 +5865,9 @@ export class UIScene extends Phaser.Scene {
 
   /** Create a unified close button (iron medallion) at the header's top-right. */
   private createPanelCloseBtn(pw: number, onClose: () => void): Phaser.GameObjects.Image {
-    return addCloseButton(this, pw - px(22), px(PANEL_STYLE.header.height) / 2 + px(1), onClose);
+    const btn = addCloseButton(this, pw - px(22), px(PANEL_STYLE.header.height) / 2 + px(1), onClose);
+    if (IS_MOBILE) btn.setData('closeBtn', true);
+    return btn;
   }
 
   /** Framed button (centre at x, y). */
@@ -5122,6 +5962,34 @@ export class UIScene extends Phaser.Scene {
     this.hideContextPopup();
     this.closeDialogue();
     this.closeQuestCard();
+    this.abyssUI?.closeDismissable();
+  }
+
+  /** A labyrinth modal (tier picker / boon choice / summary) is open: gameplay keys should wait. */
+  isAbyssModalOpen(): boolean {
+    return !!this.abyssUI?.isModalOpen();
+  }
+
+  /**
+   * Labyrinth UI. Its run widget sits under the minimap on desktop (the quest tracker moves
+   * down below it) and left of the zone plate on touch devices, clear of the panel buttons.
+   */
+  private createAbyssUI(): void {
+    this.trackerShift = 0;
+    const w = IS_MOBILE ? px(300) : HUD.tracker.w;
+    const hudAnchor = IS_MOBILE
+      ? { x: HUD.info.x - px(20) - w, y: HUD.info.y - px(8), w }
+      : { x: HUD.tracker.x - px(9), y: HUD.tracker.y - px(8), w };
+    this.abyssUI = new AbyssRunUI(this, {
+      hudAnchor,
+      onHudResize: (bottom) => {
+        if (IS_MOBILE) return;
+        this.trackerShift = bottom === null ? 0 : bottom - hudAnchor.y + px(14);
+        this.questTracker.setY(HUD.tracker.y + this.trackerShift);
+        this.lastQuestTrackerSignature = '';
+        this.nextQuestTrackerRefreshAt = 0;
+      },
+    });
   }  private getQualityColorNum(quality: string): number {
     switch (quality) {
       case 'magic': return 0x2471a3;
@@ -5144,6 +6012,8 @@ export class UIScene extends Phaser.Scene {
 
   shutdown(): void {
     this.closeAllPanels();
+    this.abyssUI?.destroy();
+    this.abyssUI = null;
     this.cleanupAudioPanelInputHandlers();
     this.subscriptions.dispose();
     this.skillSlots = [];
@@ -5168,6 +6038,10 @@ export class UIScene extends Phaser.Scene {
 
   /** Per-frame HUD sync: only cheap property updates (no static redraws). */
   update(time: number, delta: number = 16): void {
+    // The HUD steps aside while a story beat plays.
+    const cinematic = !!this.zone?.storyDirector?.cinematic;
+    if (this.cameras.main.visible === cinematic) this.cameras.main.setVisible(!cinematic);
+    this.updateBossBar();
     if (!this.player) return;
     const orbBottom = HUD.orbY + GLOBE_R;
     const orbSpan = GLOBE_R * 2;
@@ -5251,16 +6125,20 @@ export class UIScene extends Phaser.Scene {
     if (this.goldText.text !== goldText) this.goldText.setText(goldText);
     const autoCombatText = this.player.autoCombat ? t('ui.hud.autoCombat.on') : t('ui.hud.autoCombat.off');
     const autoCombatColor = this.player.autoCombat ? '#8ff07a' : '#b0a8b4';
-    if (this.autoCombatText.text !== autoCombatText) this.autoCombatText.setText(autoCombatText);
-    if (this.autoCombatText.style.color !== autoCombatColor) this.autoCombatText.setColor(autoCombatColor);
+    if (this.autoCombatText) {
+      if (this.autoCombatText.text !== autoCombatText) this.autoCombatText.setText(autoCombatText);
+      if (this.autoCombatText.style.color !== autoCombatColor) this.autoCombatText.setColor(autoCombatColor);
+    }
 
     // Auto-loot button update
     const alLabels: Record<string, string> = { off: t('ui.hud.autoLoot.off'), all: t('ui.hud.autoLoot.all'), magic: t('ui.hud.autoLoot.magic'), rare: t('ui.hud.autoLoot.rare'), legendary: t('ui.hud.autoLoot.legendary') };
     const alColors: Record<string, string> = { off: '#b0a8b4', all: '#e0d8cc', magic: QUALITY_TEXT.magic, rare: QUALITY_TEXT.rare, legendary: QUALITY_TEXT.legendary };
     const autoLootText = alLabels[this.player.autoLootMode] ?? t('ui.hud.autoLoot.off');
     const autoLootColor = alColors[this.player.autoLootMode] ?? '#b0a8b4';
-    if (this.autoLootText.text !== autoLootText) this.autoLootText.setText(autoLootText);
-    if (this.autoLootText.style.color !== autoLootColor) this.autoLootText.setColor(autoLootColor);
+    if (this.autoLootText) {
+      if (this.autoLootText.text !== autoLootText) this.autoLootText.setText(autoLootText);
+      if (this.autoLootText.style.color !== autoLootColor) this.autoLootText.setColor(autoLootColor);
+    }
 
     if (this.zone && (this.zone as any).currentMapId) {
       const map = AllMaps[(this.zone as any).currentMapId] ?? (this.zone as any).mapData;
@@ -5302,6 +6180,11 @@ export class UIScene extends Phaser.Scene {
         }
         if (cdText?.active && cdText.visible) cdText.setVisible(false);
       }
+    }
+
+    if (!this.logExpanded && time >= this.nextLogFadeAt) {
+      this.nextLogFadeAt = time + 250;
+      this.updateLogDisplay();
     }
 
     if (time >= this.nextMinimapRefreshAt) {
@@ -5347,7 +6230,7 @@ export class UIScene extends Phaser.Scene {
     const rank = (e: { quest: { id: string; zone: string } }): number =>
       e.quest.id === guidedId ? 0 : e.quest.zone === zoneId ? 1 : 2;
     const active = this.zone.questSystem.getActiveQuests().sort((a, b) => rank(a) - rank(b));
-    const state = buildTrackerState(active);
+    const state = buildTrackerState(active, IS_MOBILE ? MOBILE_TRACKER_QUESTS : undefined);
     this.questTrackerState = state;
 
     // Build signature including expanded state for change detection
@@ -5358,7 +6241,16 @@ export class UIScene extends Phaser.Scene {
 
     // --- Render tracker entries ---
     let textIdx = 0;
-    let y = px(18); // Start below header
+    // Line pitches (title / summary / objective / gap); taller on touch devices for the bigger fonts.
+    const pitch = IS_MOBILE
+      ? { head: px(28), title: px(26), summary: px(24), obj: px(22), scroll: px(24) }
+      : { head: px(18), title: px(17), summary: px(14), obj: px(13), scroll: px(14) };
+    const lineW = HUD.tracker.w - px(18);
+    /** Mobile: squeeze over-long lines horizontally instead of spilling past the frame. */
+    const fitLine = (o: Phaser.GameObjects.Text): void => {
+      if (IS_MOBILE) o.setScale(o.width > lineW ? lineW / o.width : 1, 1);
+    };
+    let y = pitch.head; // Start below header
 
     for (let qi = 0; qi < state.entries.length; qi++) {
       const entry = state.entries[qi];
@@ -5375,7 +6267,7 @@ export class UIScene extends Phaser.Scene {
         titleObj = this.add.text(0, 0, '', { fontFamily: FONT }).setOrigin(0, 0);
         // Touch-friendly hit area: minimum px(22) height (44px physical at DPR=2)
         titleObj.setInteractive(
-          new Phaser.Geom.Rectangle(0, 0, px(200), px(22)),
+          new Phaser.Geom.Rectangle(0, 0, IS_MOBILE ? lineW : px(200), IS_MOBILE ? px(26) : px(22)),
           Phaser.Geom.Rectangle.Contains,
         );
         titleObj.input!.cursor = 'pointer';
@@ -5401,8 +6293,9 @@ export class UIScene extends Phaser.Scene {
       titleObj.setText(titleText);
       titleObj.setY(y);
       titleObj.setData('questId', entry.questId);
-      titleObj.setFontSize(fs(12));
+      titleObj.setFontSize(hfs(12));
       titleObj.setFontStyle('bold');
+      fitLine(titleObj);
       // Gold text for completed, gold for main, muted for side
       if (entry.isCompleted) {
         titleObj.setColor('#f1c40f');
@@ -5410,7 +6303,7 @@ export class UIScene extends Phaser.Scene {
         titleObj.setColor(entry.category === 'main' ? '#e8c252' : '#a89060');
       }
       textIdx++;
-      y += px(17);
+      y += pitch.title;
 
       // Compact progress summary (always shown below title)
       let summaryObj = this.questTrackerTexts[textIdx];
@@ -5422,11 +6315,12 @@ export class UIScene extends Phaser.Scene {
       summaryObj.setVisible(true);
       summaryObj.setText(`  ${entry.progressSummary}`);
       summaryObj.setY(y);
-      summaryObj.setFontSize(fs(10));
+      summaryObj.setFontSize(hfs(10));
       summaryObj.setFontStyle('');
+      fitLine(summaryObj);
       summaryObj.setColor(entry.isCompleted ? '#f1c40f' : '#aaaaaa');
       textIdx++;
-      y += px(14);
+      y += pitch.summary;
 
       // Expanded: show individual objective lines
       if (isExpanded && entry.objectiveLines.length > 0) {
@@ -5440,11 +6334,12 @@ export class UIScene extends Phaser.Scene {
           objObj.setVisible(true);
           objObj.setText(`    ${objLine.label} ${objLine.progress}`);
           objObj.setY(y);
-          objObj.setFontSize(fs(9));
+          objObj.setFontSize(hfs(9));
           objObj.setFontStyle('');
+          fitLine(objObj);
           objObj.setColor(objLine.done ? '#66aa66' : '#888888');
           textIdx++;
-          y += px(13);
+          y += pitch.obj;
         }
       }
 
@@ -5458,7 +6353,7 @@ export class UIScene extends Phaser.Scene {
       this.questTrackerScrollText.setText(t('ui.questTracker.scrollIndicator', { count: String(remaining) }));
       this.questTrackerScrollText.setY(y);
       this.questTrackerScrollText.setVisible(true);
-      y += px(14);
+      y += pitch.scroll;
     } else if (this.questTrackerScrollText) {
       this.questTrackerScrollText.setVisible(false);
     }
@@ -5474,7 +6369,7 @@ export class UIScene extends Phaser.Scene {
         const bgH = Math.ceil((y + px(12)) / px(8)) * px(8);
         this.questTrackerBg.setVisible(true);
         this.questTracker.setVisible(true);
-        this.questTrackerBg.setTexture(frameTextureKey(this, px(218), bgH, 0.9));
+        this.questTrackerBg.setTexture(frameTextureKey(this, HUD.tracker.w, bgH, 0.9));
         this.questTrackerBg.setPosition(this.questTracker.x - px(9) - px(8), this.questTracker.y - px(7) - px(8));
       } else {
         this.questTrackerBg.setVisible(false);

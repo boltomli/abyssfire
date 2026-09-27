@@ -37,6 +37,24 @@ import {
   type Skeleton,
 } from '../rig/Humanoid';
 import { rigMonster } from '../rig/MonsterKit';
+import { drawHumanoidView, solveViewSkeleton, type HumanView, type ViewPart, type ViewSkeleton } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  band,
+  clipTo,
+  decal,
+  groundX,
+  hull3,
+  loftFill,
+  lp,
+  monsterViewSkin,
+  profileRings,
+  surf,
+  surfPatch,
+  surfVis,
+  turnedHead,
+  withAffine,
+} from '../rig/MonsterView';
 import { curlChain, embers, erode, hash01, localPt, taperPath } from './Imp';
 
 // ── Palette ─────────────────────────────────────────────────────────────
@@ -378,6 +396,191 @@ const HERALD_SKIN: HumanSkin = {
   },
 };
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const HERALD_BUILD = { hipW: 2.4, shW: 6.4, elbowOut: 1.4, footOut: 0.3 };
+const HOOD_RINGS = profileRings([vec(-6.6, 5), vec(-7.4, -2), vec(-5.6, -8), vec(-1.6, -12.4), vec(1.6, -12.4), vec(6, -6.4), vec(7.4, 0), vec(7, 6.4), vec(2, 7.4)], y => -y, a => a * 0.9, 8);
+const PORTAL = { h: 1.2, phi: 0 };
+
+function robeRings(len: number, p: HumanPose): { h: number; a: number; b: number; f: number }[] {
+  const sw = -p.flow * 5;
+  return [
+    { h: len + 0.6, a: 4.6, b: 5.4, f: 0.6 },
+    { h: len - 4, a: 7.4, b: 7.8, f: 0.8 },
+    { h: len * 0.4, a: 8.2, b: 8.4, f: 0.4 },
+    { h: 0, a: 9, b: 9.2, f: sw * 0.3 },
+    { h: -HEM + 2, a: 10.6, b: 10.4, f: sw * 0.8 },
+  ];
+}
+
+function heraldTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const hp = p as HeraldPose;
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = robeRings(len, p);
+  const ph = t * Math.PI * 2;
+  const pieces = loftFill(ctx, T, R, ROBE, { band: 2, hi: 0.8 });
+  // Ragged hem wisps
+  const bottom = R[R.length - 1];
+  for (let k = 0; k < 12; k++) {
+    const phi = (k / 12) * Math.PI * 2 + 0.1;
+    if (T.vis(phi) < 0.02) continue;
+    const l = 2.4 + (k % 2) * 1.6 + Math.sin(ph + k * 1.7) * 1;
+    const a = T.at(bottom.h + 0.3, phi - 0.24, bottom.a, bottom.b, bottom.f);
+    const b = T.at(bottom.h + 0.3, phi + 0.24, bottom.a, bottom.b, bottom.f);
+    const c = T.at(bottom.h - l, phi, bottom.a + 0.4, bottom.b + 0.4, bottom.f - p.flow * 2);
+    cel(ctx, () => polyPath(ctx, [a, b, c]), ROBE, { band: 0.6, stroke: 0.45 });
+  }
+  clipTo(ctx, pieces, () => {
+    if (T.vis(0) < -0.3) return;
+    // Embroidered front panel with glowing glyphs
+    const panel = surfPatch(T, R, len + 0.2, -HEM + 1, -0.22, 0.22, 0.1, 4);
+    cel(ctx, () => polyPath(ctx, panel), ROBE_IN, { band: 0.6 });
+    for (const phi of [-0.22, 0.22]) {
+      const a = surf(T, R, len, phi, 0.15);
+      const b = surf(T, R, -HEM + 1.4, phi, 0.15);
+      ctx.strokeStyle = TRIM.base;
+      ctx.lineWidth = 0.55;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    for (let i = 0; i < 5; i++) {
+      decal(ctx, T, R, len - 4 - i * 5.4, 0, () => {
+        ctx.strokeStyle = `rgba(170,120,255,${0.6 + hp.portal * 0.4})`;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        if (i % 2) {
+          ctx.moveTo(-1, -1);
+          ctx.lineTo(1, 1);
+          ctx.moveTo(1, -1);
+          ctx.lineTo(-1, 1);
+        } else {
+          ctx.arc(0, 0, 1, 0, Math.PI * 2);
+          ctx.moveTo(0, -2);
+          ctx.lineTo(0, 2);
+        }
+        ctx.stroke();
+      }, { lift: 0.2, minVis: 0.05 });
+    }
+  });
+  band(ctx, T, R, 1.2, ROBE_IN, 2, 0.3);
+  decal(ctx, T, R, 1.2, 0.5, () => cel(ctx, () => ellipsePath(ctx, vec(0, 0), 1.6, 1.8), tone(0x7a4ad8, { light: 0.6 }), { band: 0.4, stroke: 0.4 }), { lift: 0.8, minVis: 0.05 });
+  // Layered mantle over the shoulders
+  const mantle = [{ h: len + 1.6, a: 4.4, b: 5.2, f: 0.6 }, { h: len - 1.2, a: 7.6, b: 8.6, f: 0.8 }, { h: len - 5.6, a: 8, b: 9, f: 0.9 }];
+  loftFill(ctx, T, mantle, MANTLE, { band: 1.2 });
+  band(ctx, T, mantle, len - 5, TRIM, 0.6, 0.1);
+}
+
+function heraldHead(sk: ViewSkeleton) {
+  return turnedHead(sk, 0.3);
+}
+
+function heraldHoodView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const hp = p as HeraldPose;
+  const H = heraldHead(sk);
+  const R = HOOD_RINGS;
+  const peak = [[11, -2.6, -1.8], [11, -2.6, 1.8], [16.4, -8.4, 0], [12.2, -5, 0], [9.6, 0, -2.2], [9.6, 0, 2.2]] as const;
+  const peakBehind = H.rig.d(lp(H, 14, -7, 0)) < H.rig.d(H.o);
+  if (peakBehind) hull3(ctx, H, peak, ROBE, { band: 1 });
+  const pieces = loftFill(ctx, H, R, ROBE, { band: 1.6 });
+  if (!peakBehind) hull3(ctx, H, peak, ROBE, { band: 1 });
+  if (H.vis(0) < -0.2) return;
+  clipTo(ctx, pieces, () => {
+    decal(ctx, H, R, PORTAL.h, PORTAL.phi, () => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 4, 5.6, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#05020c';
+      ctx.fill();
+      ctx.clip();
+      const ph = t * Math.PI * 2;
+      const glowK = 0.55 + hp.portal * 0.45;
+      for (let i = 0; i < 4; i++) {
+        const r = 1 + i * 1.3;
+        ctx.strokeStyle = i % 2 ? `rgba(90,224,255,${0.5 * glowK})` : `rgba(160,100,255,${0.8 * glowK})`;
+        ctx.lineWidth = 0.55;
+        ctx.beginPath();
+        const a0 = ph * (i % 2 ? -1 : 1) + i * 1.3;
+        ctx.ellipse(0, 0, r * 0.85, r * 1.15, 0, a0, a0 + Math.PI * 1.3);
+        ctx.stroke();
+      }
+      for (let i = 0; i < 8; i++) {
+        const k = (hash01(i * 4.1) + t) % 1;
+        const a = hash01(i * 9.3) * Math.PI * 2 + ph * 0.25;
+        const r = 5 * (1 - k);
+        ctx.fillStyle = `rgba(255,255,255,${0.9 * k})`;
+        ctx.fillRect(Math.cos(a) * r * 0.8 - 0.25, Math.sin(a) * r - 0.25, 0.5, 0.5);
+      }
+      ctx.fillStyle = `rgba(240,225,255,${glowK})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, 0.9 + hp.portal * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = ROBE_IN.base;
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 4.2, 5.8, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }, { lift: 0.1, minVis: 0.02 });
+  });
+}
+
+/** The broken rune-halo turns in a plane behind the head, facing forward. */
+function haloCentre(sk: ViewSkeleton): { x: number; y: number; z: number } {
+  return lp(sk.skull, 4.4, -6.4, 0);
+}
+
+function heraldBack(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const hp = p as HeraldPose;
+  tentacle(ctx, tentaclePts(sk, hp, t, 2), TENTS[2].r, true);
+  tentacle(ctx, tentaclePts(sk, hp, t, 1), TENTS[1].r, true);
+}
+
+function heraldExtra(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number, d0: number): ViewPart[] {
+  const hp = p as HeraldPose;
+  const c = haloCentre(sk);
+  return [{
+    z: sk.rig.d(c) - d0 + (sk.rig.front ? -2 : 6),
+    draw: () => {
+      // Local halo art: x → lateral, y → down, around the centre point.
+      withAffine(ctx, q => sk.rig.pt(c.x, c.y + q.y, c.z + q.x), () => {
+        ctx.save();
+        // A stand-in skeleton that puts the halo centre at the origin, unrotated.
+        const ha = 0.36;
+        const off = localPt(vec(0, 0), ha, -5.2, -4.4);
+        const fake = { head: vec(-off.x, -off.y), headAng: ha } as unknown as Skeleton;
+        halo(ctx, fake, hp, t);
+        ctx.restore();
+      });
+    },
+  }];
+}
+
+const HERALD_VIEW = monsterViewSkin(HERALD_SKIN, {
+  build: HERALD_BUILD,
+  headBias: 5,
+  torso: heraldTorsoView,
+  head: heraldHoodView,
+  back: heraldBack,
+  extra: heraldExtra,
+});
+
+function heraldFxView(ctx: CanvasRenderingContext2D, p: HeraldPose, act: MonsterAction, t: number, view: HumanView): void {
+  const vsk = solveViewSkeleton(p, PROP, HERALD_BUILD, view);
+  const H = heraldHead(vsk);
+  const face = surfVis(H, HOOD_RINGS, PORTAL.h, PORTAL.phi) > 0 ? surf(H, HOOD_RINGS, PORTAL.h, PORTAL.phi, 0.3) : vsk.head;
+  const { ang, k } = vsk.rig.dir(p.wpn);
+  const orb = vec(vsk.handN.x + Math.sin(ang) * k * 26.4, vsk.handN.y - Math.cos(ang) * k * 26.4);
+  const hc = vsk.rig.p(haloCentre(vsk));
+  const facing = H.vis(0) > 0;
+  heraldFx(ctx, facing ? p : { ...p, portal: 0 }, act, t, vsk, face, orb, hc, q => q, q => {
+    const s2 = solveViewSkeleton(q, PROP, HERALD_BUILD, view);
+    return tentaclePts(s2, q, t, 0);
+  });
+}
+
 // ── Animation ───────────────────────────────────────────────────────────
 
 const READY: HeraldPose = {
@@ -498,7 +701,24 @@ export const VoidHeraldDrawer = rigMonster<HeraldPose>({
   frameH: 68,
   scale: 1.15,
   pose: heraldPose,
-  draw: (ctx, p, _act, t) => {
+  draw: (ctx, p, _act, t, view) => {
+    if (view) {
+      const vsk0 = solveViewSkeleton(p, PROP, HERALD_BUILD, view);
+      if (p.fade > 0) {
+        const c = vsk0.head;
+        const k = 1 - p.fade * 0.55;
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.scale(k * (1 - p.fade * 0.2), k);
+        ctx.translate(-c.x, -c.y);
+        drawHumanoidView(ctx, p, HERALD_VIEW, t, view);
+        ctx.restore();
+        erode(ctx, p.fade * 0.85, { x: c.x - 30, y: c.y - 26, w: 56, h: 60 }, 57, 0.8, '30,10,60');
+        return;
+      }
+      drawHumanoidView(ctx, p, HERALD_VIEW, t, view);
+      return;
+    }
     if (p.fade > 0) {
       // Fold toward the portal: squeeze the figure about its face.
       const sk0 = solveSkeleton(p, PROP);
@@ -516,102 +736,113 @@ export const VoidHeraldDrawer = rigMonster<HeraldPose>({
     }
     drawHumanoid(ctx, p, HERALD_SKIN, t);
   },
-  shadow: (p) => ({ x: p.root.x + 1, r: 14 * (1 - p.fade * 0.6), lift: Math.max(4, 12 - (p.root.y - 60) * 0.6) }),
-  fx: (ctx, p, act, t) => {
+  shadow: (p, _act, _t, view) => ({ x: groundX(view, p.root.x + 1), r: 14 * (1 - p.fade * 0.6), lift: Math.max(4, 12 - (p.root.y - 60) * 0.6) }),
+  views: MONSTER_VIEWS,
+  fx: (ctx, p, act, t, view) => {
+    if (view) {
+      heraldFxView(ctx, p, act, t, view);
+      return;
+    }
     const sk = solveSkeleton(p, PROP);
-    const face = portalPoint(p, sk);
-    const live = 1 - p.fade;
-    // Portal and orb glow
-    glow(ctx, face, 6 + p.portal * 5, VOID, (0.3 + p.portal * 0.35) * (0.4 + live * 0.6));
-    glow(ctx, face, 2.2, VOID_CORE, 0.5 + p.portal * 0.4);
-    const orb = spun(p, along(sk.handN, p.wpn, 26.4), sk);
-    if (live > 0.3) {
-      glow(ctx, orb, 5 + p.fx * 4, VOID, 0.45 * live);
-      glow(ctx, orb, 2, VOID_CYAN, 0.6 * live);
-    }
-    // Void mist pooling beneath the floating hem
-    const hem = spun(p, hemCentre(sk, p), sk);
-    glow(ctx, vec(hem.x - 1, hem.y + 2), 12, VOID, 0.22 * live);
-    for (let i = 0; i < 5; i++) {
-      const k = (hash01(i * 2.7) + t) % 1;
-      glow(ctx, vec(hem.x - 9 + i * 4.5 + Math.sin(t * 6 + i) * 1.5, hem.y + 4 - k * 8), 1.5, i % 2 ? VOID_CYAN : VOID, 0.5 * (1 - k) * live);
-    }
-    // Halo shimmer
-    const hc = spun(p, localPt(sk.head, sk.headAng, -5.2, -4.4), sk);
-    glow(ctx, hc, 15, VOID_CYAN, 0.1 * live + p.portal * 0.06);
-    glow(ctx, hc, 11, VOID, 0.16 * live + p.portal * 0.1);
-    // Tentacle tips
-    for (let i = 0; i < 3; i++) {
-      const pts = tentaclePts(sk, p, t, i);
-      const tip = spun(p, pts[pts.length - 1], sk);
-      glow(ctx, tip, i === 0 ? 2.6 + p.lash * 3 : 1.8, VOID, 0.55 * live);
-    }
-    if (act === 'attack') {
-      // Void motes spiralling into the staff during the wind-up
-      for (let i = 0; i < 6; i++) {
-        const k = (i / 6 + t * 1.5) % 1;
-        const a = i * 1.05 + t * 9;
-        const r = 9 * (1 - k);
-        glow(ctx, vec(orb.x + Math.cos(a) * r, orb.y + Math.sin(a) * r), 1.3, i % 2 ? VOID_CYAN : VOID, p.fx * k);
-      }
-      if (t > 0.5) {
-        const main = tentaclePts(sk, p, t, 0).map(pt => spun(p, pt, sk));
-        const prev = samplePoseTrack(ATTACK, t - 0.07);
-        const psk = solveSkeleton(prev, PROP);
-        const ghost = tentaclePts(psk, prev, t, 0).map(pt => spun(prev, pt, psk));
-        ctx.save();
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = `rgba(160,110,255,${0.3 * p.fx})`;
-        ctx.lineWidth = 2.4;
-        ctx.beginPath();
-        ctx.moveTo(ghost[0].x, ghost[0].y);
-        for (let i = 1; i < ghost.length; i++) ctx.lineTo(ghost[i].x, ghost[i].y);
-        ctx.stroke();
-        ctx.restore();
-        if (t > 0.9) {
-          const tip = main[main.length - 1];
-          glow(ctx, tip, 10, VOID, 0.7);
-          glow(ctx, tip, 4, VOID_CORE, 0.9);
-          // A small rift tearing open at the point of impact
-          ctx.save();
-          ctx.translate(tip.x + 1, tip.y);
-          ctx.fillStyle = 'rgba(8,2,20,0.9)';
-          ctx.beginPath();
-          ctx.ellipse(0, 0, 1.6, 5, 0.2, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(200,160,255,0.95)';
-          ctx.lineWidth = 0.6;
-          ctx.stroke();
-          ctx.strokeStyle = 'rgba(90,224,255,0.9)';
-          for (let i = 0; i < 6; i++) {
-            const a = (i / 6) * Math.PI * 2 + 0.4;
-            ctx.beginPath();
-            ctx.moveTo(Math.cos(a) * 2.6, Math.sin(a) * 4);
-            ctx.lineTo(Math.cos(a) * 5.4, Math.sin(a) * 7);
-            ctx.stroke();
-          }
-          ctx.restore();
-        }
-      }
-    }
-    if (act === 'death') {
-      // The rift that swallows it
-      const r = 3 + Math.sin(Math.min(1, t) * Math.PI) * 7;
-      ctx.save();
-      ctx.translate(face.x, face.y);
-      ctx.fillStyle = `rgba(6,2,16,${0.4 + 0.5 * p.fade})`;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, r * 0.55, r, 0.15, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = `rgba(190,140,255,${0.5 + 0.4 * p.fade})`;
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-      ctx.restore();
-      glow(ctx, face, r * 1.6, VOID, 0.45);
-      embers(ctx, { x: face.x - 16, y: face.y - 4, w: 32, h: 34 }, 16, t, 0.3 + p.fade * 0.6, VOID, 63);
-    }
+    heraldFx(ctx, p, act, t, sk, portalPoint(p, sk), spun(p, along(sk.handN, p.wpn, 26.4), sk), spun(p, localPt(sk.head, sk.headAng, -5.2, -4.4), sk), q => spun(p, q, sk));
   },
   ink: '#0c0618',
   rim: 'rgba(190,160,255,0.55)',
 });
+
+function heraldFx(
+  ctx: CanvasRenderingContext2D, p: HeraldPose, act: MonsterAction, t: number, sk: Skeleton,
+  face: V, orb: V, hc: V, S: (q: V) => V, ghostOf: (q: HeraldPose) => V[] = q => {
+    const psk = solveSkeleton(q, PROP);
+    return tentaclePts(psk, q, t, 0).map(pt => spun(q, pt, psk));
+  },
+): void {
+    const live = 1 - p.fade;
+  // Portal and orb glow
+  glow(ctx, face, 6 + p.portal * 5, VOID, (0.3 + p.portal * 0.35) * (0.4 + live * 0.6));
+  glow(ctx, face, 2.2, VOID_CORE, 0.5 + p.portal * 0.4);
+  if (live > 0.3) {
+    glow(ctx, orb, 5 + p.fx * 4, VOID, 0.45 * live);
+    glow(ctx, orb, 2, VOID_CYAN, 0.6 * live);
+  }
+  // Void mist pooling beneath the floating hem
+  const hem = S(hemCentre(sk, p));
+  glow(ctx, vec(hem.x - 1, hem.y + 2), 12, VOID, 0.22 * live);
+  for (let i = 0; i < 5; i++) {
+    const k = (hash01(i * 2.7) + t) % 1;
+    glow(ctx, vec(hem.x - 9 + i * 4.5 + Math.sin(t * 6 + i) * 1.5, hem.y + 4 - k * 8), 1.5, i % 2 ? VOID_CYAN : VOID, 0.5 * (1 - k) * live);
+  }
+  // Halo shimmer
+  glow(ctx, hc, 15, VOID_CYAN, 0.1 * live + p.portal * 0.06);
+  glow(ctx, hc, 11, VOID, 0.16 * live + p.portal * 0.1);
+  // Tentacle tips
+  for (let i = 0; i < 3; i++) {
+    const pts = tentaclePts(sk, p, t, i);
+    const tip = S(pts[pts.length - 1]);
+    glow(ctx, tip, i === 0 ? 2.6 + p.lash * 3 : 1.8, VOID, 0.55 * live);
+  }
+  if (act === 'attack') {
+    // Void motes spiralling into the staff during the wind-up
+    for (let i = 0; i < 6; i++) {
+      const k = (i / 6 + t * 1.5) % 1;
+      const a = i * 1.05 + t * 9;
+      const r = 9 * (1 - k);
+      glow(ctx, vec(orb.x + Math.cos(a) * r, orb.y + Math.sin(a) * r), 1.3, i % 2 ? VOID_CYAN : VOID, p.fx * k);
+    }
+    if (t > 0.5) {
+      const main = tentaclePts(sk, p, t, 0).map(S);
+      const prev = samplePoseTrack(ATTACK, t - 0.07);
+      const ghost = ghostOf(prev);
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = `rgba(160,110,255,${0.3 * p.fx})`;
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(ghost[0].x, ghost[0].y);
+      for (let i = 1; i < ghost.length; i++) ctx.lineTo(ghost[i].x, ghost[i].y);
+      ctx.stroke();
+      ctx.restore();
+      if (t > 0.9) {
+        const tip = main[main.length - 1];
+        glow(ctx, tip, 10, VOID, 0.7);
+        glow(ctx, tip, 4, VOID_CORE, 0.9);
+        // A small rift tearing open at the point of impact
+        ctx.save();
+        ctx.translate(tip.x + 1, tip.y);
+        ctx.fillStyle = 'rgba(8,2,20,0.9)';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 1.6, 5, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(200,160,255,0.95)';
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(90,224,255,0.9)';
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 + 0.4;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * 2.6, Math.sin(a) * 4);
+          ctx.lineTo(Math.cos(a) * 5.4, Math.sin(a) * 7);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+  }
+  if (act === 'death') {
+    // The rift that swallows it
+    const r = 3 + Math.sin(Math.min(1, t) * Math.PI) * 7;
+    ctx.save();
+    ctx.translate(face.x, face.y);
+    ctx.fillStyle = `rgba(6,2,16,${0.4 + 0.5 * p.fade})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 0.55, r, 0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(190,140,255,${0.5 + 0.4 * p.fade})`;
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.restore();
+    glow(ctx, face, r * 1.6, VOID, 0.45);
+    embers(ctx, { x: face.x - 16, y: face.y - 4, w: 32, h: 34 }, 16, t, 0.3 + p.fade * 0.6, VOID, 63);
+  }
+}

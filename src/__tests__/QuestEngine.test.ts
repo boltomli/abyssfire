@@ -51,6 +51,15 @@ describe('QuestGuide', () => {
     expect(computeGuideTarget(q, active([1, 0]), world())).toMatchObject({ col: 9, row: 8, objectiveIndex: 1 });
   });
 
+  it('fetches the escort first, then leads to the destination', () => {
+    const q = quest({
+      type: 'escort',
+      objectives: [{ type: 'escort', targetId: 'merchant', targetName: 'm', required: 1, current: 0, location: { col: 40, row: 40, radius: 5 } }],
+    });
+    expect(computeGuideTarget(q, active([0]), world({ escortTile: () => ({ col: 10, row: 10 }) }))).toMatchObject({ col: 10, row: 10 });
+    expect(computeGuideTarget(q, active([0]), world({ escortTile: () => ({ col: 1, row: 1 }) }))).toMatchObject({ col: 40, row: 40 });
+  });
+
   it('points back at the giver once complete', () => {
     const done: QuestProgress = { questId: 'q_test', status: 'completed', objectives: [{ current: 3 }] };
     expect(computeGuideTarget(quest(), done, world())).toMatchObject({ col: 5, row: 5, reason: 'turn_in' });

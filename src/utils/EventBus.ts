@@ -38,6 +38,10 @@ export const GameEvents = {
   QUEST_PROGRESS: 'quest:progress',
   /** The quest shown by the guide arrow changed: { questId | null }. */
   QUEST_TRACKED_CHANGED: 'quest:tracked_changed',
+  /** A story beat started/finished playing: { active: boolean }. */
+  STORY_STATE: 'story:state',
+  /** Show (BossBarState) or hide (null) the boss health bar. */
+  BOSS_BAR: 'story:boss_bar',
   ACHIEVEMENT_UNLOCKED: 'achievement:unlocked',
   HOMESTEAD_UPGRADED: 'homestead:upgraded',
   ITEM_DISCARDED: 'item:discarded',
@@ -60,6 +64,71 @@ export const GameEvents = {
   DUNGEON_FLOOR_CHANGE: 'dungeon:floor_change',
   DUNGEON_EXIT: 'dungeon:exit',
   DUNGEON_BOSS_KILLED: 'dungeon:boss_killed',
+  /** Zone → UI: open the tier picker at the labyrinth portal (DungeonTierPickPayload). */
+  DUNGEON_TIER_PICK: 'dungeon:tier_pick',
+  /** UI → Zone: `{ tier }` chosen, or `{ tier: 0 }` to cancel. */
+  DUNGEON_TIER_CHOSEN: 'dungeon:tier_chosen',
+  /** Zone → UI: offer boons after a floor (DungeonBoonOfferPayload). */
+  DUNGEON_BOON_OFFER: 'dungeon:boon_offer',
+  /** UI → Zone: `{ boonId }` picked. */
+  DUNGEON_BOON_CHOSEN: 'dungeon:boon_chosen',
+  /** Zone → UI: run status for the HUD (DungeonHudPayload); `null` hides it. */
+  DUNGEON_HUD: 'dungeon:hud',
+  /** Zone → UI: the run is over (DungeonRunEndPayload). */
+  DUNGEON_RUN_END: 'dungeon:run_end',
   GEM_SOCKET_OPEN: 'gem_socket:open',
   LOCALE_CHANGED: 'locale:changed',
 } as const;
+
+// ── Abyss Labyrinth payloads ──
+
+export interface DungeonTierPickPayload {
+  /** Highest tier the hero may start. */
+  unlockedTier: number;
+  /** Best tier cleared so far (0 = none). */
+  bestTier: number;
+  /** Recommended hero level per tier: TIER_BASE_LEVEL + (tier - 1) * TIER_LEVEL_STEP. */
+  heroLevel: number;
+}
+
+export interface DungeonBoonOfferPayload {
+  /** Floor just cleared. */
+  floor: number;
+  /** Boon ids from BOONS (src/data/abyssRun.ts), usually three. */
+  options: string[];
+  /** Stacks already held this run, by boon id. */
+  held: Record<string, number>;
+}
+
+export interface DungeonHudPayload {
+  tier: number;
+  floor: number;
+  totalFloors: number;
+  /** FLOOR_THEMES id. */
+  theme: string;
+  /** CURSES id on this floor, or null. */
+  curse: string | null;
+  boons: Record<string, number>;
+  /** The exit opens once the gatekeeper falls (always open on the boss floor after the boss). */
+  sealOpen: boolean;
+  /** Localised gatekeeper / boss name while the seal holds. */
+  sealKeeper: string | null;
+  kills: number;
+  /** Run start (Date.now()) for the timer. */
+  startedAt: number;
+}
+
+export interface DungeonRunEndPayload {
+  result: 'cleared' | 'fallen' | 'abandoned';
+  tier: number;
+  floorsCleared: number;
+  totalFloors: number;
+  kills: number;
+  timeMs: number;
+  boons: Record<string, number>;
+  /** Cleared a tier above the previous best. */
+  newBest: boolean;
+  /** Highest tier now available. */
+  unlockedTier: number;
+}
+

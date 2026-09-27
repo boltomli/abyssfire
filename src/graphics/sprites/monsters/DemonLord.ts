@@ -43,6 +43,29 @@ import {
 } from '../rig/Humanoid';
 import { rigMonster } from '../rig/MonsterKit';
 import { embers, erode, flameTongue, hash01, hornPath, hornRidges, localPt } from './Imp';
+import { drawHumanoidView, solveViewSkeleton, type HumanView, type ViewPart, type ViewSkeleton } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  band,
+  decal,
+  groundX,
+  loftFill,
+  lp,
+  monsterViewSkin,
+  poly3,
+  profileRings,
+  ringsBetween,
+  sagittalSpun,
+  solid3,
+  strap,
+  surf,
+  surfCurve,
+  surfPatch,
+  surfVis,
+  tube3,
+  turnedHead,
+  type L3,
+} from '../rig/MonsterView';
 
 // ── Palette ─────────────────────────────────────────────────────────────
 const PLATE = tone(0x3c3446, { light: 0.42 });
@@ -409,6 +432,185 @@ const LORD_SKIN: HumanSkin = {
   },
 };
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const LORD_BUILD = { hipW: 4, shW: 8.4, elbowOut: 2, footOut: 0.8 };
+const CHEST = (len: number): V[] => [vec(-10.6, 0.8), vec(-3, -3.2), vec(7.4, -1.6), vec(12.4, 5), vec(11.4, len * 0.52), vec(7.6, len - 2.6), vec(-7, len - 2), vec(-10.8, len * 0.5)];
+const chestRings = (len: number): ReturnType<typeof profileRings> => profileRings(CHEST(len), y => len - y, a => a * 0.95, 8);
+const RUNE = { hk: 0.55, phi: 0.3 };
+
+function seamRuns(ctx: CanvasRenderingContext2D, runs: V[][], heat: number): void {
+  for (const r of runs) seam(ctx, r, heat);
+}
+
+function lordTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const lp0 = p as LordPose;
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = chestRings(len);
+  const front = T.vis(0) > T.vis(Math.PI);
+  const heat = 0.5 + p.fx * 0.5 - lp0.burn * 0.5;
+  const sway = Math.sin(t * Math.PI * 2) * 0.5 - p.flow * 2.5;
+  const tasset = (phi: number): L3[] => {
+    const r0 = R[R.length - 1];
+    const a = r0.a + 0.8;
+    const b = r0.b + 0.8;
+    const c = Math.cos(phi);
+    const sn = Math.sin(phi);
+    const f0 = (r0.f ?? 0) + c * a;
+    const l0 = sn * b;
+    return [[1.6, f0 - sn * 3, l0 + c * 3], [1.6, f0 + sn * 3, l0 - c * 3], [-8, f0 + sn * 3 + c * (1.5 + sway * 0.3), l0 - c * 3 + sn * 1.5], [-8.8, f0 - sn * 3 + c * (1.5 + sway * 0.3), l0 + c * 3 + sn * 1.5]];
+  };
+  const loin: L3[] = [[1.2, 9.8, -3], [1.2, 9.8, 3], [-12, 10.6 + sway, 3.2], [-9.6, 10.4 + sway, 1], [-13, 10.8 + sway, -0.6], [-10, 10.4 + sway, -3]];
+  const plates = [0.5, -0.5, 1.4, -1.4, Math.PI - 0.6, Math.PI + 0.6];
+  const vis = (phi: number): boolean => T.vis(phi) > 0;
+  for (const phi of plates) if (!vis(phi)) poly3(ctx, T, tasset(phi), PLATE_FAR, { band: 0.8 });
+  if (!front) poly3(ctx, T, loin, CAPE, { band: 1 });
+  solid3(ctx, T, R, PLATE, {
+    band: 2.2,
+    hi: 1,
+    face: () => {
+      for (let i = 0; i < 3; i++) band(ctx, T, R, len * (0.44 - i * 0.12) - 1, IRON, 1.8, 0.2);
+      strap(ctx, T, R, [[len - 3, -1], [len - 4.4, 0], [len - 3, 1]], { ...PLATE, base: PLATE.light, line: 'rgba(0,0,0,0)' }, 0.8, 0.1);
+      const hh = len * RUNE.hk;
+      seamRuns(ctx, surfCurve(T, R, [[hh + 2, RUNE.phi], [hh, RUNE.phi - 0.35], [hh - 2, RUNE.phi], [hh, RUNE.phi + 0.35], [hh + 2, RUNE.phi]], 0.1, 4, 0.02), heat);
+      seamRuns(ctx, surfCurve(T, R, [[hh + 4, RUNE.phi], [hh - 4, RUNE.phi]], 0.1, 6, 0.02), heat);
+      seamRuns(ctx, surfCurve(T, R, [[len - 4, -0.9], [len - 7.6, -0.6], [len - 11, -0.8]], 0.1, 4, 0.02), heat * 0.8);
+    },
+    over: () => {
+      // Heavy gorget
+      loftFill(ctx, T, ringsBetween(R, len - 1, len + 3.6, 0.6, 0.9), IRON, { band: 0.8 });
+      band(ctx, T, R, len + 1.6, BRONZE, 0.8, 1.2);
+      // War belt with a horned skull buckle
+      band(ctx, T, R, 1.2, IRON, 3, 0.5);
+      decal(ctx, T, R, 1.4, 0.2, () => {
+        cel(ctx, () => blobPath(ctx, [vec(-2.2, -2), vec(2.2, -2), vec(2.8, 0.8), vec(1.2, 3.4), vec(-1.2, 3.4), vec(-2.8, 0.8)]), BONE, { band: 0.6 });
+        ctx.fillStyle = '#1a0a0c';
+        ctx.fillRect(-1.6, -0.6, 1.2, 1.2);
+        ctx.fillRect(0.6, -0.6, 1.2, 1.2);
+        ctx.fillStyle = MAGMA;
+        ctx.fillRect(-1.3, -0.3, 0.6, 0.6);
+        ctx.fillRect(0.9, -0.3, 0.6, 0.6);
+        for (const sgn of [-1, 1]) cel(ctx, () => polyPath(ctx, [vec(sgn * 2, -1.8), vec(sgn * 4.6, -4.6), vec(sgn * 2.8, -0.6)]), BONE, { band: 0.2, stroke: 0.3 });
+      }, { lift: 1, minVis: 0.05 });
+      for (const phi of plates) if (vis(phi)) poly3(ctx, T, tasset(phi), PLATE, { band: 1 });
+      if (front) poly3(ctx, T, loin, CAPE, { band: 1 });
+    },
+  });
+}
+
+const HELM_RINGS = profileRings([vec(-6.4, -1), vec(-5.8, -6), vec(0, -8.4), vec(5.8, -6.8), vec(8, -2.4), vec(8, 2), vec(6.6, 6), vec(1.2, 7.8), vec(-5, 5.6)], y => -y, a => a * 0.92, 8);
+const SLIT_H = 1.4;
+
+function lordHelmView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const lp0 = p as LordPose;
+  const H = turnedHead(sk, 0.35);
+  const R = HELM_RINGS;
+  const horn = (s: 1 | -1): L3[] => [[2.8, -2, 5.6 * s], [5, -8, 10.6 * s], [9, -14, 12.4 * s], [16, -14.6, 11.6 * s], [22, -8.8, 9.6 * s], [25, -4, 8 * s]];
+  const drawHorn = (s: 1 | -1): void => {
+    tube3(ctx, H, horn(s), [3, 2.6, 2.1, 1.6, 1.1, 0.4], s > 0 ? HORN : HORN_FAR);
+    tube3(ctx, H, horn(s).slice(4), [1.1, 0.4], BONE);
+  };
+  const deep = (s: 1 | -1): boolean => H.rig.d(lp(H, 12, -12, 11 * s)) < H.rig.d(H.o);
+  for (const s of [1, -1] as const) if (deep(s)) drawHorn(s);
+  solid3(ctx, H, R, PLATE, {
+    band: 1.9,
+    hi: 0.9,
+    face: () => {
+      if (H.vis(0) < -0.25) return;
+      // Charred jaw with fangs beneath the visor
+      cel(ctx, () => polyPath(ctx, surfPatch(H, R, -2.6, -6.4, -0.8, 0.8, 0.2, 8)), HIDE, { band: 0.5 });
+      ctx.fillStyle = '#12060a';
+      ctx.beginPath();
+      polyPath(ctx, surfPatch(H, R, -3.6, -4.8, -0.7, 0.7, 0.3, 8));
+      ctx.fill();
+      ctx.fillStyle = BONE.base;
+      for (const phi of [-0.45, 0, 0.45]) {
+        decal(ctx, H, R, -3.7, phi, () => {
+          ctx.beginPath();
+          ctx.moveTo(-0.5, 0);
+          ctx.lineTo(0.5, 0);
+          ctx.lineTo(0, 1.4);
+          ctx.fill();
+        }, { lift: 0.35, minVis: 0.05 });
+      }
+      // Angular visor with a brow ridge and the hellfire eye slit
+      cel(ctx, () => polyPath(ctx, surfPatch(H, R, 4.6, -2.2, -1, 1, 0.4, 8, k => -2.6 + Math.abs(k - 0.5) * 2)), IRON, { band: 0.8 });
+      cel(ctx, () => polyPath(ctx, surfPatch(H, R, 5.8, 4.2, -1.1, 1.1, 0.6, 8)), PLATE, { band: 0.4 });
+      ctx.fillStyle = '#12060a';
+      ctx.beginPath();
+      polyPath(ctx, surfPatch(H, R, SLIT_H + 1, SLIT_H - 1, -0.8, 0.8, 0.5, 8));
+      ctx.fill();
+      ctx.fillStyle = `rgb(255,${90 + p.fx * 100},40)`;
+      ctx.beginPath();
+      polyPath(ctx, surfPatch(H, R, SLIT_H + 0.5, SLIT_H - 0.5, -0.7, 0.7, 0.55, 8));
+      ctx.fill();
+      seamRuns(ctx, surfCurve(H, R, [[SLIT_H - 1.2, 0], [-2.6, 0]], 0.45, 2), 0.5);
+    },
+    over: () => {
+      // Crown: iron circlet of spikes, each crowned with flame
+      const fl = 0.7 + lp0.crown * 0.6;
+      const ph = t * Math.PI * 2;
+      band(ctx, H, R, 6.2, IRON, 1.6, 0.5);
+      for (let i = 0; i < 7; i++) {
+        const phi = (i / 7) * Math.PI * 2 + 0.2;
+        if (surfVis(H, R, 6.2, phi) < -0.05) continue;
+        const h = 4.6 + (i % 2) * 2;
+        const base = surf(H, R, 6.4, phi, 0.5);
+        const up = H.rig.vec(H.up.x, H.up.y, 0);
+        const tip = { x: base.x + up.x * h, y: base.y + up.y * h };
+        if (fl > 0.05) flameTongue(ctx, { x: tip.x, y: tip.y + 1.2 }, 0, (3.4 + h * 0.35) * fl, 1.3, ph * 2 + i, FLAME_OUT, FLAME_IN);
+        cel(ctx, () => polyPath(ctx, [vec(base.x - 1.2, base.y + 0.4), tip, vec(base.x + 1.2, base.y + 0.4)]), IRON, { band: 0.4 });
+      }
+    },
+  });
+  for (const s of [1, -1] as const) if (!deep(s)) drawHorn(s);
+}
+
+/** 3D cape hung across the shoulders, streaming back and flaring wider. */
+function lordCape(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = chestRings(len);
+  const top = R[0];
+  const anchor = lp(T, len - 1, (top.f ?? 0) - top.a * 0.8, 0);
+  const chain = clothChain({ x: anchor.x, y: anchor.y }, 36, 7, p.flow, 1.2, t * Math.PI * 2);
+  const left: V[] = [];
+  const right: V[] = [];
+  chain.forEach((pt, i) => {
+    const k = i / (chain.length - 1);
+    const half = 7 + k * 5;
+    left.push(sk.rig.pt(pt.x, pt.y, -half));
+    right.push(sk.rig.pt(pt.x, pt.y, half));
+  });
+  const a = left[left.length - 1];
+  const b = right[right.length - 1];
+  const hem: V[] = [];
+  for (let i = 1; i < 7; i++) {
+    const q = lerpV(a, b, i / 7);
+    hem.push(vec(q.x, q.y + (i % 2 ? -3 - hash01(i * 5.1) * 3.5 : 0.6)));
+  }
+  cel(ctx, () => polyPath(ctx, [...left, ...hem, ...[...right].reverse()]), CAPE, { band: 1.8 });
+}
+
+function lordExtra(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number, d0: number): ViewPart[] {
+  return [{ z: sk.torso.depth(sk.torsoLen * 0.5, Math.PI, 8, 0) - d0 + (sk.rig.front ? -2 : 1), draw: () => lordCape(ctx, sk, p, t) }];
+}
+
+const LORD_VIEW = monsterViewSkin(LORD_SKIN, {
+  build: LORD_BUILD,
+  headBias: 4,
+  torso: lordTorsoView,
+  head: lordHelmView,
+  back: () => undefined,
+  extra: lordExtra,
+});
+
+/** Two-handed grip in 3/4: the far hand crosses over to the hilt. */
+function viewPose(p: LordPose): LordPose {
+  return { ...p, zF: p.grip * (LORD_BUILD.shW * 2 - 1.5) };
+}
+
 // ── Animation ───────────────────────────────────────────────────────────
 
 const READY: LordPose = {
@@ -542,20 +744,55 @@ export const DemonLordDrawer = rigMonster<LordPose>({
   frameW: 120,
   frameH: 84,
   scale: 1.04,
+  views: MONSTER_VIEWS,
   pose: lordPose,
-  draw: (ctx, p, _act, t) => {
+  draw: (ctx, p, _act, t, view) => {
+    if (view) {
+      const vsk = drawHumanoidView(ctx, viewPose(p), LORD_VIEW, t, view);
+      if (p.burn > 0) erode(ctx, p.burn, { x: vsk.pelvis.x - 34, y: vsk.pelvis.y - 38, w: 70, h: 50 }, 31, 1.4);
+      return;
+    }
     const sk = drawHumanoid(ctx, p, LORD_SKIN, t);
     if (p.burn > 0) {
       const c = spun(p, sk.pelvis, sk);
       erode(ctx, p.burn, { x: c.x - 34, y: c.y - 38, w: 70, h: 50 }, 31, 1.4);
     }
   },
-  shadow: (p) => ({
-    x: Math.abs(p.spin) > 1 ? p.root.x + 12 : p.root.x + 2,
+  shadow: (p, _act, _t, view) => ({
+    x: groundX(view, Math.abs(p.spin) > 1 ? p.root.x + 12 : p.root.x + 2),
     r: Math.abs(p.spin) > 1 ? 26 : 19,
     lift: 0,
   }),
-  fx: (ctx, p, act, t) => {
+  fx: (ctx, p, act, t, view) => {
+    if (view) {
+      lordViewFx(ctx, p, act, t, view);
+      return;
+    }
+    lordFx(ctx, p, act, t);
+  },
+  rim: 'rgba(255,150,110,0.5)',
+});
+
+function lordViewFx(ctx: CanvasRenderingContext2D, p0: LordPose, act: MonsterAction, t: number, view: HumanView): void {
+  const p = viewPose(p0);
+  const vsk = solveViewSkeleton(p, PROP, LORD_BUILD, view);
+  sagittalSpun(ctx, vsk, p, () => lordFx(ctx, p, act, t, true));
+  const dead = act === 'death';
+  const live = dead ? Math.max(0, 1 - p.burn * 1.6) : 1;
+  if (live <= 0.05) return;
+  const H = turnedHead(vsk, 0.35);
+  const up = vsk.rig.vec(H.up.x, H.up.y, 0);
+  const crown = surf(H, HELM_RINGS, 6.4, 0, 0);
+  glow(ctx, vec(crown.x + up.x * 5, crown.y + up.y * 5), 9 + p.crown * 4, HELLFIRE, (0.18 + p.crown * 0.22) * live);
+  if (surfVis(H, HELM_RINGS, SLIT_H, 0) > 0.1) glow(ctx, surf(H, HELM_RINGS, SLIT_H, 0, 0.6), 4, HELLFIRE, (0.55 + p.fx * 0.3) * live);
+  const T = vsk.torso;
+  const R = chestRings(vsk.torsoLen);
+  const hh = vsk.torsoLen * RUNE.hk;
+  if (surfVis(T, R, hh, RUNE.phi) > 0.05) glow(ctx, surf(T, R, hh, RUNE.phi, 0.3), 6 + p.fx * 3, HELLFIRE, (0.3 + p.fx * 0.3) * live);
+}
+
+function lordFx(ctx: CanvasRenderingContext2D, p: LordPose, act: MonsterAction, t: number, bladeOnly = false): void {
+  {
     const sk = solveSkeleton(p, PROP);
     const dead = act === 'death';
     const live = dead ? Math.max(0, 1 - p.burn * 1.6) : 1;
@@ -597,7 +834,7 @@ export const DemonLordDrawer = rigMonster<LordPose>({
       }
     }
     // Crown and visor glow
-    if (live > 0.05) {
+    if (live > 0.05 && !bladeOnly) {
       const crown = spun(p, localPt(sk.head, sk.headAng, 0, -12), sk);
       glow(ctx, crown, 9 + p.crown * 4, HELLFIRE, (0.18 + p.crown * 0.22) * live);
       const eye = spun(p, localPt(sk.head, sk.headAng, 6.4, -1.3), sk);
@@ -609,6 +846,6 @@ export const DemonLordDrawer = rigMonster<LordPose>({
       const c = spun(p, sk.pelvis, sk);
       embers(ctx, { x: c.x - 22, y: c.y - 26, w: 50, h: 30 }, 26, t, Math.min(1, 0.2 + p.burn * 1.5), HELLFIRE, 41);
     }
-  },
-  rim: 'rgba(255,150,110,0.5)',
-});
+  }
+}
+

@@ -37,6 +37,13 @@ export interface HumanPose {
   fx: number;
   /** Squash (−) / stretch (+) of the upper body along the spine. */
   stretch: number;
+  /**
+   * 3/4 views only (HumanView.ts): lateral offsets of the near / far hand
+   * from its shoulder (+ = toward the near side), e.g. a shield brought
+   * across the chest. Ignored by the side view.
+   */
+  zN?: number;
+  zF?: number;
 }
 
 export interface Proportions {
@@ -190,6 +197,8 @@ export function basePose(over: Partial<HumanPose> = {}): HumanPose {
     flow: 0.1,
     fx: 0,
     stretch: 0,
+    zN: 0,
+    zF: 0,
     ...over,
   };
 }

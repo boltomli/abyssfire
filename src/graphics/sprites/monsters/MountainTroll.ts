@@ -27,6 +27,22 @@ import {
 } from '../rig/Rig';
 import { basePose, solveSkeleton, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { humanoidMonster } from '../rig/MonsterKit';
+import { solveViewSkeleton, type ViewSkeleton } from '../rig/HumanView';
+import {
+  backSpikes,
+  band,
+  decal,
+  eye3,
+  eyeGlowPoints,
+  poly3,
+  profileRings,
+  solid3,
+  strap,
+  surfPatch,
+  turnedHead,
+  type L3,
+  type Part3,
+} from '../rig/MonsterView';
 
 const HIDE = tone(0x71877a, { light: 0.34 });
 const HIDE_FAR = tone(0x4d5f58, { light: 0.18 });
@@ -265,6 +281,113 @@ function bracer(ctx: CanvasRenderingContext2D, el: V, hand: V): void {
   });
 }
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const TROLL_BODY = (len: number): V[] => [
+  vec(-9, -3.4), vec(-2, -6.4), vec(5, -3), vec(9.5, 3), vec(11, len * 0.55),
+  vec(8.4, len + 1.4), vec(-5.4, len + 2), vec(-10.4, len * 0.6), vec(-12, len * 0.2),
+];
+
+function trollTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const breathe = Math.sin(t * Math.PI * 2) * 0.3;
+  const R = profileRings(TROLL_BODY(len), y => len - y, a => a * 0.92 + breathe, 8);
+  const front = T.vis(0) > T.vis(Math.PI);
+  const flap = p.flow * 2;
+  const loin = (s: 1 | -1): L3[] => {
+    const fr = s > 0 ? 9.6 : -7;
+    return [[1.4, fr, -4.2], [1.4, fr, 4.2], [-8.4, fr - flap * s + 0.8 * s, 3.4], [-6.8, fr - flap * s + 0.4 * s, 0], [-8.8, fr - flap * s + 0.8 * s, -3.4]];
+  };
+  const mane = backSpikes(T, R, len + 3, len * 0.3, 5, [-1, 0, 1], i => 4.2 - i * 0.4 + p.flow * 1.4, 2.4);
+  const parts: Part3[] = [
+    { pts: loin(front ? -1 : 1), tone: PELT, bias: -20 },
+    ...mane.map(pts => ({ pts, tone: MANE, band: 1, hull: true })),
+  ];
+  solid3(ctx, T, R, HIDE, {
+    band: 2.2,
+    hi: 1,
+    parts,
+    face: () => {
+      // Pale belly plates
+      if (T.vis(0) > -0.3) {
+        cel(ctx, () => polyPath(ctx, surfPatch(T, R, len - 1, 2, -0.95, 0.95, 0.1, 10)), BELLY, { band: 1.2, stroke: 0.4 });
+        for (const h of [len * 0.62, len * 0.42, len * 0.22]) strap(ctx, T, R, [[h, -0.9], [h - 0.8, 0], [h, 0.9]], BELLY, 0.3, 0.15);
+      }
+      // Scars across the chest
+      decal(ctx, T, R, len * 0.72, -0.9, () => {
+        ctx.strokeStyle = 'rgba(40,30,40,0.55)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(-2.4, -2.6);
+        ctx.lineTo(2, 2.6);
+        ctx.moveTo(-1.2, -3);
+        ctx.lineTo(-0.4, -1.6);
+        ctx.stroke();
+      });
+      // Moss carpet over the hump and shoulders
+      // (only where the hump faces the camera: a patch wrapping past the
+      // silhouette would fold over the chest)
+      if (T.vis(Math.PI) > -0.25) cel(ctx, () => polyPath(ctx, surfPatch(T, R, len + 3.4, len - 3, Math.PI - 1.9, Math.PI + 1.9, 0.3, 12, k => len - 3 - Math.abs(Math.sin(k * Math.PI * 4)) * 1.6)), MOSS, { band: 1 });
+      for (const [h, phi] of [[len + 1, 2.6], [len - 1, 3.4], [len + 2, 3.9], [len - 2, 2.2]] as const) {
+        decal(ctx, T, R, h, phi, () => {
+          ctx.fillStyle = MOSS_DARK.base;
+          ctx.beginPath();
+          ctx.arc(0, 0, 0.8, 0, Math.PI * 2);
+          ctx.fill();
+        }, { lift: 0.4 });
+      }
+    },
+    over: () => {
+      band(ctx, T, R, 1.2, PELT_DARK, 2.2, 0.4);
+      decal(ctx, T, R, 1.2, 0.35, () => {
+        ctx.save();
+        ctx.rotate(0.3);
+        cel(ctx, () => ellipsePath(ctx, vec(0, 0), 2.6, 0.9), TUSK, { band: 0.3, stroke: 0.35 });
+        ctx.restore();
+      }, { lift: 1, minVis: 0.05 });
+      poly3(ctx, T, loin(front ? 1 : -1), PELT, { band: 1 });
+    },
+  });
+}
+
+const TROLL_SKULL = profileRings([vec(-5.8, -1), vec(-4.6, -5.8), vec(1.4, -7), vec(6.4, -4.6), vec(8.2, 0), vec(8.4, 4.6), vec(3.4, 7.4), vec(-3.6, 6)], y => -y, a => a * 0.95, 8);
+const TROLL_EYE = { h: 1.4, phi: 0.5 };
+
+function trollHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const H = turnedHead(sk, 0.35);
+  const R = TROLL_SKULL;
+  const parts: Part3[] = [
+    // Ragged ears
+    { pts: [[2.4, -1, 5.6], [4.6 + p.flow, -5.6, 11], [2.8, -4.6, 9.4], [2.2, -6, 9.6], [-1, -2, 5.8]], tone: HIDE, farTone: HIDE_FAR, mirror: true, band: 0.6 },
+    // Underbite jaw
+    { pts: [[-2, 1, -4.2], [-2, 1, 4.2], [-3, 9, -3], [-3, 9, 3], [-7.4, 6.6, -2.6], [-7.4, 6.6, 2.6], [-6.4, 0.6, -3.6], [-6.4, 0.6, 3.6]], tone: HIDE, hull: true, band: 1, bias: 0.6 },
+    // Tusks jutting up out of the jaw
+    { pts: [[-2.8, 7.4, 2.4], [-2.8, 8.6, 2.2], [2.4, 8.4, 3], [-3.2, 8, 3]], tone: TUSK, mirror: true, hull: true, band: 0.4, bias: 1.2 },
+    // Bulbous nose
+    { pts: [[3, 8, -1.4], [3, 8, 1.4], [0.4, 10.4, -1.6], [0.4, 10.4, 1.6], [-1.6, 9.8, -1.8], [-1.6, 9.8, 1.8], [-1.4, 7.6, -1.6], [-1.4, 7.6, 1.6], [1.4, 11, 0]], tone: HIDE, hull: true, smooth: true, band: 0.6, bias: 0.8 },
+    // Tuft of mane on the crown
+    { pts: [[6.4, -5, -1.6], [6.6, 1, 0], [6.4, -5, 1.6], [9.6 + p.flow, -5.4, 0]], tone: MANE, hull: true, band: 0.6 },
+  ];
+  solid3(ctx, H, R, HIDE, {
+    band: 1.6,
+    hi: 0.8,
+    parts,
+    face: () => {
+      if (H.vis(0) < -0.3) return;
+      cel(ctx, () => polyPath(ctx, surfPatch(H, R, 4.6, 2.8, -1, 1, 0.3, 8, k => 2.6 - Math.sin(k * Math.PI) * 0.4)), HIDE_FAR, { band: 0.5, stroke: 0.4 });
+      for (const s of [1, -1]) {
+        eye3(ctx, H, R, TROLL_EYE.h, s * TROLL_EYE.phi, { rx: 1.5, ry: 1, socket: '#1a0c08', iris: '#ffb45a', irisR: 0.45 });
+      }
+      // Grimace under the nose
+      ctx.fillStyle = '#23161a';
+      ctx.beginPath();
+      polyPath(ctx, surfPatch(H, R, -2.4, -3.2, -0.7, 0.7, 0.2, 6, k => -2.8 - Math.sin(k * Math.PI) * 0.8));
+      ctx.fill();
+    },
+  });
+}
+
 const SKIN: HumanSkin = {
   prop: {
     thigh: 12, shin: 11.5, upperArm: 13, foreArm: 12.5,
@@ -343,6 +466,8 @@ const DEATH: Key<HumanPose>[] = [
   { at: 1, ease: 'out', pose: P({ root: vec(CENTER_X - 10, 80.5), lean: 0.05, head: 0.15, spin: 1.5, footN: vec(CENTER_X - 9, 102), footF: vec(CENTER_X - 12, 102.5), handN: vec(CENTER_X - 2, 70), handF: vec(CENTER_X - 14, 54), wpn: 0.05, flow: 0.05 }) },
 ];
 
+const VIEW_BUILD = { hipW: 4, shW: 8, elbowOut: 1.8, footOut: 0.8 };
+
 function clubTip(p: HumanPose): { tip: V; base: V } {
   const sk = solveSkeleton(p, SKIN.prop);
   return { tip: along(sk.handN, p.wpn, CLUB_LEN), base: along(sk.handN, p.wpn, 8) };
@@ -415,5 +540,44 @@ export const MountainTrollDrawer = humanoidMonster({
     };
   },
   fx: drawFx,
+  view: {
+    build: VIEW_BUILD,
+    headBias: 4,
+    torso: trollTorsoView,
+    head: trollHeadView,
+  },
+  viewFx: (ctx, p, sk, act, t) => {
+    if (act === 'attack' && t > 0.9) {
+      const tips: V[] = [];
+      const bases: V[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const q = samplePoseTrack(ATTACK, Math.max(0.67, t - i * 0.055));
+        const s2 = solveViewSkeleton(q, SKIN.prop, VIEW_BUILD, sk.rig.view);
+        const { ang, k } = s2.rig.dir(q.wpn);
+        tips.push(vec(s2.handN.x + Math.sin(ang) * k * CLUB_LEN, s2.handN.y - Math.cos(ang) * k * CLUB_LEN));
+        bases.push(vec(s2.handN.x + Math.sin(ang) * k * 8, s2.handN.y - Math.cos(ang) * k * 8));
+      }
+      smear(ctx, tips, bases, 0xe8dcc0, 0.35);
+    }
+    if (act === 'attack' && t > 0.95) {
+      // Ground impact where the club head lands
+      const { ang, k } = sk.rig.dir(p.wpn);
+      const hit = vec(sk.handN.x + Math.sin(ang) * k * CLUB_LEN, GROUND_Y + (sk.rig.front ? 3 : -3));
+      glow(ctx, hit, 6, 0xffc27a, 0.4);
+      ctx.fillStyle = 'rgba(200,190,170,0.45)';
+      for (const [dx, dy, r] of [[-10, -1.5, 3], [-6, -3, 2.4], [8, -2.4, 2.8], [11, -1, 2.2]] as const) {
+        ctx.beginPath();
+        ctx.ellipse(hit.x + dx, hit.y + dy, r * 1.3, r, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#8e949c';
+      for (const [dx, dy] of [[-8, -10], [6, -12], [11, -7], [-12, -6]] as const) ctx.fillRect(hit.x + dx, hit.y + dy, 1.4, 1.2);
+    }
+    if (act !== 'death' || t < 0.5) {
+      for (const e of eyeGlowPoints(turnedHead(sk, 0.35), TROLL_SKULL, TROLL_EYE.h, [TROLL_EYE.phi, -TROLL_EYE.phi])) {
+        glow(ctx, e, 2.2 + p.fx, EMBER, 0.4 + p.fx * 0.35);
+      }
+    }
+  },
   shadowR: 17,
 });

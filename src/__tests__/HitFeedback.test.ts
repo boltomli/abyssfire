@@ -98,12 +98,14 @@ describe('sprite sheet grid', () => {
 
   it('maps frame indices row-major without overlap', () => {
     const grid = computeSheetGrid(300, 100, 30);
-    expect(grid.cols).toBe(13);
+    // 13 fit per row → 3 rows, balanced to 10 per row (no empty tail).
+    expect(grid.cols).toBe(10);
     expect(grid.rows).toBe(3);
+    expect(grid.width).toBe(3000);
     expect(sheetFrameOrigin(grid, 0)).toEqual({ x: 0, y: 0 });
-    expect(sheetFrameOrigin(grid, 12)).toEqual({ x: 3600, y: 0 });
-    expect(sheetFrameOrigin(grid, 13)).toEqual({ x: 0, y: 100 });
-    expect(sheetFrameOrigin(grid, 29)).toEqual({ x: 900, y: 200 });
+    expect(sheetFrameOrigin(grid, 9)).toEqual({ x: 2700, y: 0 });
+    expect(sheetFrameOrigin(grid, 10)).toEqual({ x: 0, y: 100 });
+    expect(sheetFrameOrigin(grid, 29)).toEqual({ x: 2700, y: 200 });
   });
 
   it('keeps short sheets as a single row', () => {

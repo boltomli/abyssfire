@@ -126,9 +126,10 @@ describe('New Quest Types', () => {
 
     it('investigate quests have clues config', () => {
       for (const q of investigateQuests) {
-        expect(q.clues).toBeDefined();
-        expect(q.clues!.length).toBeGreaterThanOrEqual(2);
-        for (const clue of q.clues!) {
+        // Clue objectives carry their own location; the legacy `clues` list is optional.
+        const clueObjs = q.objectives.filter(o => o.type === 'investigate_clue');
+        expect(clueObjs.length, q.id).toBeGreaterThanOrEqual(2);
+        for (const clue of q.clues ?? []) {
           expect(clue.id).toBeTruthy();
           expect(clue.name).toBeTruthy();
           expect(clue.col).toBeGreaterThanOrEqual(0);
@@ -140,7 +141,7 @@ describe('New Quest Types', () => {
     it('investigate quests have investigate_clue objectives matching clues', () => {
       for (const q of investigateQuests) {
         const clueObjs = q.objectives.filter(o => o.type === 'investigate_clue');
-        expect(clueObjs.length).toBe(q.clues!.length);
+        if (q.clues) expect(clueObjs.length).toBe(q.clues.length);
         for (const obj of clueObjs) {
           expect(obj.location).toBeDefined();
         }
@@ -276,6 +277,10 @@ describe('New Quest Types', () => {
       expect(qs.progress.get('q_investigate_corruption_forest')!.status).toBe('active');
 
       qs.updateProgress('investigate_clue', 'clue_corrupt_3');
+      // The last clue reveals the Rot Mother; the quest completes once she falls.
+      expect(qs.progress.get('q_investigate_corruption_forest')!.objectives[2].current).toBe(1);
+      expect(qs.progress.get('q_investigate_corruption_forest')!.status).toBe('active');
+      qs.updateProgress('kill', 'hunt_rot_mother');
       expect(qs.progress.get('q_investigate_corruption_forest')!.status).toBe('completed');
     });
 
@@ -622,7 +627,9 @@ describe('New Quest Types', () => {
     it('all new quests have questArea defined', () => {
       const newQuests = AllQuests.filter(q => ['escort', 'defend', 'investigate', 'craft'].includes(q.type));
       for (const q of newQuests) {
-        expect(q.questArea).toBeDefined();
+        // Either a quest area, or every field objective pins its own location.
+        const located = q.objectives.filter(o => o.type !== 'talk').every(o => !!o.location);
+        expect(!!q.questArea || located, q.id).toBe(true);
       }
     });
   });

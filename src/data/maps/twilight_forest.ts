@@ -27,7 +27,7 @@ export const TwilightForestMap: MapData = {
     { col: 20, row: 95, monsterId: 'werewolf', count: 6 },
     // Q4 — bottom-right quadrant
     { col: 85, row: 80, monsterId: 'werewolf', count: 6 },
-    { col: 90, row: 90, monsterId: 'werewolf_alpha', count: 2 },
+    { col: 90, row: 90, monsterId: 'werewolf_alpha', count: 1 },
     { col: 100, row: 65, monsterId: 'zombie', count: 4 },
   ],
   camps: [

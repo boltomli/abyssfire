@@ -39,6 +39,30 @@ import {
   type Skeleton,
 } from '../rig/Humanoid';
 import { rigMonster } from '../rig/MonsterKit';
+import { drawHumanoidView, solveViewSkeleton, type HumanView, type ViewPart, type ViewSkeleton } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  backSpikes,
+  band,
+  decal,
+  groundX,
+  hull3,
+  loftFill,
+  monsterViewSkin,
+  profileRings,
+  ringsBetween,
+  sagittal,
+  sagittalSpun,
+  sd,
+  solid3,
+  sp,
+  surf,
+  surfPatch,
+  surfVis,
+  turnedHead,
+  type L3,
+  type Part3,
+} from '../rig/MonsterView';
 
 const IRON = tone(0x727a88, { light: 0.45 });
 const IRON_FAR = tone(0x535a67, { light: 0.25 });
@@ -341,6 +365,200 @@ const SKIN: HumanSkin = {
   },
 };
 
+
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const MINE_BUILD = { hipW: 4.4, shW: 8.4, elbowOut: 1.8, footOut: 0.9 };
+const BARREL = (len: number): V[] => [vec(-10.6, 0), vec(-5, -3.4), vec(5, -2.6), vec(11.4, 2.4), vec(12.6, len * 0.55), vec(10, len + 1.8), vec(-7, len + 2), vec(-11.6, len * 0.5)];
+const barrelRings = (len: number): ReturnType<typeof profileRings> => profileRings(BARREL(len), y => len - y, a => a * 0.95, 9);
+const HELM = profileRings([vec(-5.6, -1.8), vec(-4.6, -6.6), vec(0.6, -8.8), vec(5.4, -7), vec(7, -2.6), vec(7.4, 2.6), vec(4, 5), vec(-3.4, 3.6)], y => -y, a => a * 1.05, 8);
+const SLIT = { h: 0.5, phi: 0.34 };
+const LENS: L3 = [4.7, 9, 0];
+const minerHeadView = (sk: ViewSkeleton): ReturnType<typeof turnedHead> => turnedHead(sk, 0.6);
+
+function mineTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = barrelRings(len);
+  solid3(ctx, T, R, STONE, {
+    band: 2.2,
+    hi: 1,
+    face: () => {
+      // Stone cracks on the flank
+      ctx.strokeStyle = STONE.shade;
+      ctx.lineWidth = 0.5;
+      const cr = [surf(T, R, len - 3, -1.9, 0.05), surf(T, R, len - 6, -1.6, 0.05), surf(T, R, len - 9, -1.75, 0.05)];
+      if (surfVis(T, R, len - 6, -1.6) > 0) {
+        ctx.beginPath();
+        cr.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+        ctx.stroke();
+      }
+      if (T.vis(0) < -0.35) return;
+      // Riveted iron belly plate with bronze bands
+      cel(ctx, () => polyPath(ctx, surfPatch(T, R, len - 3.4, 0.8, -0.95, 0.95, 0.35, 8)), IRON, { band: 1.4, hi: 0.6 });
+      for (const hk of [0.64, 0.38]) cel(ctx, () => polyPath(ctx, surfPatch(T, R, len * hk + 1, len * hk - 1, -1, 1, 0.55, 8)), BRONZE, { band: 0.4, stroke: 0.4 });
+      for (const [h, phi] of [[len - 5, -0.7], [len - 5, 0], [len - 5, 0.7], [2.2, -0.7], [2.2, 0], [2.2, 0.7]] as const) {
+        if (surfVis(T, R, h, phi) < 0.05) continue;
+        const q = surf(T, R, h, phi, 0.5);
+        ctx.fillStyle = IRON.light;
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, 0.55, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    },
+    over: () => {
+      // Wide leather belt with a big buckle
+      loftFill(ctx, T, ringsBetween(R, -2.2, 1.6, 0.5, 1), tone(0x4e3522), { band: 0.5 });
+      decal(ctx, T, R, -0.3, 0.25, () => {
+        cel(ctx, () => polyPath(ctx, [vec(-2.2, -2.4), vec(2.2, -2.4), vec(2.2, 2.4), vec(-2.2, 2.4)]), BRONZE, { band: 0.5 });
+        ctx.fillStyle = IRON_DARK.base;
+        ctx.fillRect(-0.8, -0.9, 1.6, 1.8);
+      }, { lift: 1, minVis: 0.05 });
+    },
+  });
+}
+
+function mineHelmView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const mp = p as MinerPose;
+  const H = minerHeadView(sk);
+  const R = HELM;
+  const beardPts = (s: number): L3[] => [[-2.8, -1, 3.4 * s], [-2.2, 7.2, 3 * s], [-6, 7.8, 2.6 * s], [-9, 6, 1.8 * s], [-11, 4, 0.8 * s], [-7.4, -0.4, 2.2 * s], [-4.6, -1.8, 3 * s]];
+  const beard: L3[] = [...beardPts(1), ...beardPts(-1)];
+  const housing: L3[] = [[6.6, 3.4, -2.2], [6.6, 3.4, 2.2], [6.4, 8.6, -2.2], [6.4, 8.6, 2.2], [2.8, 9, -2.2], [2.8, 9, 2.2], [3.2, 3.6, -2.2], [3.2, 3.6, 2.2]];
+  const parts: Part3[] = [
+    { pts: beard, tone: STONE, hull: true, band: 1.2, bias: 0.5, after: () => {
+      if (H.vis(0) < -0.2) return;
+      ctx.strokeStyle = STONE.shade;
+      ctx.lineWidth = 0.5;
+      for (const l of [-1.8, 0, 1.8]) {
+        const a = sp(H, -3.6, 8, l);
+        const b = sp(H, -7, 7.2, l * 0.8);
+        const c = sp(H, -9.6, 5.4, l * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.quadraticCurveTo(b.x, b.y, c.x, c.y);
+        ctx.stroke();
+      }
+      // Bronze beard ring
+      hull3(ctx, H, [[-8.4, 6.8, -1.6], [-8.4, 6.8, 1.6], [-9.6, 6, -1.4], [-9.6, 6, 1.4], [-8.4, 4.2, 0], [-9.6, 3.8, 0]], BRONZE, { band: 0.3, stroke: 0.35 });
+    } },
+    { pts: housing, tone: BRONZE, hull: true, band: 0.5, bias: 0.3, after: () => {
+      if (sd(H, LENS[0], LENS[1] + 1, 0) < sd(H, LENS[0], LENS[1] - 3, 0)) return;
+      const q = sp(H, LENS[0], LENS[1] + 0.1, LENS[2]);
+      ctx.fillStyle = mp.light > 0.05 ? `rgba(255,236,170,${0.5 + Math.min(1, mp.light) * 0.5})` : '#3a3530';
+      ctx.beginPath();
+      ctx.ellipse(q.x, q.y, 1.5, 1.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } },
+  ];
+  solid3(ctx, H, R, IRON, {
+    band: 1.4,
+    hi: 0.7,
+    parts,
+    face: () => {
+      // Bronze crest strap over the dome
+      band(ctx, H, R, 5.4, BRONZE, 0.8, 0.3);
+      if (H.vis(0) < -0.3) return;
+      // Glowing eye slits in the iron mask
+      for (const sgn of [1, -1]) {
+        decal(ctx, H, R, SLIT.h, sgn * SLIT.phi, () => {
+          ctx.fillStyle = '#140c08';
+          ctx.fillRect(-1.3, -0.75, 2.6, 1.5);
+          if (mp.light > 0.05) {
+            ctx.fillStyle = `rgba(255,196,90,${Math.min(1, mp.light)})`;
+            ctx.fillRect(-0.75, -0.45, 1.5, 0.9);
+          }
+        }, { lift: 0.1, minVis: 0.05 });
+      }
+    },
+    over: () => {
+      // Brim: a raised rim round the helm (a solid disk would hide the face from above)
+      band(ctx, H, R, 2.6, IRON_DARK, 1.6, 1.3);
+    },
+  });
+}
+
+function mineExtra(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, _t: number, d0: number): ViewPart[] {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = barrelRings(len);
+  const spikes = backSpikes(T, R, len - 1.5, len - 9, 3, [-0.55, 0.55], i => 12 - i * 3, 2.2);
+  const r = R[2];
+  const back = (r.f ?? 0) - r.a * 0.85;
+  const side = solveSkeleton(p, SKIN.prop);
+  return [
+    {
+      z: sd(T, len - 5, back - 3, 0) - d0,
+      draw: () => {
+        const items: Part3[] = [...spikes.map((pts, i) => ({ pts, tone: i % 3 === 1 ? CRYSTAL_DEEP : CRYSTAL, hull: true, band: 0.8 }))];
+        items
+          .map(it => ({ it, d: it.pts.reduce((a, q) => a + sd(T, q[0], q[1], q[2]), 0) / it.pts.length + (it.bias ?? 0) }))
+          .sort((a, b) => a.d - b.d)
+          .forEach(({ it }) => hull3(ctx, T, it.pts, it.tone, { band: it.band, stroke: 0.45 }));
+      },
+    },
+    {
+      // Lantern on the far hip
+      z: sk.rig.depth(side.pelvis.x - 4, side.pelvis.y, -MINE_BUILD.hipW - 5) - d0,
+      draw: () => sagittal(ctx, sk.rig, -MINE_BUILD.hipW - 5, () => lantern(ctx, side, p as MinerPose)),
+    },
+  ];
+}
+
+const MINE_VIEW = monsterViewSkin(SKIN, {
+  build: MINE_BUILD,
+  headBias: 6,
+  torso: mineTorsoView,
+  head: mineHelmView,
+  back: () => undefined,
+  extra: mineExtra,
+});
+
+/** Two-handed haft in 3/4: the far hand crosses over to the near side while gripping. */
+function viewPose(p: MinerPose, t: number, act: MonsterAction): MinerPose {
+  const gripping = act === 'idle' || act === 'attack' || act === 'hurt' || (act === 'death' && t < 0.4);
+  return gripping ? { ...p, zF: MINE_BUILD.shW * 2 - 2 } : p;
+}
+
+function drawFxView(ctx: CanvasRenderingContext2D, p0: MinerPose, act: MonsterAction, t: number, view: HumanView): void {
+  const p = viewPose(p0, t, act);
+  const vsk = solveViewSkeleton(p, SKIN.prop, MINE_BUILD, view);
+  sagittalSpun(ctx, vsk, p, () => drawFx(ctx, p, act, t, true));
+  const L = Math.min(1, p.light);
+  if (L <= 0.02) return;
+  const H = minerHeadView(vsk);
+  const lamp = sp(H, LENS[0], LENS[1] + 0.3, LENS[2]);
+  const facing = sd(H, LENS[0], LENS[1] + 1, 0) > sd(H, LENS[0], LENS[1] - 3, 0);
+  if (facing) {
+    glow(ctx, lamp, 4.5, LAMP, 0.65 * L);
+    // Beam along the head's forward axis
+    const f0 = sp(H, LENS[0], LENS[1], 0);
+    const f1 = sp(H, LENS[0] - 2, LENS[1] + 16, 0);
+    const dir = Math.atan2(f1.y - f0.y, f1.x - f0.x);
+    const reach = Math.max(6, Math.hypot(f1.x - f0.x, f1.y - f0.y));
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createLinearGradient(lamp.x, lamp.y, lamp.x + Math.cos(dir) * reach, lamp.y + Math.sin(dir) * reach);
+    g.addColorStop(0, `rgba(255,220,140,${0.28 * L})`);
+    g.addColorStop(1, 'rgba(255,220,140,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(lamp.x, lamp.y - 1);
+    ctx.lineTo(lamp.x + Math.cos(dir - 0.25) * reach, lamp.y + Math.sin(dir - 0.25) * reach);
+    ctx.lineTo(lamp.x + Math.cos(dir + 0.25) * reach, lamp.y + Math.sin(dir + 0.25) * reach);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  for (const sgn of [1, -1]) {
+    if (surfVis(H, HELM, SLIT.h, sgn * SLIT.phi) > 0.2) glow(ctx, surf(H, HELM, SLIT.h, sgn * SLIT.phi, 0.2), 2.2, LAMP, 0.35 * L);
+  }
+  const T = vsk.torso;
+  const R = barrelRings(vsk.torsoLen);
+  const r = R[2];
+  glow(ctx, sp(T, vsk.torsoLen - 4, (r.f ?? 0) - r.a - 3, 0), 9, BLUE, (0.3 + 0.08 * Math.sin(t * Math.PI * 4)) * L);
+}
+
 // ── Poses ───────────────────────────────────────────────────────────────
 
 function grip(p: MinerPose, gap = 5): MinerPose {
@@ -435,7 +653,7 @@ function pickTip(p: MinerPose): { tip: V; base: V } {
   return { tip: along(sk.handN, p.wpn, PICK_LEN + 3), base: along(sk.handN, p.wpn, PICK_LEN - 8) };
 }
 
-function drawFx(ctx: CanvasRenderingContext2D, p: MinerPose, act: MonsterAction, t: number): void {
+function drawFx(ctx: CanvasRenderingContext2D, p: MinerPose, act: MonsterAction, t: number, groundOnly = false): void {
   const sk = solveSkeleton(p, SKIN.prop);
   const L = Math.min(1, p.light);
   if (act === 'attack' && t > 0.9) {
@@ -458,7 +676,7 @@ function drawFx(ctx: CanvasRenderingContext2D, p: MinerPose, act: MonsterAction,
     ctx.fillStyle = '#ffe0a0';
     for (const [dx, dy] of [[-7, -4], [6, -6], [11, -2], [-12, -2]] as const) ctx.fillRect(hit.x + dx, hit.y + dy, 1, 1);
   }
-  if (L > 0.02) {
+  if (L > 0.02 && !groundOnly) {
     // Head-lamp beam + lantern + crystal glow
     const lamp = spun(p, vec(sk.head.x + Math.cos(sk.headAng) * 8.6 - Math.sin(sk.headAng) * -4.7, sk.head.y + Math.sin(sk.headAng) * 8.6 + Math.cos(sk.headAng) * -4.7), sk);
     glow(ctx, lamp, 4.5, LAMP, 0.65 * L);
@@ -497,12 +715,16 @@ export const SubMineGuardianDrawer = rigMonster<MinerPose>({
   frameW: 80,
   frameH: 68,
   scale: 1.36,
+  views: MONSTER_VIEWS,
   pose: minerPose,
-  draw: (ctx, p, _act, t) => { drawHumanoid(ctx, p, SKIN, t); },
-  shadow: (p) => ({
-    x: Math.abs(p.spin) > 1 ? p.root.x + 8 : p.root.x + 1,
+  draw: (ctx, p, act, t, view) => {
+    if (view) drawHumanoidView(ctx, viewPose(p, t, act), MINE_VIEW, t, view);
+    else drawHumanoid(ctx, p, SKIN, t);
+  },
+  shadow: (p, _act, _t, view) => ({
+    x: groundX(view, Math.abs(p.spin) > 1 ? p.root.x + 8 : p.root.x + 1),
     r: Math.abs(p.spin) > 1 ? 20 : 15,
     lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)),
   }),
-  fx: drawFx,
+  fx: (ctx, p, act, t, view) => (view ? drawFxView(ctx, p, act, t, view) : drawFx(ctx, p, act, t)),
 });

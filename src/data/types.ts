@@ -166,6 +166,8 @@ export interface ItemInstance {
   level: number;
   affixes: ItemAffix[];
   sockets: GemInstance[];
+  /** Extra sockets punched by the blacksmith (CraftingSystem), on top of the base's. */
+  bonusSockets?: number;
   setId?: string;
   legendaryEffect?: string;
   identified: boolean;
@@ -350,6 +352,31 @@ export interface QuestDefinition {
   };
   /** Whether this quest can be re-accepted after failure. */
   reacceptable?: boolean;
+  /** Named monsters this quest puts into the world (bounties, lairs, ambushes). */
+  hunts?: QuestHunt[];
+}
+
+/**
+ * A named quest monster. It spawns only while its quest is open, never
+ * respawns, and its kill objective targets `huntId` (so ordinary kills of
+ * the base monster do not count and the guide arrow points straight at it).
+ */
+export interface QuestHunt {
+  /** Unique monster id for the kill objective; en name via `data.monster.<huntId>`. */
+  huntId: string;
+  /** Base monster whose rig, attacks and loot table it borrows. */
+  monsterId: string;
+  /** Display name (zh-CN). */
+  name: string;
+  col: number;
+  row: number;
+  /** Multipliers on the base monster (default hp ×4, damage ×1.5). */
+  hpMul?: number;
+  dmgMul?: number;
+  /** Stay hidden until every objective listed before its kill objective is done (track it down first). */
+  revealAfterPrevious?: boolean;
+  /** Pack that spawns around it. */
+  minions?: { monsterId: string; count: number };
 }
 
 export interface QuestObjective {
@@ -363,6 +390,8 @@ export interface QuestObjective {
   source?: QuestItemSource;
   /** Look of the collectible (icon + world node art); see QuestItemIcons. */
   itemKind?: string;
+  /** i18n key for the objective text when `targetId` alone is ambiguous (e.g. the same NPC in several deliveries). */
+  labelKey?: string;
 }
 
 /**
@@ -511,6 +540,15 @@ export interface SpiritSaveState {
   resonanceRemainingMs: number;
 }
 
+/** What a death left behind (see SoulEcho). */
+export interface SoulEchoData {
+  mapId: string;
+  col: number;
+  row: number;
+  gold: number;
+  exp: number;
+}
+
 export interface SaveData {
   id: string;
   version: number;
@@ -562,4 +600,10 @@ export interface SaveData {
   loreCollected?: string[];
   /** Hidden area IDs that have been discovered and had rewards collected. */
   discoveredHiddenAreas?: string[];
+  /** Story beats already played (prologue, chapters, cutscenes, boss intros, ending). */
+  storySeen?: string[];
+  /** Gold/exp dropped at the hero's last death, waiting to be reclaimed. */
+  soulEcho?: SoulEchoData | null;
+  /** Abyss Labyrinth tier ladder: highest tier unlocked / cleared, best clear time. */
+  abyss?: { unlockedTier: number; bestTier: number; bestTimeMs?: number };
 }

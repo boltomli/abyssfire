@@ -18,7 +18,7 @@ Deployed to GitHub Pages via `.github/workflows/deploy.yml` — push to `main` a
 - **Storage**: IndexedDB via Dexie.js (saves, stash)
 - **State**: Custom EventBus pub/sub + direct references
 - **Art**: Procedurally generated sprites with external asset override (cartoon-style PNG fallback)
-- **Resolution**: 1280x720, isometric tiles 64x32
+- **Resolution**: 1280x720 logical, isometric tiles 64x32. The canvas renders at `RENDER_SCALE` (1 / 1.5 / 2 × by window size, device pixel ratio and render quality; `?res=` overrides) with every camera zoomed to match, so code stays in logical pixels: screen-fixed scenes call `applyScreenCamera`, the zone camera is `ZONE_CAMERA_ZOOM × RENDER_SCALE`, and raw pointer coordinates in UI code go through `/ RENDER_SCALE` (`logicalPointer`). Text is rasterised at the matching resolution (`installTextResolution`)
 
 ## Project Structure
 
@@ -100,6 +100,17 @@ Each zone (`src/data/maps/`) defines: tile grid, spawn points, NPC positions, ex
 - Turn-in goes through `ZoneScene.turnInQuest(id, choiceIndex)`; `rewards.choices` generates class-appropriate pick-one gear (`QuestRewards.ts`).
 - NPC lines per quest live in `src/i18n/locales/questStory.ts` (`data.quest.<id>.offer` / `.complete`).
 
+### Story
+- Story bible: `docs/story.md`. Script data: `src/data/story/script.ts` (prologue/epilogue/credits sequences, chapter cards, cutscenes, boss intros, triggers) typed by `src/data/story/types.ts`; all text is i18n keys in `src/i18n/locales/story.ts`.
+- `StoryDirector` (created by `ZoneScene`) queues beats — prologue on a new game, a chapter card on each zone's first visit, cutscenes on main-quest turn-ins / the final boss kill, boss intros when a named boss comes within 9 tiles, then epilogue + credits — and freezes the world while one plays (`cinematic`). `StoryScene` renders them (letterbox, portraits, whispers, title cards). Seen beats persist in the save (`storySeen`).
+- `StoryScript.test.ts` checks every key exists in zh-CN and en, every trigger/boss intro resolves, and cutscene speakers stand in the zone where the cutscene plays.
+
+### Abyss Labyrinth (Zone 6 endgame)
+- Portal in Abyss Rift → tier picker (`DUNGEON_TIER_PICK` / `DUNGEON_TIER_CHOSEN`). Tiers are an endless ladder: clearing tier N unlocks N+1; the record (`GameSession.abyss`, saved as `SaveData.abyss`) keeps the best tier and fastest clear.
+- `DungeonSystem` (pure) builds a run: 5–8 floors, each a `FLOOR_THEMES` memory (crypt/forge/tomb, boss floor always the rift) painted with that zone's terrain and monsters raised to the tier's level (`raiseToLevel`), random size and orientation (`floorLayout`), a curse from floor 2 (`CURSES`: stat multipliers, elites, gloom, regeneration, volatile corpses; each adds loot quality/MF).
+- Each floor's exit is sealed until its keeper dies (`sealKeeper`: a themed gatekeeper, the mid-boss, or 卡萨诺尔 on the boss floor). Stepping on the open exit offers 3 boons (`BOONS` in `src/data/abyssRun.ts`, `rollBoonOffer`); boons are `Partial<EquipStats>` merged in `ZoneScene.getEquipStats` for the run. Labyrinth monsters never respawn.
+- UI (`src/ui/AbyssRunUI.ts`) only talks through the EventBus contract at the end of `EventBus.ts` (tier picker, boon cards, run HUD, run summary). The summary is emitted after returning to the rift.
+
 ### Loot System (D2-style)
 Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4) -> Legendary (orange, fixed) -> Set (green). Affixes have tiers 1-5 scaling with zone difficulty.
 
@@ -120,23 +131,33 @@ Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4)
 - Sub-dungeons (`DungeonSystem`), random events, weather, lighting
 - Real-time combat with auto-battle toggle, contact-frame hit timing and weighted hit feedback (see Combat Feel)
 - Elite monster affixes (`EliteAffixSystem`), difficulty modes (`DifficultySystem`)
+- Death penalty: a soul echo (`SoulEcho`) holds 10–20% of carried gold (and some exp on Nightmare/Hell) where the hero fell; walk back to reclaim, die again and it fades. Free below level 5.
+- Blacksmith forge (`CraftingSystem`): salvage, reforge, upgrade quality, punch sockets
+- Abyss Labyrinth endgame (Zone 6): tier ladder, themed floors, curses, sealed exits, run boons, 卡萨诺尔 boss intro (see Abyss Labyrinth)
 - D2-style loot with affixes, identify scrolls, gem sockets, buyback
 - Equipment (10 slots), inventory, stash panel (stash keeper NPC; homestead warehouse adds slots)
 - Quest system with tracking; NPC shops, dialogue trees, quests
 - Fog of war, minimap, homestead (buildings, pets), achievements
 - Save/load via IndexedDB; audio (BGM + SFX); zh-CN / en localisation (`t()`)
-- Keyboard controls (WASD, 1-6 skills, I/K/M/H/C panels) and mobile touch controls
+- Keyboard controls (WASD, 1-6 skills, I/K/M/H/C panels), click or hold-to-move with the mouse (`ZoneScene.updateHoldMove`: the hero keeps walking toward the held pointer, re-pathing as it moves) and mobile touch controls
 - Art: all characters, monsters and NPCs are procedural cel-shaded rigs (`src/graphics/sprites/rig/`);
   zone-themed terrain (`src/graphics/terrain/`), props, pooled skill VFX (`src/graphics/vfx/`),
   item/skill icons (`src/graphics/icons/`) and the UI kit (`src/ui/UiKit.ts`) follow
   `docs/art-direction.md`. External PNGs in `public/assets/` still override any texture key.
+- Hero sheets are isometric: every action in a front 3/4 (`se`) and back 3/4 (`ne`) view, mirrored
+  for sw/nw (`PLAYER_VIEWS`, view-major frames; `ne` anims are `player_<class>_ne_<action>`).
+  `rig/HumanView.ts` lifts the side-view keyframes into 3D (lateral axis, ±45° yaw, 2:1 iso drop,
+  depth-sorted parts); `CharacterAnimator.resolveFacing` picks view + flip from the screen-space
+  move/target vector with hysteresis. Monsters use the same two views (`rig/MonsterView.ts`:
+  lofted solids, turned heads, wing planes; radial/amorphous ones like slimes have a single se view
+  and mirror it); `Monster` faces its heading or, while attacking, the player. NPCs are drawn in
+  the se view only (`NpcKit` over `HumanView`) and mirror toward the player within 3 tiles.
 
 ### Needs Work
-- **Random dungeons**: Zone 6 (endgame roguelike) not started
-- **Death penalty**: Corpse run / gold loss not implemented
-- **Crafting**: Blacksmith crafting beyond buy/sell
-- **Performance**: Monster/NPC sheets are regenerated on every zone entry (~1 s on a software
-  renderer); consider caching or lazy per-action generation if zone load grows
+- **Performance**: first entry to a zone draws its monster/NPC sheets (~1 s on a software
+  renderer). Sheets are drawn at `TEXTURE_SCALE` 2 (camera zoom is 1.8, so that is ≥ 1 texel per
+  screen pixel) and survive `SpriteGenerator.sheetKeepZones` zone changes (2 on desktop, 1 on
+  touch), so walking back to a recent zone is ~0.15 s
 
 ## Parallel Agent Guidelines
 

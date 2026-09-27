@@ -4,11 +4,14 @@ import { CAMP_THEMES } from '../data/camp-themes';
 import { getActionFrameRate } from '../systems/CharacterAnimator';
 import { DrawUtils } from './DrawUtils';
 import { generateLegacyTiles } from './terrain/LegacyTiles';
-import type { EntityAction, EntityDrawer } from './sprites/types';
+import type { EntityAction, EntityDrawer, PlayerView } from './sprites/types';
 import {
   PLAYER_ACTION_FRAME_COUNTS,
   PLAYER_ACTION_ORDER,
+  PLAYER_VIEWS,
   getPlayerActionFrameRange,
+  getPlayerViewFrameRange,
+  playerAnimKey,
   computeSheetGrid,
   sheetFrameOrigin,
   type SheetGrid,
@@ -53,6 +56,7 @@ import { MerchantDesertDrawer } from './sprites/npcs/MerchantDesert';
 import { StashDrawer } from './sprites/npcs/Stash';
 import { QuestElderDrawer } from './sprites/npcs/QuestElder';
 import { QuestScoutDrawer } from './sprites/npcs/QuestScout';
+import { FIELD_NPC_DRAWERS } from './sprites/npcs/FieldNPCs';
 import { ForestHermitDrawer } from './sprites/npcs/ForestHermit';
 import { QuestDwarfDrawer } from './sprites/npcs/QuestDwarf';
 import { QuestNomadDrawer } from './sprites/npcs/QuestNomad';
@@ -89,6 +93,9 @@ import { EVENT_PROP_DRAWERS } from './sprites/decorations/EventProps';
 import { PetSpriteDrawers } from './sprites/decorations/Pets';
 import { LootBagDrawer } from './sprites/effects/LootBag';
 import { ExitPortalDrawer } from './sprites/effects/ExitPortal';
+import { LORE_PROP_DRAWERS } from './sprites/decorations/LoreProps';
+import { DUNGEON_GATE_DRAWERS } from './sprites/effects/DungeonGates';
+import { PICKUP_DRAWERS } from './sprites/effects/Pickups';
 
 // ── Frame Layout Constants ──────────────────────────────────────────────────
 const IDLE_START = 0, IDLE_COUNT = 4;
@@ -96,6 +103,9 @@ const WALK_START = 4, WALK_COUNT = 6;
 const ATK_START = 10, ATK_COUNT = 4;
 const HURT_START = 14, HURT_COUNT = 2;
 const DEATH_START = 16, DEATH_COUNT = 4;
+/** Frames per view in a monster sheet (multi-view sheets repeat the block). */
+const MONSTER_VIEW_FRAMES = 20;
+const MONSTER_ACTIONS = ['idle', 'walk', 'attack', 'hurt', 'death'] as const;
 
 // NPC frame layout (24 frames total per NPC)
 const NPC_WORK_START = 0, NPC_WORK_COUNT = 8;
@@ -155,6 +165,7 @@ const NPC_DRAWERS: EntityDrawer[] = [
   QuestWardenDrawer,
   WanderingMerchantDrawer,
   RescueNPCDrawer,
+  ...FIELD_NPC_DRAWERS,
 ];
 
 const NPC_WORK_RATES = new Map<string, number>([
@@ -171,6 +182,7 @@ const NPC_WORK_RATES = new Map<string, number>([
   [QuestWardenDrawer.key, 5],
   [WanderingMerchantDrawer.key, 5],
   [RescueNPCDrawer.key, 3],
+  ...FIELD_NPC_DRAWERS.map(d => [d.key, 4] as [string, number]),
 ]);
 
 const DECOR_DRAWERS: EntityDrawer[] = [
@@ -232,9 +244,12 @@ const NPC_DRAWER_BY_KEY = new Map<string, EntityDrawer>(
   [...NPC_DRAWERS, ...EVENT_NPC_DRAWERS].map(drawer => [drawer.key, drawer]),
 );
 const DECOR_DRAWER_BY_KEY = new Map<string, EntityDrawer>(
-  [...DECOR_DRAWERS, ...EVENT_PROP_DRAWERS, ...PetSpriteDrawers].map(drawer => [drawer.key, drawer]),
+  [...DECOR_DRAWERS, ...EVENT_PROP_DRAWERS, ...PetSpriteDrawers, ...LORE_PROP_DRAWERS].map(drawer => [drawer.key, drawer]),
 );
-const EFFECT_DRAWER_BY_KEY = new Map<string, EntityDrawer>(EFFECT_DRAWERS.map(drawer => [drawer.key, drawer]));
+// Gates and pickups are generated lazily (ensureEffect) the first time a zone needs them.
+const EFFECT_DRAWER_BY_KEY = new Map<string, EntityDrawer>(
+  [...EFFECT_DRAWERS, ...DUNGEON_GATE_DRAWERS, ...PICKUP_DRAWERS].map(drawer => [drawer.key, drawer]),
+);
 const CAMP_DRAWER_META = new Map<string, EntityDrawer>([
   ...STATIC_CAMP_DRAWERS,
   makeTentDrawer('camp_tent', CAMP_THEMES.plains.tentColor),
@@ -247,6 +262,15 @@ const CAMP_DRAWER_META = new Map<string, EntityDrawer>([
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class SpriteGenerator {
+  /**
+   * Character sheets are the bulk of zone-load time, so they outlive the zone
+   * that drew them: a sheet is released only after this many zone changes
+   * without being used (1 on touch devices to keep memory low).
+   */
+  static sheetKeepZones = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 ? 1 : 2;
+  private static zoneEpoch = 0;
+  private static sheetLastUsed = new Map<string, number>();
+
   private scene: Phaser.Scene;
   private utils: DrawUtils;
 
@@ -317,8 +341,33 @@ export class SpriteGenerator {
   static ensureDecoration(scene: Phaser.Scene, decorType: string): void {
     const key = decorType.startsWith('decor_') ? decorType : `decor_${decorType}`;
     const drawer = DECOR_DRAWER_BY_KEY.get(key);
-    if (!drawer || scene.textures.exists(key)) return;
-    new SpriteGenerator(scene).generateFromStaticDrawer(drawer);
+    if (!drawer) return;
+    if (!scene.textures.exists(key)) new SpriteGenerator(scene).generateFromStaticDrawer(drawer);
+    this.ensureLoopAnimation(scene, drawer);
+  }
+
+  /**
+   * Register `<key>_anim` for a static prop that declares an idle loop
+   * (chest glint, portal swirl). Returns the animation key, or null.
+   */
+  static getLoopAnimKey(scene: Phaser.Scene, key: string): string | null {
+    const animKey = `${key}_anim`;
+    return scene.anims.exists(animKey) ? animKey : null;
+  }
+
+  private static ensureLoopAnimation(scene: Phaser.Scene, drawer: EntityDrawer): void {
+    const loop = (drawer as DecorDrawer).loop;
+    if (!loop || !scene.textures.exists(drawer.key)) return;
+    const animKey = `${drawer.key}_anim`;
+    if (scene.anims.exists(animKey)) return;
+    // Externally supplied single-image textures have no numbered frames.
+    if (!scene.textures.get(drawer.key).has(String(loop.frames - 1))) return;
+    scene.anims.create({
+      key: animKey,
+      frames: scene.anims.generateFrameNumbers(drawer.key, { start: 0, end: loop.frames - 1 }),
+      frameRate: loop.fps,
+      repeat: -1,
+    });
   }
 
   /** Frame size (pre-TEXTURE_SCALE) of a generated character sheet, if known. */
@@ -337,8 +386,15 @@ export class SpriteGenerator {
 
   static ensureEffect(scene: Phaser.Scene, effectKey: string): void {
     const drawer = EFFECT_DRAWER_BY_KEY.get(effectKey);
-    if (!drawer || scene.textures.exists(effectKey)) return;
-    new SpriteGenerator(scene).generateFromStaticDrawer(drawer);
+    if (!drawer) return;
+    if (!scene.textures.exists(effectKey)) new SpriteGenerator(scene).generateFromStaticDrawer(drawer);
+    this.ensureLoopAnimation(scene, drawer);
+  }
+
+  /** Placement metadata (ground-contact origin Y) for an effect / pickup texture. */
+  static getEffectAnchorY(key: string): number | null {
+    const drawer = EFFECT_DRAWER_BY_KEY.get(key) as DecorDrawer | undefined;
+    return drawer && typeof drawer.anchorY === 'number' ? drawer.anchorY : null;
   }
 
   static clearZoneTransientTextures(scene: Phaser.Scene): void {
@@ -351,15 +407,23 @@ export class SpriteGenerator {
         key === 'exit_portal';
       if (!shouldRelease) continue;
       if (this.isExternalTexture(scene, key)) continue;
+      if (key.startsWith('monster_') || key.startsWith('npc_')) {
+        const used = this.sheetLastUsed.get(key) ?? -Infinity;
+        if (this.zoneEpoch - used < this.sheetKeepZones) continue;
+        this.sheetLastUsed.delete(key);
+      }
       if (key.startsWith('monster_')) this.clearEntityAnimations(scene, key, false);
       if (key.startsWith('npc_')) this.clearNPCAnimations(scene, key);
+      if (key.startsWith('decor_') && scene.anims.exists(`${key}_anim`)) scene.anims.remove(`${key}_anim`);
       scene.textures.remove(key);
     }
+    this.zoneEpoch++;
   }
 
   private static ensureEntitySheet(scene: Phaser.Scene, key: string): void {
     const drawer = ENTITY_DRAWER_BY_KEY.get(key);
     if (!drawer) return;
+    this.sheetLastUsed.set(key, this.zoneEpoch);
     const generator = new SpriteGenerator(scene);
     const generatedNow = !scene.textures.exists(key);
     if (generatedNow) {
@@ -375,6 +439,7 @@ export class SpriteGenerator {
   private static ensureNPCKey(scene: Phaser.Scene, key: string): void {
     const drawer = NPC_DRAWER_BY_KEY.get(key);
     if (!drawer) return;
+    this.sheetLastUsed.set(key, this.zoneEpoch);
     const generator = new SpriteGenerator(scene);
     const generatedNow = !scene.textures.exists(key);
     if (generatedNow) {
@@ -394,12 +459,20 @@ export class SpriteGenerator {
   }
 
   private static clearEntityAnimations(scene: Phaser.Scene, key: string, isPlayer: boolean): void {
-    const actions = isPlayer
-      ? PLAYER_ACTION_ORDER
-      : ['idle', 'walk', 'attack', 'hurt', 'death'];
-    for (const action of actions) {
-      const animKey = `${key}_${action}`;
-      if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
+    if (isPlayer) {
+      for (const view of PLAYER_VIEWS) {
+        for (const action of PLAYER_ACTION_ORDER) {
+          const animKey = playerAnimKey(key, view, action);
+          if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
+        }
+      }
+      return;
+    }
+    for (const view of PLAYER_VIEWS) {
+      for (const action of MONSTER_ACTIONS) {
+        const animKey = playerAnimKey(key, view, action);
+        if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
+      }
     }
   }
 
@@ -508,25 +581,27 @@ export class SpriteGenerator {
     const [canvas, ctx] = this.utils.createCanvas(grid.width, grid.height);
 
     const isPlayer = PLAYER_DRAWER_BY_KEY.has(drawer.key);
-    const actions: [EntityAction, number, number][] = isPlayer
-      ? PLAYER_ACTION_ORDER.map(action => {
-          const range = getPlayerActionFrameRange(action);
-          return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action]];
-        })
-      : [
-          ['idle', IDLE_START, IDLE_COUNT],
-          ['walk', WALK_START, WALK_COUNT],
-          ['attack', ATK_START, ATK_COUNT],
-          ['hurt', HURT_START, HURT_COUNT],
-          ['death', DEATH_START, DEATH_COUNT],
-        ];
+    // Player heroes carry every action once per isometric view (view-major).
+    const actions: [EntityAction, number, number, PlayerView | undefined][] = isPlayer
+      ? (drawer.views ?? [undefined]).flatMap(view => PLAYER_ACTION_ORDER.map((action): [EntityAction, number, number, PlayerView | undefined] => {
+          const range = view ? getPlayerViewFrameRange(view, action) : getPlayerActionFrameRange(action);
+          return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action], view];
+        }))
+      // Monsters: 20 frames per view, view-major (se first).
+      : (drawer.views ?? [undefined]).flatMap((view, vi): [EntityAction, number, number, PlayerView | undefined][] => [
+          ['idle', vi * MONSTER_VIEW_FRAMES + IDLE_START, IDLE_COUNT, view],
+          ['walk', vi * MONSTER_VIEW_FRAMES + WALK_START, WALK_COUNT, view],
+          ['attack', vi * MONSTER_VIEW_FRAMES + ATK_START, ATK_COUNT, view],
+          ['hurt', vi * MONSTER_VIEW_FRAMES + HURT_START, HURT_COUNT, view],
+          ['death', vi * MONSTER_VIEW_FRAMES + DEATH_START, DEATH_COUNT, view],
+        ]);
 
     // Rigged drawers ink themselves; legacy ones get the shared ink pass.
     const legacy = !drawer.inked;
-    for (const [action, start, count] of actions) {
+    for (const [action, start, count, view] of actions) {
       for (let f = 0; f < count; f++) {
         this.drawCell(ctx, grid, start + f, fw, fh, legacy,
-          c => drawer.drawFrame(c, f, action, fw, fh, this.utils));
+          c => drawer.drawFrame(c, f, action, fw, fh, this.utils, view));
       }
     }
 
@@ -656,10 +731,31 @@ export class SpriteGenerator {
   // ═══════════════════════════════════════════════════════════════════════
 
   private hasEntityAnimationsRegistered(key: string, isPlayer: boolean): boolean {
-    const actions = isPlayer
-      ? PLAYER_ACTION_ORDER
-      : ['idle', 'walk', 'attack', 'hurt', 'death'];
-    return actions.every(action => this.scene.anims.exists(`${key}_${action}`));
+    if (isPlayer) {
+      return this.playerSheetViews(key).every(view =>
+        PLAYER_ACTION_ORDER.every(action => this.scene.anims.exists(playerAnimKey(key, view, action))));
+    }
+    return this.monsterSheetViews(key).every(view =>
+      MONSTER_ACTIONS.every(action => this.scene.anims.exists(playerAnimKey(key, view, action))));
+  }
+
+  /** Views a monster sheet holds (an external PNG override only has the first). */
+  private monsterSheetViews(key: string): readonly PlayerView[] {
+    const views = ENTITY_DRAWER_BY_KEY.get(key)?.views ?? [PLAYER_VIEWS[0]];
+    if (!this.scene.textures.exists(key)) return views;
+    const frames = this.scene.textures.get(key).frameTotal - 1; // minus __BASE
+    return views.filter((_, vi) => (vi + 1) * MONSTER_VIEW_FRAMES <= frames);
+  }
+
+  /**
+   * Views the loaded sheet actually holds. An external single-view PNG
+   * override only has the first view's frames.
+   */
+  private playerSheetViews(key: string): readonly PlayerView[] {
+    const views = PLAYER_DRAWER_BY_KEY.get(key)?.views ?? [PLAYER_VIEWS[0]];
+    if (!this.scene.textures.exists(key)) return views;
+    const frames = this.scene.textures.get(key).frameTotal - 1; // minus __BASE
+    return views.filter(view => getPlayerViewFrameRange(view, 'cast').end < frames);
   }
 
   private ensureEntityAnimationsRegistered(key: string, isPlayer: boolean): void {
@@ -671,19 +767,23 @@ export class SpriteGenerator {
   private registerEntityAnimations(key: string, isPlayer: boolean): void {
     const anims = this.scene.anims;
     const defs: [string, number, number, number, number][] = isPlayer
-      ? PLAYER_ACTION_ORDER.map(action => {
-          const range = getPlayerActionFrameRange(action);
+      ? this.playerSheetViews(key).flatMap(view => PLAYER_ACTION_ORDER.map((action): [string, number, number, number, number] => {
+          const range = getPlayerViewFrameRange(view, action);
           const rate = getActionFrameRate(key.replace(/^player_/, ''), action);
           const repeat = action === 'idle' || action === 'walk' ? -1 : 0;
-          return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action], rate, repeat];
-        })
-      : [
-          ['idle', IDLE_START, IDLE_COUNT, 6, -1],
-          ['walk', WALK_START, WALK_COUNT, 10, -1],
-          ['attack', ATK_START, ATK_COUNT, 12, 0],
-          ['hurt', HURT_START, HURT_COUNT, 10, 0],
-          ['death', DEATH_START, DEATH_COUNT, 6, 0],
-        ];
+          return [playerAnimKey('', view, action).slice(1), range.start, PLAYER_ACTION_FRAME_COUNTS[action], rate, repeat];
+        }))
+      : this.monsterSheetViews(key).flatMap((view, vi): [string, number, number, number, number][] => {
+          const base = vi * MONSTER_VIEW_FRAMES;
+          const name = (action: string): string => playerAnimKey('', view, action).slice(1);
+          return [
+            [name('idle'), base + IDLE_START, IDLE_COUNT, 6, -1],
+            [name('walk'), base + WALK_START, WALK_COUNT, 10, -1],
+            [name('attack'), base + ATK_START, ATK_COUNT, 12, 0],
+            [name('hurt'), base + HURT_START, HURT_COUNT, 10, 0],
+            [name('death'), base + DEATH_START, DEATH_COUNT, 6, 0],
+          ];
+        });
     for (const [action, start, count, rate, repeat] of defs) {
       const animKey = `${key}_${action}`;
       if (anims.exists(animKey)) anims.remove(animKey);

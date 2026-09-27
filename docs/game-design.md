@@ -34,7 +34,7 @@ Cartoon-style isometric MUD web game. DnD-inspired world, Diablo II-style loot a
 
 ## World — Abyssfire (渊火)
 
-Ancient seals shattered, darkness pours from the Abyss. Player awakens as a chosen hero.
+The full story bible (myth, the Oathburner Ignaroth, the hero's brand and prophecy, five chapters, ending) lives in [`docs/story.md`](story.md). In short: the world was forged in the Abyssfire; the sixth sage Ignaroth broke the oath to recast it in the fire and was sealed beneath five seals; now the fire stirs, and the hero wakes in the ashes with a five-flame brand that both opens and closes the gate.
 
 **Races** (affect starting stats): Human / Elf / Dwarf / Half-Orc
 
@@ -47,7 +47,7 @@ Ancient seals shattered, darkness pours from the Abyss. Player awakens as a chos
 | 3 | Anvil Mountains (铁砧山脉) | Dwarven ruins, gargoyles | 20-30 |
 | 4 | Scorching Desert (灼热荒漠) | Fire elementals, sandworms | 30-40 |
 | 5 | Abyss Rift (深渊裂谷) | Demons, final bosses | 40-50 |
-| 6 | Random Dungeons | Roguelike (future) | Endgame |
+| 6 | Abyss Labyrinth (深渊迷宫) | Roguelike tier ladder: themed floors, curses, sealed exits, run boons | Endgame |
 
 ## Classes
 

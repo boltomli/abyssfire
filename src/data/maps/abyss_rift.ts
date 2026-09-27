@@ -25,7 +25,7 @@ export const AbyssRiftMap: MapData = {
     // Q3 — bottom-left quadrant
     { col: 35, row: 85, monsterId: 'succubus', count: 6 },
     { col: 20, row: 95, monsterId: 'succubus', count: 3 },
-    { col: 55, row: 105, monsterId: 'demon_lord', count: 2 },
+    { col: 55, row: 105, monsterId: 'demon_lord', count: 1 },
     // Q4 — bottom-right quadrant
     { col: 60, row: 65, monsterId: 'imp', count: 6 },
     { col: 80, row: 80, monsterId: 'lesser_demon', count: 4 },

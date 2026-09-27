@@ -363,14 +363,14 @@ function drawBody(ctx: CanvasRenderingContext2D, p: ElementalPose, t: number): v
   }
 
   // Brow mask with blazing eye slits
-  const mk = fallen(p, H(1.4, -0.4), vec(p.root.x + 7, bY - 7.5), p.lean + p.head, 1.3);
+  const mk = fallen(p, H(-1.6, -0.4), vec(p.root.x + 7, bY - 7.5), p.lean + p.head, 1.3);
   rockPlate(ctx, mk.at, mk.rot, MASK, ROCK, [[-1.6, 2.2, -0.6, 3.2]], heat);
   ctx.save();
   ctx.translate(mk.at.x, mk.at.y);
   ctx.rotate(mk.rot);
   if (alive > 0.2) {
-    // Blazing almond eyes under the brow
-    for (const [x, w] of [[1.4, 3.4], [5.3, 2.2]] as const) {
+    // Blazing almond eyes under the brow, turned toward the camera (3/4)
+    for (const [x, w] of [[1.2, 3.2], [5, 2.8]] as const) {
       ctx.fillStyle = '#3a0a04';
       ctx.beginPath();
       ctx.ellipse(x, 1.5, w / 2 + 0.55, 1.35, 0.12, 0, Math.PI * 2);
@@ -385,7 +385,7 @@ function drawBody(ctx: CanvasRenderingContext2D, p: ElementalPose, t: number): v
   }
   ctx.restore();
 
-  const jw = fallen(p, H(0.6, -0.2), vec(p.root.x + 10, bY - 2), p.lean + p.head, -0.4);
+  const jw = fallen(p, H(-1.8, -0.2), vec(p.root.x + 10, bY - 2), p.lean + p.head, -0.4);
   rockPlate(ctx, jw.at, jw.rot, JAW, ROCK, [[2, 3.4, 3, 4.4, 4.6, 3.4]], heat);
 
   // Near arm in front

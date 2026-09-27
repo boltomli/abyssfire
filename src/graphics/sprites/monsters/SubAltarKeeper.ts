@@ -26,6 +26,27 @@ import {
 } from '../rig/Rig';
 import { basePose, solveSkeleton, spun, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { humanoidMonster, humanoidTracks, type HumanoidMonsterSpec } from '../rig/MonsterKit';
+import type { ViewPart, ViewSkeleton } from '../rig/HumanView';
+import type { MonsterAction } from '../types';
+import {
+  band,
+  decal,
+  eye3,
+  loftFill,
+  lp,
+  poly3,
+  profileRings,
+  sagittalSpun,
+  sd,
+  solid3,
+  surf,
+  surfCurve,
+  surfPatch,
+  surfVis,
+  turnedHead,
+  withAffine,
+  type L3,
+} from '../rig/MonsterView';
 
 const ROBE = tone(0x7a1628, { light: 0.3, shadow: 0.45 });
 const ROBE_FAR = tone(0x4a0c1a, { light: 0.18 });
@@ -280,7 +301,7 @@ function censer(ctx: CanvasRenderingContext2D, from: V, p: HumanPose, t: number)
   return bob;
 }
 
-function censerPoint(sk: Skeleton, p: HumanPose, t: number): V {
+function censerPoint(sk: { handF: V }, p: HumanPose, t: number): V {
   const swing = Math.sin(t * Math.PI * 2 + 0.6) * 0.35 - p.flow * 0.7;
   return vec(sk.handF.x + Math.sin(swing) * 8.5, sk.handF.y + Math.cos(swing) * 8.5);
 }
@@ -358,6 +379,237 @@ function halo(ctx: CanvasRenderingContext2D, sk: Skeleton, t: number): void {
   ctx.setLineDash([]);
 }
 
+
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const ALTAR_BUILD = { hipW: 2.4, shW: 5.4, elbowOut: 1.2, footOut: 0.4 };
+const PRIEST_BODY = (len: number): V[] => [vec(-5.4, 0.5), vec(1, -0.8), vec(6, 1.4), vec(6.6, 7), vec(5.8, len * 0.7), vec(5.2, len + 0.5), vec(-5.2, len + 0.5), vec(-6.2, 7)];
+const priestRings = (len: number): ReturnType<typeof profileRings> => profileRings(PRIEST_BODY(len), y => len - y, a => a * 0.95, 8);
+const HOOD = profileRings([vec(-6.6, 2.4), vec(-7.2, -3.6), vec(-3.6, -8.6), vec(1.2, -10.6), vec(6.2, -6), vec(7.4, 1), vec(5.8, 7), vec(-2, 8)], y => -y, a => a * 0.95, 8);
+const MASK_EYE = { h: 2.8, phi: 0.36 };
+const altarHead = (sk: ViewSkeleton): ReturnType<typeof turnedHead> => turnedHead(sk, 0.35);
+
+/** Vestment skirt rings from the waist down to just above the ground. */
+function skirtRings(p: HumanPose): { h: number; a: number; b: number; f: number }[] {
+  const hem = -Math.max(8, (GROUND_Y - 3 - p.root.y) / Math.max(0.5, Math.cos(p.lean)));
+  const sw = -p.flow * 3.4;
+  return [
+    { h: 2, a: 5.8, b: 6, f: 0.3 },
+    { h: hem * 0.45, a: 7.4, b: 7.4, f: 0.6 + sw * 0.3 },
+    { h: hem, a: 9.4, b: 8.8, f: 1.4 + sw },
+  ];
+}
+
+function sigilDecal(ctx: CanvasRenderingContext2D, i: number): void {
+  ctx.strokeStyle = '#ff4060';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  if (i % 2 === 0) {
+    ctx.moveTo(-0.9, -1.1);
+    ctx.lineTo(0.9, -1.1);
+    ctx.lineTo(0, 1.2);
+    ctx.closePath();
+    ctx.moveTo(0, -1.9);
+    ctx.lineTo(0, 1.9);
+  } else {
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.moveTo(-1.6, 0);
+    ctx.lineTo(1.6, 0);
+  }
+  ctx.stroke();
+}
+
+function altarTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = priestRings(len);
+  const SR = skirtRings(p);
+  const front = T.vis(0) > T.vis(Math.PI);
+  const ph = t * Math.PI * 2;
+  const sw = Math.sin(ph + 0.4) * 0.8 - p.flow * 3;
+  const r0 = R[R.length - 1];
+  const stoleTail: L3[] = [[2, (r0.f ?? 0) + r0.a + 0.6, -2], [2, (r0.f ?? 0) + r0.a + 0.6, 2], [-11, (r0.f ?? 0) + r0.a + 1.6 + sw * 0.6, 2.4], [-13.4, (r0.f ?? 0) + r0.a + 1.8 + sw, 0], [-11, (r0.f ?? 0) + r0.a + 1.6 + sw * 0.8, -2.2]];
+  if (!front) poly3(ctx, T, stoleTail, STOLE, { band: 0.7 });
+  // Vestment skirt with the dark front split and a blood-soaked hem
+  const skirt = loftFill(ctx, T, SR, ROBE, { band: 1.9 });
+  const hem = SR[SR.length - 1].h;
+  ctx.save();
+  ctx.beginPath();
+  for (const pc of skirt) polyPath(ctx, pc);
+  ctx.clip();
+  if (T.vis(0.25) > -0.2) cel(ctx, () => polyPath(ctx, surfPatch(T, SR, 1.6, hem - 1, 0.05, 0.45, 0.1, 5, k => k * 0.2)), LINING, { band: 0.6, stroke: 0.4 });
+  ctx.fillStyle = 'rgba(40,0,8,0.45)';
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const b = ((i + 1) / 10) * Math.PI * 2;
+    if (surfVis(T, SR, hem + 1, (a + b) / 2) < -0.1) continue;
+    ctx.beginPath();
+    polyPath(ctx, surfPatch(T, SR, hem + 3.2, hem - 1, a, b, 0.05, 3));
+    ctx.fill();
+  }
+  ctx.restore();
+  solid3(ctx, T, R, ROBE, {
+    band: 1.5,
+    face: () => {
+      // Black stole down the front, edged in brass, sigils stitched along it
+      if (T.vis(0) > -0.35) {
+        cel(ctx, () => polyPath(ctx, surfPatch(T, R, len + 0.4, 3, -0.3, 0.3, 0.15, 5)), STOLE, { band: 0.8 });
+        ctx.strokeStyle = BRASS.base;
+        ctx.lineWidth = 0.5;
+        for (const phi of [-0.28, 0.28]) {
+          for (const run of surfCurve(T, R, [[len, phi], [3.2, phi]], 0.2, 5, 0.02)) {
+            ctx.beginPath();
+            run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+            ctx.stroke();
+          }
+        }
+        for (let i = 0; i < 3; i++) decal(ctx, T, R, len - 4.4 - i * 3.6, 0, () => sigilDecal(ctx, i), { lift: 0.25, minVis: 0.05 });
+      }
+    },
+    over: () => {
+      // Vertebrae belt
+      band(ctx, T, R, 2.4, STOLE, 2.6, 0.4);
+      for (let i = 0; i < 9; i++) {
+        const phi = -1.6 + i * 0.4;
+        decal(ctx, T, R, 2.4, phi, () => {
+          ctx.fillStyle = BONE.base;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 1.1, 0.9, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }, { lift: 0.9, minVis: 0.1 });
+      }
+      // High mantle with a brass edge
+      const mantle = [{ h: len + 2, a: 4.6, b: 5.4, f: 0.4 }, { h: len - 1.6, a: 7, b: 7.6, f: 0.6 }, { h: len - 5, a: 7.2, b: 7.8, f: 0.8 }];
+      loftFill(ctx, T, mantle, ROBE_FAR, { band: 1 });
+      band(ctx, T, mantle, len - 4.6, BRASS, 0.6, 0.1);
+      // Heart reliquary on its chain
+      decal(ctx, T, mantle, len - 5.4, 0.15, () => {
+        cel(ctx, () => blobPath(ctx, [vec(-1, -1.6), vec(1, -2), vec(1.4, -0.2), vec(0, 1.6), vec(-1.4, -0.2)]), BRASS, { band: 0.4, stroke: 0.4 });
+        ctx.fillStyle = BLOOD;
+        ctx.beginPath();
+        ctx.arc(0, -0.4, 0.7, 0, Math.PI * 2);
+        ctx.fill();
+      }, { lift: 1.4, minVis: 0.05 });
+      if (front) {
+        poly3(ctx, T, stoleTail, STOLE, { band: 0.7 });
+        const tip = stoleTail[3];
+        const a = T.rig.p(lp(T, stoleTail[2][0] + 0.6, stoleTail[2][1], stoleTail[2][2]));
+        const b = T.rig.p(lp(T, tip[0] + 0.9, tip[1], tip[2]));
+        const c = T.rig.p(lp(T, stoleTail[4][0] + 0.6, stoleTail[4][1], stoleTail[4][2]));
+        ctx.strokeStyle = BRASS.base;
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.lineTo(c.x, c.y);
+        ctx.stroke();
+      }
+    },
+  });
+}
+
+function altarHoodView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const H = altarHead(sk);
+  const R = HOOD;
+  const sway = Math.sin(t * Math.PI * 2) * 0.5 + p.flow * 2.5;
+  // Hood point trailing down the back
+  const tail: L3[] = [[4, -6, -3], [4, -6, 3], [-3, -9 - sway, 2], [-10 - sway * 0.2, -10.4 - sway * 1.4, 0], [-3, -9 - sway, -2]];
+  const spikes = [-1.1, -0.55, 0, 0.55, 1.1].map((phi, i) => {
+    const a = surf(H, R, 6.2, phi - 0.12, 0.5);
+    const b = surf(H, R, 6.2, phi + 0.12, 0.5);
+    const up = H.rig.vec(H.up.x, H.up.y, 0);
+    const hgt = [4, 5.4, 5.8, 5.4, 4][i];
+    const c0 = surf(H, R, 6.4, phi, 0.6);
+    return { phi, pts: [a, vec(c0.x + up.x * hgt, c0.y + up.y * hgt), b] };
+  });
+  solid3(ctx, H, R, ROBE, {
+    band: 1.7,
+    parts: [{ pts: tail, tone: ROBE, bias: -1, band: 1 }],
+    face: () => {
+      if (H.vis(0) < -0.35) return;
+      // Dark opening, porcelain mask, eye slits, weeping blood
+      ctx.fillStyle = '#12060a';
+      ctx.beginPath();
+      polyPath(ctx, surfPatch(H, R, 6.4, -4.4, -1.05, 1.05, 0.2, 8));
+      ctx.fill();
+      cel(ctx, () => polyPath(ctx, surfPatch(H, R, 5.4, -3.6, -0.78, 0.78, 0.5, 8, k => -Math.abs(k - 0.5) * 2.4)), MASK, { band: 1, stroke: 0.4 });
+      for (const sgn of [1, -1]) eye3(ctx, H, R, MASK_EYE.h, sgn * MASK_EYE.phi, { rx: 1.5, ry: 0.45, socket: '#1a0608', iris: '#ffd0d6', irisR: 0.4, tilt: 0.12, minVis: 0.1 });
+      ctx.strokeStyle = BLOOD;
+      ctx.lineWidth = 0.55;
+      for (const run of surfCurve(H, R, [[MASK_EYE.h - 0.5, MASK_EYE.phi], [MASK_EYE.h - 2.6, MASK_EYE.phi + 0.04], [MASK_EYE.h - 4.6, MASK_EYE.phi - 0.02]], 0.6, 3, 0.1)) {
+        ctx.beginPath();
+        run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+        ctx.stroke();
+      }
+      ctx.strokeStyle = MASK.line;
+      ctx.lineWidth = 0.35;
+      for (const run of surfCurve(H, R, [[-1.6, -0.3], [-1.7, 0.3]], 0.6, 4, 0.1)) {
+        ctx.beginPath();
+        run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+        ctx.stroke();
+      }
+    },
+    over: () => {
+      // Spiked iron circlet over the hood
+      band(ctx, H, R, 6.2, IRON, 1.4, 0.5);
+      for (const sp of spikes) {
+        if (surfVis(H, R, 6.2, sp.phi) < -0.05) continue;
+        cel(ctx, () => polyPath(ctx, sp.pts), IRON, { band: 0.3, stroke: 0.4 });
+      }
+      decal(ctx, H, R, 6.2, 0, () => {
+        ctx.fillStyle = BLOOD;
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.7, 0, Math.PI * 2);
+        ctx.fill();
+      }, { lift: 0.9, minVis: 0.05 });
+    },
+  });
+}
+
+/** Sigil-wheel centre: in a plane behind the hood, facing forward. */
+function altarHaloCentre(sk: ViewSkeleton): { x: number; y: number; z: number } {
+  return lp(sk.skull, 2.4, -9, 0);
+}
+
+function altarExtra(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number, d0: number): ViewPart[] {
+  const c = altarHaloCentre(sk);
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const r = priestRings(len)[1];
+  const back = (r.f ?? 0) - r.a - 0.6;
+  const sw = Math.sin(t * Math.PI * 2 + 1) * 1 - p.flow * 4 - 1;
+  const tails: L3[][] = [-1, 1].map(s => [[len - 1, back, s * 1], [len - 1, back, s * 4.2], [len - 20, back + sw - 1, s * 4.6], [len - 22, back + sw - 1.4, s * 3], [len - 20, back + sw - 1, s * 1.4]]);
+  return [
+    {
+      z: sk.rig.d(c) - d0 + (sk.rig.front ? -2 : 6),
+      draw: () => withAffine(ctx, q => sk.rig.pt(c.x, c.y + q.y, c.z + q.x), () => {
+        // A stand-in skeleton that puts the wheel centre at the origin.
+        halo(ctx, { head: vec(3.2, 2.4), headAng: 0 } as unknown as Skeleton, t);
+      }),
+    },
+    {
+      z: sd(T, len - 10, back, 0) - d0,
+      draw: () => {
+        for (const pts of tails) poly3(ctx, T, pts, ROBE_FAR, { band: 0.8 });
+      },
+    },
+  ];
+}
+
+function altarViewFx(ctx: CanvasRenderingContext2D, p: HumanPose, sk: ViewSkeleton, act: MonsterAction, t: number): void {
+  const live = act === 'death' ? Math.max(0, 1 - t * 1.2) : 1;
+  const H = altarHead(sk);
+  for (const sgn of [1, -1]) {
+    if (surfVis(H, HOOD, MASK_EYE.h, sgn * MASK_EYE.phi) > 0.2) glow(ctx, surf(H, HOOD, MASK_EYE.h, sgn * MASK_EYE.phi, 0.6), 2.2 + p.fx, SIGIL, (0.45 + p.fx * 0.3) * live);
+  }
+  const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 4);
+  glow(ctx, sk.rig.p(altarHaloCentre(sk)), 11, SIGIL, (0.12 + pulse * 0.06 + p.fx * 0.12) * live);
+  censerSmoke(ctx, censerPoint(sk, p, t), t, pulse, live);
+  const R = priestRings(sk.torsoLen);
+  if (surfVis(sk.torso, R, sk.torsoLen * 0.5, 0) > 0.1) glow(ctx, surf(sk.torso, R, sk.torsoLen * 0.5, 0, 0.3), 3 + pulse, SIGIL, 0.22 * live);
+  sagittalSpun(ctx, sk, p, () => altarBladeFx(ctx, p, solveSkeleton(p, SKIN.prop), act, t));
+}
+
 const SKIN: HumanSkin = {
   prop: {
     thigh: 12, shin: 12, upperArm: 9.4, foreArm: 9,
@@ -424,12 +676,70 @@ const SPEC: HumanoidMonsterSpec = {
 
 const TRACKS = humanoidTracks(SPEC);
 
+/** Censer embers and rising blood-red smoke. */
+function censerSmoke(ctx: CanvasRenderingContext2D, cp: V, t: number, pulse: number, live: number): void {
+  glow(ctx, cp, 4 + pulse, SIGIL, (0.35 + pulse * 0.15) * live);
+  for (let i = 0; i < 4; i++) {
+    const k = (i / 4 + t * 0.75) % 1;
+    const pt = vec(cp.x - k * 5 + Math.sin(k * 7 + i) * 1.6, cp.y - 2 - k * 13);
+    glow(ctx, pt, 2 + k * 2.6, SMOKE, 0.4 * (1 - k) * live);
+  }
+}
+
+/** Sickle smear and the ground sigil on contact (side-view coordinates). */
+function altarBladeFx(ctx: CanvasRenderingContext2D, p: HumanPose, sk: Skeleton, act: MonsterAction, t: number): void {
+  if (act === 'attack' && t > 0.5) {
+    const tips: V[] = [];
+    const bases: V[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const sp = samplePoseTrack(TRACKS.attack, Math.max(0.34, t - i * 0.05));
+      const ssk = solveSkeleton(sp, SKIN.prop);
+      tips.push(spun(sp, along(ssk.handN, sp.wpn + 0.3, BLADE_LEN), ssk));
+      bases.push(spun(sp, along(ssk.handN, sp.wpn, 4), ssk));
+    }
+    smear(ctx, tips, bases, 0xff3050, 0.55 * p.fx);
+  }
+  if (act === 'attack' && t >= 0.99) {
+    // Blood sigil flares on the ground under the blow
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,50,80,0.75)';
+    ctx.lineWidth = 0.8;
+    const cx = sk.handN.x + 6;
+    ctx.beginPath();
+    ctx.ellipse(cx, GROUND_Y, 9, 2.6, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + i * (Math.PI * 4 / 5);
+      const x = cx + Math.cos(a) * 7.5;
+      const y = GROUND_Y + Math.sin(a) * 2.1;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+    glow(ctx, vec(cx, GROUND_Y - 1), 8, SIGIL, 0.35);
+  }
+}
+
 export const SubAltarKeeperDrawer = humanoidMonster({
   ...SPEC,
   tracks: {
     // Long vestments fall wider than the generated pose assumes: keep the mid-fall clear of the frame floor.
     death: TRACKS.death.map(k => (k.at > 0.5 && k.at < 1 ? { ...k, pose: { ...k.pose, root: vec(k.pose.root.x, k.pose.root.y - 3) } } : k)),
   },
+  view: {
+    build: ALTAR_BUILD,
+    headBias: 5,
+    torso: altarTorsoView,
+    head: altarHoodView,
+    back: () => undefined,
+    extra: altarExtra,
+    // The vestment is part of the 3D torso; the near leg only shows its shin.
+    legNear: (ctx, sk) => shin(ctx, sk.kneeN, sk.footN, sk.soleN, false),
+  },
+  viewFx: altarViewFx,
   fx: (ctx, p, sk, act, t) => {
     const live = act === 'death' ? Math.max(0, 1 - t * 1.2) : 1;
     const S = (pt: V): V => spun(p, pt, sk);
@@ -437,49 +747,10 @@ export const SubAltarKeeperDrawer = humanoidMonster({
     glow(ctx, S(headPt(sk, vec(5, -0.9))), 2.6 + p.fx, SIGIL, (0.5 + p.fx * 0.3) * live);
     const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 4);
     glow(ctx, S(haloCentre(sk)), 11, SIGIL, (0.12 + pulse * 0.06 + p.fx * 0.12) * live);
-    // Censer embers and rising blood-red smoke
-    const cp = S(censerPoint(sk, p, t));
-    glow(ctx, cp, 4 + pulse, SIGIL, (0.35 + pulse * 0.15) * live);
-    for (let i = 0; i < 4; i++) {
-      const k = (i / 4 + t * 0.75) % 1;
-      const pt = vec(cp.x - k * 5 + Math.sin(k * 7 + i) * 1.6, cp.y - 2 - k * 13);
-      glow(ctx, pt, 2 + k * 2.6, SMOKE, 0.4 * (1 - k) * live);
-    }
+    censerSmoke(ctx, S(censerPoint(sk, p, t)), t, pulse, live);
     // Stole sigils smoulder
     const st = S(lerpV(sk.neck, sk.pelvis, 0.5));
     glow(ctx, vec(st.x + 3, st.y), 3 + pulse, SIGIL, 0.22 * live);
-    if (act === 'attack' && t > 0.5) {
-      const tips: V[] = [];
-      const bases: V[] = [];
-      for (let i = 6; i >= 0; i--) {
-        const sp = samplePoseTrack(TRACKS.attack, Math.max(0.34, t - i * 0.05));
-        const ssk = solveSkeleton(sp, SKIN.prop);
-        tips.push(spun(sp, along(ssk.handN, sp.wpn + 0.3, BLADE_LEN), ssk));
-        bases.push(spun(sp, along(ssk.handN, sp.wpn, 4), ssk));
-      }
-      smear(ctx, tips, bases, 0xff3050, 0.55 * p.fx);
-    }
-    if (act === 'attack' && t >= 0.99) {
-      // Blood sigil flares on the ground under the blow
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255,50,80,0.75)';
-      ctx.lineWidth = 0.8;
-      const cx = sk.handN.x + 6;
-      ctx.beginPath();
-      ctx.ellipse(cx, GROUND_Y, 9, 2.6, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      for (let i = 0; i < 5; i++) {
-        const a = -Math.PI / 2 + i * (Math.PI * 4 / 5);
-        const x = cx + Math.cos(a) * 7.5;
-        const y = GROUND_Y + Math.sin(a) * 2.1;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      ctx.stroke();
-      ctx.restore();
-      glow(ctx, vec(cx, GROUND_Y - 1), 8, SIGIL, 0.35);
-    }
+    altarBladeFx(ctx, p, sk, act, t);
   },
 });

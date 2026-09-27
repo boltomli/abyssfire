@@ -21,7 +21,22 @@ import {
 } from '../rig/Rig';
 import { basePose, spun, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { humanoidMonster, humanoidTracks, type HumanoidMonsterSpec } from '../rig/MonsterKit';
-import { goblinArm, goblinHand, goblinHead, goblinLeg, type GoblinLook } from './Goblin';
+import { GOBLIN_HEAD_RINGS, goblinArm, goblinHand, goblinHead, goblinHeadView, goblinLeg, goblinTorsoRings, type GoblinLook } from './Goblin';
+import type { Ring, Section, ViewSkeleton } from '../rig/HumanView';
+import {
+  band,
+  clipTo,
+  decal,
+  hull3,
+  loftFill,
+  sp,
+  strap,
+  surf,
+  surfPatch,
+  surfVis,
+  turnedHead,
+  type L3,
+} from '../rig/MonsterView';
 
 const LOOK: GoblinLook = {
   skin: tone(0x6f9c46, { light: 0.34 }),
@@ -284,6 +299,141 @@ function spiritFlame(ctx: CanvasRenderingContext2D, base: V, size: number, t: nu
   ctx.restore();
 }
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const SHAMAN_EYE = { h: 3.2, phi: 0.42 };
+
+/** Feather standing off a section between two local points. */
+function feather3(ctx: CanvasRenderingContext2D, S: Section, a: L3, b: L3, w: number, tn: ReturnType<typeof tone>): void {
+  const r = sp(S, a[0], a[1], a[2]);
+  const q = sp(S, b[0], b[1], b[2]);
+  feather(ctx, r, Math.atan2(q.x - r.x, -(q.y - r.y)), Math.hypot(q.x - r.x, q.y - r.y), w, tn);
+}
+
+function shamanHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const H = turnedHead(sk);
+  const R = GOBLIN_HEAD_RINGS;
+  const sway = Math.sin(t * Math.PI * 2 + 0.5) * 0.6 - p.flow * 2;
+  const fan: [number, number, ReturnType<typeof tone>][] = [[-3.4, 12, FEATHER_TEAL], [-1.2, 13.5, FEATHER_RED], [1.2, 12.5, FEATHER_CREAM], [3.4, 11, FEATHER_RED]];
+  const drawFan = (): void => {
+    for (const [l, len, tn] of fan) {
+      feather3(ctx, H, [5.2, -3.4, l], [5.2 + len * 0.75, -3.4 - len * 0.55 + sway, l * 2], 2.2, tn);
+    }
+  };
+  const fanBehind = H.rig.d(H.p3(8, Math.PI, 5, 5)) < H.rig.d(H.o);
+  if (fanBehind) drawFan();
+  goblinHeadView(ctx, sk, p, t, LOOK, {
+    grin: 0.6,
+    over: () => {
+      if (H.vis(0) > -0.25) {
+        // Cracked bird-skull mask over brow and nose, beak jutting forward
+        const m = surfPatch(H, R, 6.8, 0.2, -1.05, 1.05, 0.5, 10, k => 0.4 - Math.sin(k * Math.PI) * 1.2);
+        cel(ctx, () => blobPath(ctx, m), BONE, { band: 1.2 });
+        hull3(ctx, H, [[2.4, 6.6, -1.6], [2.4, 6.6, 1.6], [0.2, 8, -1.2], [0.2, 8, 1.2], [-1.6, 12.6, 0], [-0.6, 9.4, 0]], BONE, { band: 0.6, stroke: 0.45 });
+        for (const s2 of [1, -1]) {
+          decal(ctx, H, R, SHAMAN_EYE.h, s2 * SHAMAN_EYE.phi, () => {
+            ctx.fillStyle = '#10180c';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 1.8, 1.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(190,255,190,${0.8 + p.fx * 0.2})`;
+            ctx.fillRect(-0.6, -0.5, 1.2, 0.9);
+          }, { lift: 0.55, minVis: 0.02 });
+        }
+        decal(ctx, H, R, 4.2, -0.75, () => {
+          ctx.strokeStyle = 'rgba(190,40,30,0.9)';
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(0, -3);
+          ctx.lineTo(0.3, 3);
+          ctx.stroke();
+        }, { lift: 0.55, minVis: 0.05 });
+      }
+      // Beaded band round the brow
+      band(ctx, H, R, 6.2, HIDE, 1.4, 0.5);
+      for (const [phi, col] of [[-1.6, '#d24a2a'], [2.2, '#3fbfae'], [3, '#d24a2a'], [1.4, '#3fbfae']] as const) {
+        if (surfVis(H, R, 6.2, phi) < 0.05) continue;
+        const b = surf(H, R, 6.2, phi, 0.9);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 0.75, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    },
+  });
+  if (!fanBehind) drawFan();
+}
+
+function shamanTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = goblinTorsoRings(len);
+  const ph = t * Math.PI * 2;
+  const w = Math.sin(ph * 2) * 0.6;
+  // Hide skirt flaring from the waist over the thighs
+  const skirt: Ring[] = [
+    { h: 1.8, a: 5.2, b: 5.6, f: 0.6 },
+    { h: -4, a: 5.8, b: 6.2, f: 0.4 - p.flow },
+    { h: -9 + w * 0.3, a: 6.6, b: 6.8, f: 0.2 - p.flow * 2.4 },
+  ];
+  const sk2 = loftFill(ctx, T, skirt, HIDE, { band: 1.2 });
+  clipTo(ctx, sk2, () => {
+    for (const phi of [0.3, 2.4, -2.1]) {
+      const a = surf(T, skirt, 1.4, phi, 0.1);
+      const b = surf(T, skirt, -9, phi + 0.1, 0.1);
+      ctx.strokeStyle = HIDE_DARK.base;
+      ctx.lineWidth = 0.45;
+      ctx.setLineDash([0.8, 0.8]);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  });
+  const body = loftFill(ctx, T, R, LOOK.skin, { band: 1.5 });
+  clipTo(ctx, body, () => {
+    decal(ctx, T, R, len * 0.38, 0.3, () => {
+      ctx.strokeStyle = 'rgba(240,240,220,0.75)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, 1.8, 0.2, Math.PI * 1.7);
+      ctx.stroke();
+    }, { lift: 0.1 });
+  });
+  band(ctx, T, R, 1.2, LOOK.strap, 1.6, 0.4);
+  decal(ctx, T, R, 0.4, -0.9, () => cel(ctx, () => blobPath(ctx, [vec(-1.6, -1), vec(1.6, -1.1), vec(1.7, 2.6), vec(-1.5, 2.8)]), HIDE_DARK, { band: 0.5 }), { lift: 0.9, minVis: 0.05 });
+  // Mangy fur shawl with a ragged fringe
+  const shawl: Ring[] = [
+    { h: len + 1.6, a: 3, b: 3.8 },
+    { h: len - 0.8, a: 5.8, b: 7, f: 0.2 },
+    { h: len - 5.6, a: 6.4, b: 7.6, f: 0.4 },
+  ];
+  const sh = loftFill(ctx, T, shawl, FUR, { band: 1.2 });
+  clipTo(ctx, sh, () => {
+    for (let i = 0; i < 12; i++) {
+      const phi = (i / 12) * Math.PI * 2;
+      if (T.vis(phi) < 0) continue;
+      const a = T.at(len - 3.4, phi, 6.3, 7.4, 0.3);
+      const b = T.at(len - 5.4, phi, 6.4, 7.6, 0.4);
+      ctx.strokeStyle = FUR_DARK.base;
+      ctx.lineWidth = 0.45;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+  });
+  // Tooth necklace with a spirit-stone
+  if (T.vis(0) > -0.1) {
+    strap(ctx, T, shawl, [[len - 4.6, -1], [len - 5.4, 0], [len - 4.6, 1]], LOOK.strap, 0.35, 0.2);
+    for (let i = 0; i < 5; i++) {
+      decal(ctx, T, shawl, len - 5.2 + Math.abs(i - 2) * 0.3, -0.8 + i * 0.4, () => cel(ctx, () => polyPath(ctx, [vec(-0.5, 0), vec(0.5, 0), vec(0, 1.9)]), BONE, { band: 0.2, stroke: 0.3 }), { lift: 0.3, minVis: 0.05 });
+    }
+    decal(ctx, T, shawl, len - 6, 0.1, () => cel(ctx, () => polyPath(ctx, [vec(-1.1, -0.6), vec(0.1, -1.4), vec(1.1, 0), vec(0, 1.8)]), GEM, { band: 0.4, stroke: 0.4 }), { lift: 0.5, minVis: 0.05 });
+  }
+}
+
 const SKIN: HumanSkin = {
   prop: {
     thigh: 9, shin: 9, upperArm: 8.4, foreArm: 8,
@@ -367,6 +517,58 @@ const ATTACK = [
 export const GoblinShamanDrawer = humanoidMonster({
   ...SPEC,
   tracks: { attack: ATTACK },
+  view: {
+    build: { hipW: 2.2, shW: 4.6, elbowOut: 1.2 },
+    headBias: 6,
+    torso: shamanTorsoView,
+    head: shamanHeadView,
+    back: () => undefined,
+    legNear: (ctx, sk) => goblinLeg(ctx, sk.hipN, sk.kneeN, sk.footN, sk.soleN, LOOK.skin),
+  },
+  viewFx: (ctx, p, sk, act, t) => {
+    const live = act === 'death' ? Math.max(0, 1 - t * 1.4) : 1;
+    if (live <= 0) return;
+    const H = turnedHead(sk);
+    for (const s2 of [1, -1]) {
+      if (surfVis(H, GOBLIN_HEAD_RINGS, SHAMAN_EYE.h, s2 * SHAMAN_EYE.phi) > 0.25) {
+        glow(ctx, surf(H, GOBLIN_HEAD_RINGS, SHAMAN_EYE.h, s2 * SHAMAN_EYE.phi, 0.7), 2 + p.fx, SPIRIT, (0.4 + p.fx * 0.3) * live);
+      }
+    }
+    const { ang, k } = sk.rig.dir(p.wpn);
+    const fp = vec(sk.handN.x + Math.sin(ang) * k * (STAFF_UP + 6.5), sk.handN.y - Math.cos(ang) * k * (STAFF_UP + 6.5));
+    const size = 2.2 + p.fx * 2.2;
+    glow(ctx, fp, 6 + p.fx * 7, SPIRIT, (0.35 + p.fx * 0.35) * live);
+    ctx.save();
+    ctx.globalAlpha = live;
+    spiritFlame(ctx, vec(fp.x, fp.y + 2.5), size, t, act === 'walk' ? 0.4 : p.flow * 0.6);
+    ctx.restore();
+    glow(ctx, fp, 2 + p.fx * 2, SPIRIT_HOT, (0.6 + p.fx * 0.3) * live);
+    if (act === 'attack' && p.fx > 0.5) {
+      glow(ctx, sk.handF, 3 + p.fx * 4, SPIRIT, 0.55 * p.fx);
+      for (let i = 0; i < 5; i++) {
+        const a = t * 10 + i * (Math.PI * 2 / 5);
+        glow(ctx, vec(fp.x + Math.cos(a) * 6, fp.y + Math.sin(a) * 3), 1.5, SPIRIT_HOT, 0.85 * p.fx);
+      }
+      const c = sk.rig.pt(p.root.x + 1, GROUND_Y);
+      ctx.save();
+      ctx.globalAlpha = 0.7 * p.fx;
+      ctx.strokeStyle = '#7dffa0';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.ellipse(c.x, GROUND_Y, 11 + p.fx * 3, 5.5 + p.fx * 1.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([1.4, 1.8]);
+      ctx.beginPath();
+      ctx.ellipse(c.x, GROUND_Y, 8, 4, 0, t * 6, t * 6 + Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (act === 'attack' && t >= 0.99) {
+      const tip = vec(sk.handN.x + Math.sin(ang) * k * (STAFF_UP + 10), sk.handN.y - Math.cos(ang) * k * (STAFF_UP + 10));
+      glow(ctx, tip, 7, SPIRIT, 0.7);
+      glow(ctx, tip, 3, SPIRIT_HOT, 0.9);
+    }
+  },
   fx: (ctx, p, sk, act, t) => {
     const live = act === 'death' ? Math.max(0, 1 - t * 1.4) : 1;
     if (live <= 0) return;

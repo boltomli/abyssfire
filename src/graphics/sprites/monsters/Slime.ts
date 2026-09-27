@@ -83,9 +83,19 @@ function slimePose(act: MonsterAction, t: number): SlimePose {
   }
 }
 
+/** Rim bulge of the round footprint toward the camera. */
+function rimDepth(p: SlimePose): number {
+  return 2.6 * Math.min(1.2, p.sx) + p.melt * 1.2;
+}
+
+/** Screen y of the footprint's left/right extremes (its near rim sits lower, on the ground). */
+function slimeBase(p: SlimePose): number {
+  return GROUND_Y - p.hop - rimDepth(p) * 0.7;
+}
+
 /** Dome outline: flat-ish base, top skewed by lean, optional forward pseudopod. */
 function outline(p: SlimePose): V[] {
-  const base = GROUND_Y - p.hop;
+  const base = slimeBase(p);
   const w = W * p.sx;
   const h = H * p.sy;
   const pts: V[] = [];
@@ -101,16 +111,19 @@ function outline(p: SlimePose): V[] {
     }
     pts.push(vec(x, y));
   }
-  // Base bulges slightly and drips when melting
-  pts.push(vec(p.x + w * 0.7, base + 1.2 + p.melt));
-  pts.push(vec(p.x, base + 1.6 + p.melt * 1.5));
-  pts.push(vec(p.x - w * 0.7, base + 1.2 + p.melt));
+  // Round footprint seen from above (isometric): the near rim of the base
+  // bulges toward the camera, dripping when melting.
+  const rim = rimDepth(p);
+  pts.push(vec(p.x + w * 0.75, base + rim * 0.55));
+  pts.push(vec(p.x + w * 0.3, base + rim));
+  pts.push(vec(p.x - w * 0.3, base + rim));
+  pts.push(vec(p.x - w * 0.75, base + rim * 0.55));
   return pts;
 }
 
 function drawSlime(ctx: CanvasRenderingContext2D, p: SlimePose, t: number): void {
   const pts = outline(p);
-  const base = GROUND_Y - p.hop;
+  const base = slimeBase(p);
   const h = H * p.sy;
   cel(ctx, () => blobPath(ctx, pts), BODY, { band: 2.6, hi: 1.2 });
   ctx.save();
@@ -157,10 +170,10 @@ function drawSlime(ctx: CanvasRenderingContext2D, p: SlimePose, t: number): void
   ctx.fill();
   ctx.restore();
 
-  // Eyes
-  const ex = p.x + 4 * p.sx + p.lean * h * 0.75;
-  const ey = base - h * 0.58;
-  for (const [dx, r] of [[0, 3], [5.6, 2.3]] as const) {
+  // Eyes: turned toward the camera (front 3/4), the far eye a little smaller.
+  const ex = p.x + 1 * p.sx + p.lean * h * 0.75;
+  const ey = base - h * 0.5;
+  for (const [dx, r] of [[-3.4, 3.1], [3.6, 2.7]] as const) {
     const cx = ex + dx * p.sx;
     if (p.eyes <= 0.05) {
       ctx.strokeStyle = '#123018';
@@ -193,10 +206,10 @@ function drawSlime(ctx: CanvasRenderingContext2D, p: SlimePose, t: number): void
     ctx.strokeStyle = '#1d4a24';
     ctx.lineWidth = 0.9;
     ctx.beginPath();
-    ctx.moveTo(ex - 3, ey - 4.2);
-    ctx.lineTo(ex + 2.5, ey - 2.6);
-    ctx.moveTo(ex + 4 * p.sx, ey - 3);
-    ctx.lineTo(ex + 8 * p.sx, ey - 3.8);
+    ctx.moveTo(ex - 6.6 * p.sx, ey - 4.4);
+    ctx.lineTo(ex - 1.2 * p.sx, ey - 3);
+    ctx.moveTo(ex + 1.4 * p.sx, ey - 3);
+    ctx.lineTo(ex + 6 * p.sx, ey - 4);
     ctx.stroke();
   }
 }

@@ -363,8 +363,9 @@ function drawHead(ctx: CanvasRenderingContext2D, p: WraithPose, sk: Sk, t: numbe
     ctx.quadraticCurveTo((x0 + x1) / 2 - 1.5, (y0 + y1) / 2, x1, y1);
     ctx.stroke();
   }
-  // Void face
-  const face = [vec(1.2, -4.6), vec(5.2, -5), vec(8, -1), vec(7.4, 4.2), vec(4, 6.4), vec(1, 3.4)];
+  // Void face, turned toward the camera (front 3/4) rather than in profile
+  ctx.translate(-2.2, 0);
+  const face = [vec(0.6, -4.8), vec(5.2, -5.2), vec(8, -1), vec(7.4, 4.2), vec(4, 6.6), vec(0.4, 3.4)];
   ctx.fillStyle = VOID;
   ctx.beginPath();
   blobPath(ctx, face);
@@ -382,7 +383,7 @@ function drawHead(ctx: CanvasRenderingContext2D, p: WraithPose, sk: Sk, t: numbe
   // Ember eyes (skip once crumbling)
   if (p.fade < 0.55) {
     const e = 1 - p.fade * 1.6;
-    for (const [x, r] of [[5.8, 1.1], [2.9, 0.85]] as const) {
+    for (const [x, r] of [[5.8, 1.05], [2.6, 1]] as const) {
       ctx.fillStyle = `rgba(255,150,40,${0.9 * e})`;
       ctx.beginPath();
       ctx.ellipse(x, -0.6, r * 1.3, r * 0.75, -0.15, 0, Math.PI * 2);
@@ -594,7 +595,7 @@ function wraithFx(ctx: CanvasRenderingContext2D, p: WraithPose, act: MonsterActi
   const alive = 1 - p.fade;
   // Eye + scarab glow
   if (p.fade < 0.55) {
-    glow(ctx, local(sk.head, sk.headAng, 4.5, -0.6), 5, 0xffa030, 0.55 * alive);
+    glow(ctx, local(sk.head, sk.headAng, 2, -0.6), 5, 0xffa030, 0.55 * alive);
     glow(ctx, local(sk.neck, p.lean, 1.5, 7.8), 4.5, 0x40ffe0, 0.35 * alive);
   }
   // Orbiting sand grains

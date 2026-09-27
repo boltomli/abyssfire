@@ -24,9 +24,31 @@ import {
   type Tone,
   type V,
 } from '../rig/Rig';
-import { basePose, spun, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
+import { basePose, solveSkeleton, spun, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { humanoidMonster } from '../rig/MonsterKit';
 import { curlChain, demonTail, embers, flameTongue, hash01, hornPath, hornRidges, localPt } from './Imp';
+import type { ViewSkeleton } from '../rig/HumanView';
+import {
+  backSpikes,
+  band,
+  decal,
+  eye3,
+  eyeGlowPoints,
+  lp,
+  poly3,
+  profileRings,
+  sagittalSpun,
+  solid3,
+  strap,
+  surf,
+  surfCurve,
+  surfPatch,
+  surfVis,
+  tiltedHead,
+  tube3,
+  type L3,
+  type Part3,
+} from '../rig/MonsterView';
 
 const HIDE = tone(0x7a1c32, { light: 0.32 });
 const HIDE_FAR = tone(0x4e1024, { light: 0.16 });
@@ -253,6 +275,196 @@ function head(ctx: CanvasRenderingContext2D, sk: Skeleton, p: HumanPose): void {
   ctx.restore();
 }
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const LD_BODY = (len: number): V[] => [vec(-9.6, 1.4), vec(-6, -4.6), vec(1, -5.2), vec(7.4, -2), vec(11.4, 4), vec(10.4, len * 0.55), vec(6.6, len - 1), vec(-5.4, len + 0.6), vec(-9.4, len * 0.5)];
+const ldRings = (len: number): ReturnType<typeof profileRings> => profileRings(LD_BODY(len), y => len - y, a => a * 0.95, 8);
+/** Heart furnace on the chest surface. */
+const HEART = { hk: 0.72, phi: 0.25 };
+
+function ldTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = ldRings(len);
+  const front = T.vis(0) > T.vis(Math.PI);
+  const sway = Math.sin(t * Math.PI * 2) * 0.5 - p.flow * 2;
+  const flap = (s: 1 | -1): L3[] => {
+    const fr = s > 0 ? 7.4 : -6.6;
+    return [[1.4, fr, -3], [1.4, fr, 3], [-7.4, fr + sway * s * 0.3 + 0.6 * s, 2.4], [-5.8, fr + 0.4 * s, 0], [-7.8, fr + sway * s * 0.3 + 0.6 * s, -2.4]];
+  };
+  const spikes = backSpikes(T, R, len + 2, len * 0.4, 4, [0], i => 4.6 - i * 0.8, 1.4);
+  const parts: Part3[] = [
+    { pts: flap(front ? -1 : 1), tone: CLOTH, bias: -30 },
+    ...spikes.map(pts => ({ pts, tone: HORN, hull: true, band: 0.3 })),
+  ];
+  const heat = 0.55 + p.fx * 0.45;
+  const hh = len * HEART.hk;
+  solid3(ctx, T, R, HIDE, {
+    band: 2,
+    hi: 0.9,
+    parts,
+    face: () => {
+      // Pectoral + ab contours
+      for (const ctrl of [[[len - 4, -1.2], [len - 5.4, 0.1], [len - 4, 1.2]], [[len * 0.4, -0.6], [len * 0.4, 0.6]], [[len * 0.24, -0.6], [len * 0.24, 0.6]]] as const) {
+        strap(ctx, T, R, ctrl, { ...HIDE, base: HIDE.shade, line: 'rgba(0,0,0,0)' }, 0.5, 0.05);
+      }
+      // Molten cracks radiating from the heart furnace
+      const cracks: (readonly [number, number])[][] = [
+        [[hh, HEART.phi], [hh + 2.6, HEART.phi + 0.3], [hh + 4.2, HEART.phi + 0.45]],
+        [[hh, HEART.phi], [hh - 0.8, HEART.phi + 0.45], [hh - 3.4, HEART.phi + 0.6]],
+        [[hh, HEART.phi], [hh - 3.4, HEART.phi - 0.15], [hh - 6.4, HEART.phi + 0.05], [hh - 8.8, HEART.phi - 0.05]],
+        [[hh, HEART.phi], [hh + 1.4, HEART.phi - 0.4], [hh + 0.2, HEART.phi - 0.7]],
+      ];
+      for (const [w, col] of [[1.6, 'rgba(120,20,10,0.9)'], [0.9, `rgba(255,${110 + p.fx * 60},30,${heat})`], [0.35, `rgba(255,230,150,${heat})`]] as const) {
+        for (const c of cracks) {
+          for (const run of surfCurve(T, R, c, 0.1, 4, 0.02)) {
+            ctx.strokeStyle = col;
+            ctx.lineWidth = w;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+            ctx.stroke();
+          }
+        }
+      }
+      decal(ctx, T, R, hh, HEART.phi, () => {
+        ctx.fillStyle = `rgba(255,200,90,${heat})`;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 1.5 + p.fx * 0.6, 1.8 + p.fx * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }, { lift: 0.1, minVis: 0.02 });
+    },
+    over: () => {
+      band(ctx, T, R, 1.4, CARAPACE, 2.4, 0.4);
+      decal(ctx, T, R, 1.4, 0.3, () => {
+        cel(ctx, () => ellipsePath(ctx, vec(0, 0), 1.7, 1.7), IRON, { band: 0.4 });
+        ctx.fillStyle = CARAPACE.shade;
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }, { lift: 0.9, minVis: 0.05 });
+      poly3(ctx, T, flap(front ? 1 : -1), CLOTH, { band: 0.7 });
+    },
+  });
+}
+
+const LD_SKULL = profileRings([vec(-5.4, -1.6), vec(-4, -5.4), vec(1.8, -6.4), vec(6.4, -4), vec(7.6, 0), vec(8.4, 3.4), vec(6.6, 6.4), vec(0.6, 6.8), vec(-4.2, 4)], y => -y, a => a * 0.95, 8);
+const LD_EYE = { h: 2, phi: 0.5 };
+
+function ldHead(sk: ViewSkeleton, p: HumanPose) {
+  return tiltedHead(sk, p, HT, 0.4, 0.3);
+}
+
+function ldHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose): void {
+  const H = ldHead(sk, p);
+  const R = LD_SKULL;
+  const horn = (s: 1 | -1): L3[] => [[4.8, -0.6, 4.2 * s], [6.6, 0.4, 8.6 * s], [11, 2, 10.6 * s], [15.6, 5.4, 8.6 * s], [17.6, 8.6, 6.2 * s]];
+  const drawHorn = (s: 1 | -1): void => {
+    tube3(ctx, H, horn(s), [2.2, 1.9, 1.5, 1, 0.4], s > 0 ? HORN : tone(0x241a22));
+    const tipPts = horn(s).slice(3);
+    tube3(ctx, H, tipPts, [1, 0.4], HORN_TIP);
+  };
+  const deep = (s: 1 | -1): boolean => H.rig.d(lp(H, 10, 1, 9 * s)) < H.rig.d(H.o);
+  for (const s of [1, -1] as const) if (deep(s)) drawHorn(s);
+  const parts: Part3[] = [
+    // Tusks jutting up out of the underbite
+    { pts: [[-3, 6.4, 2.6], [-3, 7.2, 2], [0.4, 7, 2.8], [-3.2, 6.8, 3.2]], tone: TUSK, mirror: true, hull: true, band: 0.2, bias: 1 },
+  ];
+  solid3(ctx, H, R, HIDE, {
+    band: 1.4,
+    parts,
+    face: () => {
+      if (H.vis(0) < -0.3) return;
+      cel(ctx, () => polyPath(ctx, surfPatch(H, R, LD_EYE.h + 2.6, LD_EYE.h + 1.1, -1.1, 1.1, 0.25, 6)), CARAPACE, { band: 0.4, stroke: 0.35 });
+      for (const sgn of [1, -1]) {
+        eye3(ctx, H, R, LD_EYE.h, sgn * LD_EYE.phi, { rx: 1.9, ry: 1.1, socket: '#12060a', iris: `rgb(255,${120 + p.fx * 80},40)`, irisR: 0.6, tilt: -0.15 });
+      }
+      for (const phi of [-0.18, 0.18]) {
+        decal(ctx, H, R, -0.2, phi, () => {
+          ctx.fillStyle = '#1c0810';
+          ctx.fillRect(-0.45, -0.25, 0.9, 0.5);
+        }, { minVis: 0.1 });
+      }
+      for (const run of surfCurve(H, R, [[-2.4, -0.9], [-3 - p.fx, 0], [-2.4, 0.9]], 0.1, 6)) {
+        ctx.strokeStyle = HIDE.line;
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+        ctx.stroke();
+      }
+    },
+  });
+  for (const s of [1, -1] as const) if (!deep(s)) drawHorn(s);
+}
+
+function lesserFx(ctx: CanvasRenderingContext2D, p: HumanPose, sk: Skeleton, act: MonsterAction, t: number, groundOnly = false): void {
+  const dead = act === 'death';
+  const heat = dead ? p.fx : 0.35 + p.fx * 0.65;
+  if (!groundOnly) {
+    // Heart furnace and eye glow
+    const heart = spun(p, localPt(sk.neck, sk.torsoAng, 5.4, 4.6), sk);
+    glow(ctx, heart, 7 + p.fx * 5, HELLFIRE, 0.4 * heat + 0.05);
+    glow(ctx, heart, 2.8, CORE, 0.6 * heat);
+    if (!dead || t < 0.5) {
+      const eye = spun(p, localPt(sk.head, sk.headAng - HT, 5.5, -0.3), sk);
+      glow(ctx, eye, 3, 0xff6a2a, 0.5 + p.fx * 0.3);
+    }
+  }
+  if (act === 'attack') {
+    if (!groundOnly) {
+      // Fists wreathed in flame while charging
+      for (const h of [sk.handN, sk.handF]) {
+        glow(ctx, h, 4 + p.fx * 3, HELLFIRE, 0.35 * p.fx);
+      }
+    }
+    if (t > 0.85) {
+      // Ground-shattering abyssfire burst at the impact point
+      const at = vec((sk.handN.x + sk.handF.x) / 2 + 2, GROUND_Y);
+      glow(ctx, vec(at.x, at.y - 3), 18, HELLFIRE, 0.55);
+      glow(ctx, vec(at.x, at.y - 2), 7, CORE, 0.8);
+      for (let i = 0; i < 7; i++) {
+        const a = -1.1 + (i / 6) * 2.2;
+        const h = 7 + hash01(i * 3.1) * 7 - Math.abs(a) * 3;
+        flameTongue(ctx, vec(at.x + a * 9, at.y + 0.5), a * 0.5, h, 1.8, i * 1.7, 'rgba(255,90,20,0.85)', 'rgba(255,214,120,0.9)');
+      }
+      ctx.strokeStyle = 'rgba(255,150,60,0.85)';
+      ctx.lineWidth = 0.8;
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 4 - 0.5) * 2.4;
+        ctx.beginPath();
+        ctx.moveTo(at.x, at.y);
+        ctx.lineTo(at.x + Math.sin(a) * 9, at.y + Math.cos(a) * 1.6 + 0.8);
+        ctx.lineTo(at.x + Math.sin(a) * 15, at.y + Math.cos(a) * 1.4 + 0.4);
+        ctx.stroke();
+      }
+    }
+  }
+  if (dead) {
+    const c = spun(p, sk.pelvis, sk);
+    embers(ctx, { x: c.x - 8, y: c.y - 10, w: 30, h: 10 }, 12, t, 0.2 + t * 0.6, HELLFIRE, 9);
+  }
+}
+
+function lesserViewFx(ctx: CanvasRenderingContext2D, p: HumanPose, sk: ViewSkeleton, act: MonsterAction, t: number): void {
+  const dead = act === 'death';
+  const heat = dead ? p.fx : 0.35 + p.fx * 0.65;
+  const T = sk.torso;
+  const R = ldRings(sk.torsoLen);
+  const hh = sk.torsoLen * HEART.hk;
+  if (surfVis(T, R, hh, HEART.phi) > 0.05) {
+    const heart = surf(T, R, hh, HEART.phi, 0.3);
+    glow(ctx, heart, 7 + p.fx * 5, HELLFIRE, 0.4 * heat + 0.05);
+    glow(ctx, heart, 2.8, CORE, 0.6 * heat);
+  }
+  if (!dead || t < 0.5) {
+    for (const e of eyeGlowPoints(ldHead(sk, p), LD_SKULL, LD_EYE.h, [LD_EYE.phi, -LD_EYE.phi])) glow(ctx, e, 2.6, 0xff6a2a, 0.5 + p.fx * 0.3);
+  }
+  if (act === 'attack') for (const h of [sk.handN, sk.handF]) glow(ctx, h, 4 + p.fx * 3, HELLFIRE, 0.35 * p.fx);
+  sagittalSpun(ctx, sk, p, () => lesserFx(ctx, p, solveSkeleton(p, PROP), act, t, true));
+}
+
 // ── Skin ────────────────────────────────────────────────────────────────
 
 const SKIN: HumanSkin = {
@@ -370,48 +582,12 @@ export const LesserDemonDrawer = humanoidMonster({
   tracks: { attack: ATTACK, hurt: HURT, death: DEATH },
   walk: { stride: 6.5, lift: 3.6, bob: 1.8, lean: 0.06, armSwing: 3.4, spread: 1.5 },
   shadowR: 16,
-  fx: (ctx, p, sk, act, t) => {
-    const dead = act === 'death';
-    const heat = dead ? p.fx : 0.35 + p.fx * 0.65;
-    // Heart furnace and eye glow
-    const heart = spun(p, localPt(sk.neck, sk.torsoAng, 5.4, 4.6), sk);
-    glow(ctx, heart, 7 + p.fx * 5, HELLFIRE, 0.4 * heat + 0.05);
-    glow(ctx, heart, 2.8, CORE, 0.6 * heat);
-    if (!dead || t < 0.5) {
-      const eye = spun(p, localPt(sk.head, sk.headAng - HT, 5.5, -0.3), sk);
-      glow(ctx, eye, 3, 0xff6a2a, 0.5 + p.fx * 0.3);
-    }
-    if (act === 'attack') {
-      // Fists wreathed in flame while charging
-      for (const h of [sk.handN, sk.handF]) {
-        glow(ctx, h, 4 + p.fx * 3, HELLFIRE, 0.35 * p.fx);
-      }
-      if (t > 0.85) {
-        // Ground-shattering abyssfire burst at the impact point
-        const at = vec((sk.handN.x + sk.handF.x) / 2 + 2, GROUND_Y);
-        glow(ctx, vec(at.x, at.y - 3), 18, HELLFIRE, 0.55);
-        glow(ctx, vec(at.x, at.y - 2), 7, CORE, 0.8);
-        for (let i = 0; i < 7; i++) {
-          const a = -1.1 + (i / 6) * 2.2;
-          const h = 7 + hash01(i * 3.1) * 7 - Math.abs(a) * 3;
-          flameTongue(ctx, vec(at.x + a * 9, at.y + 0.5), a * 0.5, h, 1.8, i * 1.7, 'rgba(255,90,20,0.85)', 'rgba(255,214,120,0.9)');
-        }
-        ctx.strokeStyle = 'rgba(255,150,60,0.85)';
-        ctx.lineWidth = 0.8;
-        ctx.lineCap = 'round';
-        for (let i = 0; i < 5; i++) {
-          const a = (i / 4 - 0.5) * 2.4;
-          ctx.beginPath();
-          ctx.moveTo(at.x, at.y);
-          ctx.lineTo(at.x + Math.sin(a) * 9, at.y + Math.cos(a) * 1.6 + 0.8);
-          ctx.lineTo(at.x + Math.sin(a) * 15, at.y + Math.cos(a) * 1.4 + 0.4);
-          ctx.stroke();
-        }
-      }
-    }
-    if (dead) {
-      const c = spun(p, sk.pelvis, sk);
-      embers(ctx, { x: c.x - 8, y: c.y - 10, w: 30, h: 10 }, 12, t, 0.2 + t * 0.6, HELLFIRE, 9);
-    }
+  view: {
+    build: { hipW: 3.4, shW: 7.4, elbowOut: 1.8, footOut: 0.8 },
+    headBias: 4,
+    torso: ldTorsoView,
+    head: ldHeadView,
   },
+  viewFx: lesserViewFx,
+  fx: (ctx, p, sk, act, t) => lesserFx(ctx, p, sk, act, t),
 });

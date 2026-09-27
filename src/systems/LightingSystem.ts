@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { RENDER_SCALE } from '../config';
 import type { RenderQualityProfile } from '../rendering/RenderQuality';
 import { ZONE_MOODS, getCurrentZoneMood } from '../graphics/ZonePalette';
 import type { ZoneMood } from '../graphics/ZonePalette';
@@ -90,11 +91,26 @@ export class LightingSystem {
     this.scene.textures.addCanvas(LIGHT_TEXTURE, canvas);
   }
 
-  private resizeViewport(): void {
+  /**
+   * The overlay is laid out in logical screen pixels (1280×720) and placed as
+   * screen-fixed objects around the camera centre, so it looks the same at
+   * every render scale (the camera zoom includes RENDER_SCALE).
+   */
+  private view(): { cam: Phaser.Cameras.Scene2D.Camera; w: number; h: number; z: number; ox: number; oy: number; at: (sx: number, sy: number) => [number, number] } {
     const cam = this.scene.cameras.main;
-    this.ambient.setSize(cam.width, cam.height).setDisplaySize(cam.width, cam.height);
-    this.fog.setPosition(cam.width / 2, cam.height / 2).setDisplaySize(cam.width * 1.25, cam.height * 1.25);
-    this.vignette.setPosition(cam.width / 2, cam.height / 2).setDisplaySize(cam.width, cam.height);
+    const w = cam.width / RENDER_SCALE, h = cam.height / RENDER_SCALE;
+    const ox = cam.width * cam.originX, oy = cam.height * cam.originY;
+    return {
+      cam, w, h, z: cam.zoom / RENDER_SCALE, ox, oy,
+      at: (sx, sy) => [ox + (sx - w * cam.originX), oy + (sy - h * cam.originY)],
+    };
+  }
+
+  private resizeViewport(): void {
+    const v = this.view();
+    this.ambient.setPosition(...v.at(0, 0)).setSize(v.w, v.h).setDisplaySize(v.w, v.h);
+    this.fog.setPosition(...v.at(v.w / 2, v.h / 2)).setDisplaySize(v.w * 1.25, v.h * 1.25);
+    this.vignette.setPosition(...v.at(v.w / 2, v.h / 2)).setDisplaySize(v.w, v.h);
   }
 
   /** Vignette texture: transparent centre fading to the zone colour at the edges. */
@@ -136,6 +152,13 @@ export class LightingSystem {
     this.resizeViewport();
   }
 
+  /** Darken the scene beyond the zone mood (0..1 of the remaining light), e.g. a gloom curse. */
+  deepen(amount: number): void {
+    this.ambientAlpha = Math.min(0.92, this.ambientAlpha + (1 - this.ambientAlpha) * Math.max(0, Math.min(1, amount)));
+    this.ambient.setAlpha(this.ambientAlpha);
+    this.lightScale = Math.max(this.lightScale, this.ambientAlpha * 0.9);
+  }
+
   addLight(light: LightSource): void {
     this.lights.push(light);
     if (light.id && light.flicker) this.flickerSeeds.set(light.id, Math.random() * 1000);
@@ -169,27 +192,29 @@ export class LightingSystem {
     if (this.time - this.lastUpdate < this.quality.lightingUpdateIntervalMs) return;
     this.lastUpdate = this.time;
 
-    const cam = this.scene.cameras.main;
+    const v = this.view();
+    const cam = v.cam;
     this.resizeViewport();
     this.ambient.setAlpha(Math.max(0, Math.min(1, this.ambientAlpha + Math.sin(this.time * 0.0015) * 0.015)));
     this.fog.setAlpha(Math.max(0, this.hazeAlpha * (0.8 + Math.sin(this.time * 0.0007) * 0.2)));
-    this.fog.setPosition(
-      cam.width / 2 + Math.sin(this.time * 0.0008) * cam.width * 0.15,
-      cam.height / 2 + Math.cos(this.time * 0.00056) * cam.height * 0.1,
-    );
+    this.fog.setPosition(...v.at(
+      v.w / 2 + Math.sin(this.time * 0.0008) * v.w * 0.15,
+      v.h / 2 + Math.cos(this.time * 0.00056) * v.h * 0.1,
+    ));
 
-    const originX = cam.width * cam.originX;
-    const originY = cam.height * cam.originY;
+    // Logical screen position of each light (camera centre = world scroll + origin).
+    const originX = v.w * cam.originX;
+    const originY = v.h * cam.originY;
     const visible = this.lights
       .map(light => {
-        const x = (light.x - cam.scrollX - originX) * cam.zoom + originX;
-        const y = (light.y - cam.scrollY - originY) * cam.zoom + originY;
+        const x = (light.x - cam.scrollX - v.ox) * v.z + originX;
+        const y = (light.y - cam.scrollY - v.oy) * v.z + originY;
         return { light, x, y, distance: (x - originX) ** 2 + (y - originY) ** 2 };
       })
       .filter(({ light, x, y }) => {
-        const radius = light.radius * cam.zoom;
-        return Number.isFinite(radius) && radius > 0 && x + radius >= 0 && x - radius <= cam.width
-          && y + radius >= 0 && y - radius <= cam.height;
+        const radius = light.radius * v.z;
+        return Number.isFinite(radius) && radius > 0 && x + radius >= 0 && x - radius <= v.w
+          && y + radius >= 0 && y - radius <= v.h;
       })
       .sort((a, b) => a.distance - b.distance)
       .slice(0, this.quality.maxDynamicLights);
@@ -202,8 +227,8 @@ export class LightingSystem {
           + Math.sin(this.time * 0.013 + seed * 2.3) * 0.03;
       }
       this.spriteAt(index)
-        .setVisible(true).setPosition(x, y)
-        .setDisplaySize(light.radius * cam.zoom * 2, light.radius * cam.zoom * 2)
+        .setVisible(true).setPosition(...v.at(x, y))
+        .setDisplaySize(light.radius * v.z * 2, light.radius * v.z * 2)
         // A light restores only the luminance removed by the ambient layer.
         // Mapping raw intensity directly to ADD alpha overexposes the scene.
         .setTint(light.color).setAlpha(Math.max(0, Math.min(1, intensity * this.lightScale)));

@@ -78,21 +78,21 @@ export const elderDialogueTree: DialogueTree = {
     },
     other_quests: {
       id: 'other_quests',
-      text: '除了史莱姆，商人还需要一些史莱姆凝胶来调制药水。你也可以顺便帮忙采集一些平原上的草药。',
+      text: '除了史莱姆，药师调伤药还缺史莱姆凝胶，她走不开小摊。村里的伤员也等着西边草坡上的草药救命。',
       choices: [
-        { text: '我去收集史莱姆凝胶', nextNodeId: 'accept_gel', questTrigger: 'q_collect_slime_gel' },
-        { text: '我去采集草药', nextNodeId: 'accept_herbs', questTrigger: 'q_herb_gathering' },
+        { text: '我去给药师收集凝胶', nextNodeId: 'accept_gel', questTrigger: 'q_collect_slime_gel' },
+        { text: '我去采急救草药', nextNodeId: 'accept_herbs', questTrigger: 'q_herb_gathering' },
         { text: '先处理史莱姆问题', nextNodeId: 'accept_slimes', questTrigger: 'q_kill_slimes' },
       ],
     },
     accept_gel: {
       id: 'accept_gel',
-      text: '好的！击杀史莱姆后它们会掉落凝胶，收集8份就够了。记得也可以顺便清理一下周围的史莱姆。',
+      text: '史莱姆被打散时会留下凝胶，攒够6份，亲手送到药师的小摊上。她会记着你的好。',
       isEnd: true,
     },
     accept_herbs: {
       id: 'accept_herbs',
-      text: '草药主要生长在平原西部的草地上。采集5份后送到药师那里就好。',
+      text: '翡翠草药长在西边的草坡上，叶子泛着一点微光。采5株回来就好，伤员等不起。',
       isEnd: true,
     },
     farewell: {
@@ -135,9 +135,9 @@ export const scoutDialogueTree: DialogueTree = {
     },
     clues: {
       id: 'clues',
-      text: '我手下的一个斥候在南部失踪了。另外，森林深处有位隐士，据说他对这片森林了如指掌。也许他知道些什么。',
+      text: '我派出去的一个斥候三天没回来了，猎人在营地东南找到了他的足迹。另外，森林深处有位隐士，据说他对这片森林了如指掌。',
       choices: [
-        { text: '我去找那个失踪的斥候', nextNodeId: 'accept_scout', questTrigger: 'q_lost_scout', prereqQuests: ['q_explore_forest'] },
+        { text: '我顺着足迹去找他', nextNodeId: 'accept_scout', questTrigger: 'q_lost_scout', prereqQuests: ['q_explore_forest'] },
         { text: '隐士在哪里？', nextNodeId: 'hermit_location', prereqQuests: ['q_kill_undead'] },
         { text: '我先去探索森林再说', nextNodeId: 'accept_explore', questTrigger: 'q_explore_forest' },
       ],
@@ -178,7 +178,7 @@ export const scoutDialogueTree: DialogueTree = {
     },
     accept_scout: {
       id: 'accept_scout',
-      text: '他上次汇报时在森林南部的一个废弃营地。如果他还活着，可能被亡灵包围了。请尽快赶去！',
+      text: '足迹一路往坡下去。找到他……不管找到的是什么，把他的徽章带回来给我。',
       isEnd: true,
     },
     hermit_location: {
@@ -268,28 +268,28 @@ export const dwarfDialogueTree: DialogueTree = {
     },
     dragon_egg: {
       id: 'dragon_egg',
-      text: '啊，你也听说了？在山脉最深处确实有一个古老的龙巢。传说那里还残留着龙的遗物——龙鳞碎片。如果你有胆量去探索...我可以给你指路。',
+      text: '哼，矿工们嚷嚷北峰有“龙蛋”。我活了三百年，没见过一条龙。可北峰那窝石像鬼确实护着个什么东西……你要是有胆，去看看。',
       choices: [
-        { text: '我去探索龙巢', nextNodeId: 'accept_dragon', questTrigger: 'q_dragon_egg' },
+        { text: '我去闯石像鬼的巢穴', nextNodeId: 'accept_dragon', questTrigger: 'q_dragon_egg' },
         { text: '听起来太危险了', nextNodeId: 'farewell' },
       ],
     },
     accept_dragon: {
       id: 'accept_dragon',
-      text: '龙巢在山脉西南方向的深渊旁。那里的怪物异常强大，做好充分准备再去。龙鳞碎片是极好的锻造材料。',
+      text: '巢穴在北峰东侧，守巢的是一头大家伙。宰了它，把那颗“蛋”带给符文学者——我倒要看看，到底是个什么东西。',
       isEnd: true,
     },
     more_treasure: {
       id: 'more_treasure',
-      text: '锻造大厅里有我族先祖留下的符文石板和水晶矿脉。水晶可以用于武器附魔，非常珍贵。',
+      text: '锻造大厅里有我族先祖留下的符文石板。矿工老汉还说，北坡新塌出一条水晶矿脉。水晶能给武器附魔，非常珍贵。',
       choices: [
-        { text: '我想去采集水晶', nextNodeId: 'accept_crystal', questTrigger: 'q_crystal_mining' },
+        { text: '我去北坡凿水晶', nextNodeId: 'accept_crystal', questTrigger: 'q_crystal_mining' },
         { text: '还是先帮你夺回遗迹吧', nextNodeId: 'reclaim' },
       ],
     },
     accept_crystal: {
       id: 'accept_crystal',
-      text: '水晶矿脉在山脉东部的峡谷里。小心那里的石巨人，它们会保护自己领地的矿石。采集8份水晶就够了。',
+      text: '矿脉在北坡，石像鬼就在头顶盘旋。手脚麻利些，趁它们不注意凿6块下来，交给矿工老汉。',
       isEnd: true,
     },
     farewell: {
@@ -356,10 +356,10 @@ export const nomadDialogueTree: DialogueTree = {
     },
     simple_tasks: {
       id: 'simple_tasks',
-      text: '当然。沙漠里水源稀缺，如果你能击败一些怪物搜集水囊，那就帮了大忙了。另外蝎毒也是珍贵的材料。拿着这些沙漠补给上路吧。',
+      text: '当然。寻水者的占卜杖在西边沙地里颤个不停，说下面有泉眼，正缺人去找。东边岩谷里，蝎群之母赛丝还在害我们的驼队。拿着这些沙漠补给上路吧。',
       choices: [
-        { text: '我去收集水源（获得补给）', nextNodeId: 'accept_water', questTrigger: 'q_water_supply', reward: { gold: 80, exp: 150 } },
-        { text: '我去采集蝎毒', nextNodeId: 'accept_venom', questTrigger: 'q_scorpion_venom' },
+        { text: '我去帮寻水者找泉（获得补给）', nextNodeId: 'accept_water', questTrigger: 'q_water_supply', reward: { gold: 80, exp: 150 } },
+        { text: '我去猎杀毒后赛丝', nextNodeId: 'accept_venom', questTrigger: 'q_scorpion_venom' },
         { text: '还是先了解沙漠情况吧', nextNodeId: 'accept_explore', questTrigger: 'q_explore_desert' },
       ],
     },
@@ -370,9 +370,9 @@ export const nomadDialogueTree: DialogueTree = {
     },
     water: {
       id: 'water',
-      text: '沙漠中没有天然水源，只有绿洲里有水。不过击败的怪物身上有时会掉落净化水囊，那也是宝贵的补给。',
+      text: '沙漠里没有天然水源，只有绿洲有水。不过寻水者说，西边沙地下还藏着一眼泉，只是好像有东西先占了它。',
       choices: [
-        { text: '我去收集水源', nextNodeId: 'accept_water', questTrigger: 'q_water_supply' },
+        { text: '我去找那眼泉', nextNodeId: 'accept_water', questTrigger: 'q_water_supply' },
         { text: '我先去探索沙漠', nextNodeId: 'accept_explore', questTrigger: 'q_explore_desert' },
       ],
     },
@@ -403,12 +403,12 @@ export const nomadDialogueTree: DialogueTree = {
     },
     accept_water: {
       id: 'accept_water',
-      text: '收集5份净化水囊，击败沙漠中的怪物就有机会获得。我们的营地急需淡水补给。',
+      text: '跟着寻水者的杖尖走，找到三处湿沙，泉就在最后一处。小心，占着泉的东西不会轻易让出来。',
       isEnd: true,
     },
     accept_venom: {
       id: 'accept_venom',
-      text: '蝎谷里有大量沙漠蝎子。击败8只并收集5份蝎毒。小心它们的尾刺，毒性很强！',
+      text: '赛丝盘踞在东边的岩谷里，身边总跟着几只蝎子。割下她的毒囊带回来，我们用它做解药。别让她的尾针碰到你！',
       isEnd: true,
     },
     farewell: {
@@ -475,24 +475,24 @@ export const wardenDialogueTree: DialogueTree = {
       text: '勇敢！但别冲动。先消灭周围的小恶魔和次级恶魔，收集恶魔精华来增强封印的力量。',
       choices: [
         { text: '好，我去驱逐恶魔', nextNodeId: 'accept_demons', questTrigger: 'q_kill_demons' },
-        { text: '我也想顺便收集虚空水晶', nextNodeId: 'accept_crystals', questTrigger: 'q_void_crystals' },
+        { text: '我也去帮虚空研究者采结晶', nextNodeId: 'accept_crystals', questTrigger: 'q_void_crystals' },
       ],
     },
     prepare: {
       id: 'prepare',
-      text: '明智之举。你可以先在深渊外围做些准备任务。清除一些小恶魔，收集虚空水晶来强化你的装备。这是守望者的紧急物资，拿去用吧。',
+      text: '明智之举。先在外围做些准备：堕落骑士有三个背誓的部下要了结，虚空研究者也在找人去采裂隙边的结晶。这是守望者的紧急物资，拿去用吧。',
       choices: [
-        { text: '感谢补给，我去清除小恶魔', nextNodeId: 'accept_souls', questTrigger: 'q_corrupted_souls', reward: { gold: 150, exp: 300 } },
-        { text: '虚空水晶在哪里？', nextNodeId: 'crystal_location' },
+        { text: '感谢补给，我去了结那三个背誓者', nextNodeId: 'accept_souls', questTrigger: 'q_corrupted_souls', reward: { gold: 150, exp: 300 } },
+        { text: '那些结晶在哪里？', nextNodeId: 'crystal_location' },
         { text: '还是直接进去吧', nextNodeId: 'accept_explore', questTrigger: 'q_explore_abyss' },
       ],
     },
     resistance: {
       id: 'resistance',
-      text: '虚空水晶能提供一定的深渊腐蚀抵抗。另外，如果你能找到陨落英雄留下的遗物，可能也有帮助。他们曾是封印裂隙的守卫者。',
+      text: '虚空结晶或许能挡一挡深渊的侵蚀，虚空研究者正在研究它们。另外，三百年前封印深渊的人留下过遗言，刻在神殿和纪念碑上。读懂它，比任何护甲都管用。',
       choices: [
-        { text: '我去收集虚空水晶', nextNodeId: 'accept_crystals', questTrigger: 'q_void_crystals' },
-        { text: '我去寻找英雄遗物', nextNodeId: 'accept_hero', questTrigger: 'q_fallen_hero', prereqQuests: ['q_explore_abyss'] },
+        { text: '我去采虚空结晶', nextNodeId: 'accept_crystals', questTrigger: 'q_void_crystals' },
+        { text: '我去拓下英雄的遗言', nextNodeId: 'accept_hero', questTrigger: 'q_fallen_hero', prereqQuests: ['q_explore_abyss'] },
         { text: '我已经足够强了', nextNodeId: 'seal_plan' },
       ],
     },
@@ -512,25 +512,25 @@ export const wardenDialogueTree: DialogueTree = {
     },
     accept_crystals: {
       id: 'accept_crystals',
-      text: '虚空水晶散落在深渊的各个角落。收集10份应该足够了。它们发出淡紫色的光芒，很好辨认。',
+      text: '结晶长在东边的裂隙边缘，会像活物一样呼吸。采5块交给虚空研究者，趁它们还没长成新的裂口。',
       isEnd: true,
     },
     accept_souls: {
       id: 'accept_souls',
-      text: '小恶魔虽然单个不强，但数量众多。消灭15只可以有效减轻深渊的腐蚀强度。',
+      text: '卡隆、莉丝、吉格，曾是骑士麾下最好的兵。他们在深渊里各据一方，身边跟着小恶魔。别手软——他们已经不是人了。',
       isEnd: true,
     },
     crystal_location: {
       id: 'crystal_location',
-      text: '虚空水晶主要分布在深渊西部的悬崖边。那里空间扭曲最严重，水晶也最密集。收集10份就够用了。',
+      text: '结晶长在深渊东边的裂隙边缘，那里空间扭曲最严重。它们会呼吸，泛着淡紫色的光，很好认。采5块就够了。',
       choices: [
-        { text: '我去收集虚空水晶', nextNodeId: 'accept_crystals', questTrigger: 'q_void_crystals' },
+        { text: '我去采虚空结晶', nextNodeId: 'accept_crystals', questTrigger: 'q_void_crystals' },
         { text: '我先去探索深渊', nextNodeId: 'accept_explore', questTrigger: 'q_explore_abyss' },
       ],
     },
     accept_hero: {
       id: 'accept_hero',
-      text: '陨落神殿在深渊南部，英雄纪念碑在东部。两处都有先辈留下的遗物和线索。',
+      text: '陨落神殿在深渊西南，英雄纪念碑在南边中央。两处各刻着半句遗言，拓下来，带回给我。',
       isEnd: true,
     },
     farewell: {

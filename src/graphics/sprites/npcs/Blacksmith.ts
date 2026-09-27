@@ -21,9 +21,9 @@ export const BlacksmithDrawer = npcDrawer({
     offItem: 'tongs',
   },
   work: 'hammer',
-  ready: { wpn: 1.2, off: 1.3 },
-  scenery: (ctx) => anvilScenery(ctx),
-  fx: (ctx, p, _sk, act, t) => {
-    if (act === 'working') hammerSparks(ctx, p.fx, t);
+  ready: { wpn: 2.7, off: 2.4 },
+  scenery: anvilScenery,
+  fx: (ctx, p, sk, act, t) => {
+    if (act === 'working') hammerSparks(ctx, p.fx, t, sk);
   },
 });

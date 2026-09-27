@@ -21,7 +21,7 @@ export const EmeraldPlainsMap: MapData = {
     // Q2 — top-right quadrant
     { col: 85, row: 18, monsterId: 'slime_green', count: 6 },
     { col: 95, row: 35, monsterId: 'goblin', count: 6 },
-    { col: 75, row: 50, monsterId: 'goblin_chief', count: 2 },
+    { col: 75, row: 50, monsterId: 'goblin', count: 4 },
     // Q3 — bottom-left quadrant
     { col: 30, row: 80, monsterId: 'goblin', count: 8 },
     { col: 15, row: 95, monsterId: 'goblin_chief', count: 1 },
