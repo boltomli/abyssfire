@@ -191,8 +191,11 @@ export interface SheetGrid {
 }
 
 export function computeSheetGrid(frameW: number, frameH: number, totalFrames: number): SheetGrid {
-  const cols = Math.max(1, Math.min(totalFrames, Math.floor(MAX_SHEET_DIMENSION / frameW)));
-  const rows = Math.max(1, Math.ceil(totalFrames / cols));
+  const maxCols = Math.max(1, Math.min(totalFrames, Math.floor(MAX_SHEET_DIMENSION / frameW)));
+  const rows = Math.max(1, Math.ceil(totalFrames / maxCols));
+  // Balance the rows so a wrapped sheet doesn't carry a mostly empty last row
+  // (20 frames at 18 per row used to allocate 36 cells).
+  const cols = Math.max(1, Math.ceil(totalFrames / rows));
   return { frameW, frameH, cols, rows, width: cols * frameW, height: rows * frameH };
 }
 

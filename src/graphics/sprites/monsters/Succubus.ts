@@ -29,6 +29,29 @@ import {
 import { basePose, solveSkeleton, spun, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { humanoidMonster } from '../rig/MonsterKit';
 import { batWing, curlChain, demonTail, embers, hornPath, hornRidges, localPt, taperPath, type WingLook } from './Imp';
+import type { ViewPart, ViewSkeleton } from '../rig/HumanView';
+import {
+  band,
+  decal,
+  eyeGlowPoints,
+  loftFill,
+  lp,
+  poly3,
+  profileRings,
+  ringsBetween,
+  sagittal,
+  sagittalSpun,
+  solid3,
+  strap,
+  surfCurve,
+  surfPatch,
+  tube3,
+  turnedHead,
+  wingDepth,
+  wingPlane,
+  type L3,
+  type Part3,
+} from '../rig/MonsterView';
 
 // ── Palette ─────────────────────────────────────────────────────────────
 const SKIN = tone(0x9c6490, { light: 0.34 });
@@ -358,6 +381,200 @@ const SKIN_DEF: HumanSkin = {
   },
 };
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const CUIRASS = (len: number): V[] => [vec(-4.8, 0.4), vec(0.4, -0.8), vec(5, 1.2), vec(6.2, 5.6), vec(4, len * 0.62), vec(5.6, len + 0.6), vec(-4.6, len + 0.8), vec(-4.2, len * 0.6), vec(-5.6, 5)];
+const FACE_RINGS = profileRings([vec(-4.6, -1), vec(-3.8, -5.2), vec(1, -6.4), vec(4.8, -4.4), vec(5.8, -1), vec(5.4, 2), vec(3.8, 4.8), vec(1.6, 5.8), vec(-1.6, 4.6), vec(-4.2, 2.4)], y => -y, a => a * 0.9, 8);
+const S_EYE = { h: 1.6, phi: 0.42 };
+
+function robePanel(_len: number, s: 1 | -1, p: HumanPose, t: number): L3[] {
+  const sway = Math.sin(t * Math.PI * 2) * 0.6 - p.flow * 3.5;
+  const fr = s > 0 ? 5 : -4.4;
+  const out = (k: number): number => fr + s * (0.6 + k * 1.4) + (s > 0 ? sway * 0.3 * k : -Math.abs(sway) * 0.6 * k);
+  return [[1.4, fr, -4.2], [1.4, fr, 4.4], [-10, out(0.7), 4.8], [-14.5, out(1), 1.8], [-12, out(0.85), -0.8], [-15, out(1), -3.6], [-10, out(0.7), -4.8]];
+}
+
+function succTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = profileRings(CUIRASS(len), y => len - y, a => a * 1.12, 8);
+  const front = T.vis(0) > T.vis(Math.PI);
+  poly3(ctx, T, robePanel(len, front ? -1 : 1, p, t), ROBE_IN, { band: 1.2 });
+  solid3(ctx, T, R, OBSIDIAN, {
+    band: 1.5,
+    hi: 0.8,
+    face: () => {
+      // Gilt filigree V and waist bands
+      strap(ctx, T, R, [[len - 1.6, -1.1], [len - 5.4, 0], [len - 1.6, 1.1]], GILT, 0.5, 0.1);
+      strap(ctx, T, R, [[len - 1.6, Math.PI - 1.1], [len - 5, Math.PI], [len - 1.6, Math.PI + 1.1]], GILT, 0.5, 0.1);
+      for (const h of [len * 0.4, len * 0.22]) band(ctx, T, R, h, GILT, 0.45, 0.1);
+      decal(ctx, T, R, len - 5.4, 0.1, () => cel(ctx, () => polyPath(ctx, [vec(0, -1.6), vec(1.2, 0), vec(0, 1.6), vec(-1.2, 0)]), tone(0xe0205a, { light: 0.5 }), { band: 0.3, stroke: 0.35 }), { lift: 0.2, minVis: 0.05 });
+    },
+    over: () => {
+      // High gorget collar
+      const collar = ringsBetween(R, len - 1, len + 2.4, 0.5, 0.9);
+      loftFill(ctx, T, collar, OBSIDIAN, { band: 0.6 });
+      band(ctx, T, R, len + 1.8, GILT, 0.45, 0.6);
+      band(ctx, T, R, 0.4, LEATHER, 2, 0.5);
+      decal(ctx, T, R, 0.4, 0.4, () => cel(ctx, () => ellipsePath(ctx, vec(0, 0), 1.4, 1.4), GILT, { band: 0.4 }), { lift: 0.8, minVis: 0.05 });
+      const panel = robePanel(len, front ? 1 : -1, p, t);
+      poly3(ctx, T, panel, ROBE, { band: 1.1 });
+    },
+  });
+}
+
+function succHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const H = turnedHead(sk, 0.4);
+  const R = FACE_RINGS;
+  const horn = (s: 1 | -1): L3[] => [[5.6, 1.6, 2.8 * s], [9.4, -0.6, 4.8 * s], [11.4, -5, 6.4 * s], [8.4, -9.6, 7.2 * s], [3.6, -10.2, 7 * s]];
+  const drawHorn = (s: 1 | -1): void => tube3(ctx, H, horn(s), [1.3, 1.1, 0.9, 0.6, 0.25], s > 0 ? HORN : tone(0x8a7080));
+  const deep = (s: 1 | -1): boolean => H.rig.d(lp(H, 9, -4, 6 * s)) < H.rig.d(H.o);
+  for (const s of [1, -1] as const) if (deep(s)) drawHorn(s);
+  const tw = Math.sin(t * Math.PI * 2) * 0.3;
+  const parts: Part3[] = [
+    { pts: [[1.2, -0.6, 4], [4 + tw, -5, 7.4], [-1.6, -1.4, 4.2]], tone: SKIN, farTone: SKIN_FAR, mirror: true, band: 0.5 },
+  ];
+  // Hair cap over the crown; the back of the head is hair down to the nape
+  const hair = ringsBetween(R, 4.9, 8, 0.5);
+  solid3(ctx, H, R, SKIN, {
+    band: 1.2,
+    parts,
+    face: () => {
+      if (H.vis(0) < -0.3) return;
+      for (const sgn of [1, -1]) {
+        decal(ctx, H, R, S_EYE.h, sgn * S_EYE.phi, () => {
+          ctx.fillStyle = '#1e0818';
+          ctx.beginPath();
+          ctx.moveTo(-1.2, 0);
+          ctx.quadraticCurveTo(0, -0.8, 1.2, 0);
+          ctx.quadraticCurveTo(0, 0.6, -1.2, 0);
+          ctx.fill();
+          ctx.fillStyle = `rgb(255,${110 + p.fx * 80},230)`;
+          ctx.beginPath();
+          ctx.ellipse(0, -0.05, 0.6, 0.35, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#1e0818';
+          ctx.lineWidth = 0.4;
+          ctx.beginPath();
+          ctx.moveTo(-1.3 * sgn, -1.3);
+          ctx.lineTo(1.3 * sgn, -0.95);
+          ctx.stroke();
+        }, { minVis: 0.02 });
+      }
+      for (const run of surfCurve(H, R, [[-2.8, -0.35], [-2.9 - p.fx * 0.3, 0], [-2.8, 0.35]], 0.1, 4)) {
+        ctx.strokeStyle = '#4a0c2c';
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+        ctx.stroke();
+      }
+      for (const run of surfCurve(H, R, [[0.6, 0.02], [-0.8, 0.08]], 0.2, 2)) {
+        ctx.strokeStyle = SKIN.shade;
+        ctx.lineWidth = 0.45;
+        ctx.beginPath();
+        run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+        ctx.stroke();
+      }
+    },
+    over: () => {
+      // Hair cap: a lofted shell over the crown with a swept fringe
+      const back = surfPatch(H, R, 4, -3.6, Math.PI - 1.9, Math.PI + 1.9, 0.5, 12);
+      if (H.vis(Math.PI) > 0.1) cel(ctx, () => polyPath(ctx, back), HAIR, { band: 1 });
+      loftFill(ctx, H, hair, HAIR, { band: 1 });
+      if (H.vis(0) > -0.3) {
+        const fringe = surfPatch(H, R, 5.8, 4.4, -1.1, 1.1, 0.6, 10, k => 4.6 - Math.abs(Math.sin(k * Math.PI * 2)) * 0.9);
+        cel(ctx, () => polyPath(ctx, fringe), HAIR, { band: 0.6 });
+      }
+      band(ctx, H, R, 5, GILT, 0.8, 0.9);
+      decal(ctx, H, R, 5.2, 0, () => cel(ctx, () => polyPath(ctx, [vec(0, -1.2), vec(1, 0), vec(0, 1.2), vec(-1, 0)]), tone(0xe0205a, { light: 0.5 }), { band: 0.2, stroke: 0.3 }), { lift: 1, minVis: 0.05 });
+    },
+  });
+  for (const s of [1, -1] as const) if (!deep(s)) drawHorn(s);
+}
+
+function succExtra(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number, d0: number): ViewPart[] {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const beat = Math.sin(t * Math.PI * 2) * 0.08;
+  const out: ViewPart[] = [];
+  for (const s of [1, -1] as const) {
+    const anchor = lp(T, len - 3.4, -3.6, s * 2);
+    const spread = s < 0 && sk.rig.front ? 0.15 : 1.15;
+    const root = { x: anchor.x, y: anchor.y };
+    out.push({
+      z: wingDepth(sk.rig, anchor, s, spread, 8) - d0 + (s > 0 ? 0 : -8),
+      draw: () => wingPlane(ctx, sk.rig, anchor, root, s, spread, () =>
+        batWing(ctx, root, (s > 0 ? -0.7 : -0.35) + beat + p.flow * -0.3, s > 0 ? 25 : 22, 0.35, s > 0 ? WING : WING_FAR, s > 0 ? 4 : 11)),
+    });
+  }
+  // Tail and mane stream behind, on the body plane.
+  out.push({
+    z: T.depth(0, Math.PI, 4, 0) - d0,
+    draw: () => sagittal(ctx, sk.rig, 0, () => {
+      const side = solveSkeleton(p, PROP);
+      const root = localPt(side.pelvis, p.lean * 0.3, -3, 1.4);
+      const tail = curlChain(root, -2.4 + p.lean * 0.3, 2.4, 17, 8, 1 + p.flow, t * Math.PI * 2 + 1);
+      demonTail(ctx, tail, 1.1, SKIN_FAR, HORN, 2.2);
+    }),
+  });
+  out.push({
+    z: sk.skull.depth(0, Math.PI, 5, 0) - d0 + (sk.rig.front ? 0 : 3),
+    draw: () => sagittal(ctx, sk.rig, 0, () => mane(ctx, solveSkeleton(p, PROP), p, t)),
+  });
+  return out;
+}
+
+function succFx(ctx: CanvasRenderingContext2D, p: HumanPose, sk: Skeleton, act: MonsterAction, t: number, skipEye = false): void {
+  const dead = act === 'death';
+  // Abyssfire licking along the lash
+  const pts = whipPoints(sk, p, t).map(pt => spun(p, pt, sk));
+  const heat = dead ? Math.max(0, 0.4 - t * 0.5) : 0.25 + p.fx * 0.75;
+  for (let i = 2; i < pts.length; i += 2) {
+    const k = i / (pts.length - 1);
+    glow(ctx, pts[i], 2 + k * 1.5 + p.fx * 1.5, ABYSSFIRE, heat * (0.35 + k * 0.3));
+  }
+  if (act === 'attack' && t > 0.5) {
+    // Ghost of the lash a beat earlier, as a motion blur
+    const prev = samplePoseTrack(ATTACK, t - 0.06);
+    const psk = solveSkeleton(prev, PROP);
+    const ghost = whipPoints(psk, prev, t).map(pt => spun(prev, pt, psk));
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = `rgba(255,120,200,${0.28 * p.fx})`;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(ghost[0].x, ghost[0].y);
+    for (let i = 1; i < ghost.length; i++) ctx.lineTo(ghost[i].x, ghost[i].y);
+    ctx.stroke();
+    ctx.restore();
+    if (t > 0.9) {
+      // The crack: a sharp starburst at the tip
+      const tip = pts[pts.length - 1];
+      glow(ctx, tip, 9, ABYSSFIRE, 0.75);
+      glow(ctx, tip, 3.5, FIRE_CORE, 0.95);
+      ctx.strokeStyle = 'rgba(255,230,250,0.95)';
+      ctx.lineWidth = 0.7;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + 0.3;
+        const r = i % 2 ? 3.4 : 6.4;
+        ctx.beginPath();
+        ctx.moveTo(tip.x + Math.cos(a) * 1.6, tip.y + Math.sin(a) * 1.6);
+        ctx.lineTo(tip.x + Math.cos(a) * r, tip.y + Math.sin(a) * r);
+        ctx.stroke();
+      }
+    }
+  }
+  if (!skipEye && (!dead || t < 0.5)) {
+    const eye = spun(p, localPt(sk.head, sk.headAng, 4.2, -1.15), sk);
+    glow(ctx, eye, 1.9, EYE, 0.4 + p.fx * 0.3);
+  }
+  if (dead) {
+    const c = spun(p, sk.pelvis, sk);
+    embers(ctx, { x: c.x - 16, y: c.y - 10, w: 34, h: 10 }, 12, t, 0.15 + t * 0.6, ABYSSFIRE, 21);
+  }
+}
+
 // ── Animation ───────────────────────────────────────────────────────────
 // `wpn` aims the whip handle, `off` is how hard the lash curls.
 
@@ -458,55 +675,20 @@ export const SuccubusDrawer = humanoidMonster({
       flow: ready.flow + Math.sin(ph) * 0.08,
     };
   },
-  fx: (ctx, p, sk, act, t) => {
-    const dead = act === 'death';
-    // Abyssfire licking along the lash
-    const pts = whipPoints(sk, p, t).map(pt => spun(p, pt, sk));
-    const heat = dead ? Math.max(0, 0.4 - t * 0.5) : 0.25 + p.fx * 0.75;
-    for (let i = 2; i < pts.length; i += 2) {
-      const k = i / (pts.length - 1);
-      glow(ctx, pts[i], 2 + k * 1.5 + p.fx * 1.5, ABYSSFIRE, heat * (0.35 + k * 0.3));
-    }
-    if (act === 'attack' && t > 0.5) {
-      // Ghost of the lash a beat earlier, as a motion blur
-      const prev = samplePoseTrack(ATTACK, t - 0.06);
-      const psk = solveSkeleton(prev, PROP);
-      const ghost = whipPoints(psk, prev, t).map(pt => spun(prev, pt, psk));
-      ctx.save();
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = `rgba(255,120,200,${0.28 * p.fx})`;
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(ghost[0].x, ghost[0].y);
-      for (let i = 1; i < ghost.length; i++) ctx.lineTo(ghost[i].x, ghost[i].y);
-      ctx.stroke();
-      ctx.restore();
-      if (t > 0.9) {
-        // The crack: a sharp starburst at the tip
-        const tip = pts[pts.length - 1];
-        glow(ctx, tip, 9, ABYSSFIRE, 0.75);
-        glow(ctx, tip, 3.5, FIRE_CORE, 0.95);
-        ctx.strokeStyle = 'rgba(255,230,250,0.95)';
-        ctx.lineWidth = 0.7;
-        for (let i = 0; i < 8; i++) {
-          const a = (i / 8) * Math.PI * 2 + 0.3;
-          const r = i % 2 ? 3.4 : 6.4;
-          ctx.beginPath();
-          ctx.moveTo(tip.x + Math.cos(a) * 1.6, tip.y + Math.sin(a) * 1.6);
-          ctx.lineTo(tip.x + Math.cos(a) * r, tip.y + Math.sin(a) * r);
-          ctx.stroke();
-        }
-      }
-    }
-    if (!dead || t < 0.5) {
-      const eye = spun(p, localPt(sk.head, sk.headAng, 4.2, -1.15), sk);
-      glow(ctx, eye, 1.9, EYE, 0.4 + p.fx * 0.3);
-    }
-    if (dead) {
-      const c = spun(p, sk.pelvis, sk);
-      embers(ctx, { x: c.x - 16, y: c.y - 10, w: 34, h: 10 }, 12, t, 0.15 + t * 0.6, ABYSSFIRE, 21);
+  view: {
+    build: { hipW: 2.4, shW: 5, elbowOut: 1.3, footOut: 0.3 },
+    headBias: 4,
+    torso: succTorsoView,
+    head: succHeadView,
+    back: () => undefined,
+    extra: succExtra,
+  },
+  viewFx: (ctx, p, sk, act, t) => {
+    sagittalSpun(ctx, sk, p, () => succFx(ctx, p, solveSkeleton(p, PROP), act, t, true));
+    if (act !== 'death' || t < 0.5) {
+      for (const e of eyeGlowPoints(turnedHead(sk, 0.4), FACE_RINGS, S_EYE.h, [S_EYE.phi, -S_EYE.phi], 0.3)) glow(ctx, e, 1.2, EYE, 0.3 + p.fx * 0.3);
     }
   },
+  fx: (ctx, p, sk, act, t) => succFx(ctx, p, sk, act, t),
 });
 

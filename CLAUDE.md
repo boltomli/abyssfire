@@ -148,7 +148,10 @@ Quality tiers: Normal (white) -> Magic (blue, 1-2 affixes) -> Rare (yellow, 3-4)
   for sw/nw (`PLAYER_VIEWS`, view-major frames; `ne` anims are `player_<class>_ne_<action>`).
   `rig/HumanView.ts` lifts the side-view keyframes into 3D (lateral axis, ±45° yaw, 2:1 iso drop,
   depth-sorted parts); `CharacterAnimator.resolveFacing` picks view + flip from the screen-space
-  move/target vector with hysteresis. Monsters and NPCs are still side view.
+  move/target vector with hysteresis. Monsters use the same two views (`rig/MonsterView.ts`:
+  lofted solids, turned heads, wing planes; radial/amorphous ones like slimes have a single se view
+  and mirror it); `Monster` faces its heading or, while attacking, the player. NPCs are drawn in
+  the se view only (`NpcKit` over `HumanView`) and mirror toward the player within 3 tiles.
 
 ### Needs Work
 - **Performance**: first entry to a zone draws its monster/NPC sheets (~1 s on a software

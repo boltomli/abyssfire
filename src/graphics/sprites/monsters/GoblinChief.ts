@@ -20,7 +20,20 @@ import {
 } from '../rig/Rig';
 import { basePose, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { humanoidMonster } from '../rig/MonsterKit';
-import { goblinArm, goblinHand, goblinHead, goblinLeg, type GoblinLook } from './Goblin';
+import { GOBLIN_HEAD_RINGS, goblinArm, goblinHand, goblinHead, goblinHeadView, goblinLeg, goblinTorsoRings, type GoblinLook } from './Goblin';
+import type { ViewSkeleton } from '../rig/HumanView';
+import {
+  band,
+  clipTo,
+  decal,
+  loftFill,
+  poly3,
+  ringsBetween,
+  surf as surfOf,
+  surfPatch,
+  turnedHead,
+  type L3,
+} from '../rig/MonsterView';
 
 const LOOK: GoblinLook = {
   skin: tone(0x65913a, { light: 0.32 }),
@@ -146,6 +159,110 @@ function cleaver(ctx: CanvasRenderingContext2D, at: V, angle: number): void {
   ctx.restore();
 }
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const surfPoint = (H: Parameters<typeof surfOf>[0], h: number, phi: number): V => surfOf(H, GOBLIN_HEAD_RINGS, h, phi, 0.2);
+
+function chiefTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const R = goblinTorsoRings(len, 1.15);
+  const front = T.vis(0) > T.vis(Math.PI);
+  const flap = (s: 1 | -1): L3[] => {
+    const fr = s > 0 ? 6.4 : -5.8;
+    return [[1.2, fr, -3], [1.2, fr, 3], [-7.4, fr + 0.6 * s, 2.6], [-6, fr + 0.4 * s, 0], [-7.8, fr + 0.6 * s, -2.6]];
+  };
+  poly3(ctx, T, flap(front ? -1 : 1), LOOK.cloth, { band: 0.8 });
+  loftFill(ctx, T, R, LOOK.skin, { band: 1.6 });
+  // Leather cuirass with iron studs
+  const cuirass = loftFill(ctx, T, ringsBetween(R, 0.6, len - 3, 0.35), LEATHER, { band: 1.2 });
+  clipTo(ctx, cuirass, () => {
+    for (let r = 0; r < 3; r++) {
+      for (let c = -2; c <= 2; c++) {
+        decal(ctx, T, R, len - 6 - r * 3.1, c * 0.42 + (front ? 0 : Math.PI), () => {
+          ctx.fillStyle = IRON.light;
+          ctx.fillRect(-0.45, -0.45, 0.9, 0.9);
+        }, { lift: 0.45, minVis: 0.05 });
+      }
+    }
+  });
+  band(ctx, T, R, 1.2, LOOK.strap, 2);
+  // Trophy-skull buckle
+  decal(ctx, T, R, 1.2, 0.25, () => {
+    cel(ctx, () => ellipsePath(ctx, vec(0, 0), 2, 1.8), BONE, { band: 0.4 });
+    ctx.fillStyle = '#2a1a12';
+    ctx.fillRect(-0.9, -0.5, 0.7, 0.7);
+    ctx.fillRect(0.3, -0.5, 0.7, 0.7);
+  }, { lift: 0.8, minVis: 0.05 });
+  poly3(ctx, T, flap(front ? 1 : -1), LOOK.cloth, { band: 0.8 });
+  // Wolf-pelt mantle over the shoulders
+  const ph = t * Math.PI * 2;
+  const mantle = [
+    { h: len + 1.6, a: 3.2, b: 4 },
+    { h: len - 0.6, a: 6.6, b: 7.6, f: -0.4 },
+    { h: len - 4.6 - p.flow * 0.4, a: 7.4, b: 8.2, f: -0.6 },
+  ];
+  const pelt = loftFill(ctx, T, mantle, FUR, { band: 1.2 });
+  clipTo(ctx, pelt, () => {
+    for (let i = 0; i < 12; i++) {
+      const phi = (i / 12) * Math.PI * 2 + Math.sin(ph + i) * 0.03;
+      if (T.vis(phi) < 0) continue;
+      const a = T.at(len - 2.6, phi, 7.2, 8.1, -0.5);
+      const b = T.at(len - 4.6, phi, 7.6, 8.3, -0.6);
+      ctx.strokeStyle = FUR_DARK.base;
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+  });
+}
+
+function chiefHeadView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const H = turnedHead(sk);
+  const R = GOBLIN_HEAD_RINGS;
+  const horn = (s: 1 | -1): L3[] => [
+    [5, -0.8, 4.4 * s], [6.4, 0.8, 4.8 * s], [8.8, -0.2, 8.8 * s], [13, -2, 10.6 * s], [9.6, -2, 7.8 * s], [6.8, -2, 5.4 * s],
+  ];
+  const extra = ([1, -1] as const).map(s => ({
+    pts: horn(s),
+    draw: () => poly3(ctx, H, horn(s), s > 0 ? HORN : tone(0xbcae8c), { band: 0.7, smooth: true }),
+  }));
+  goblinHeadView(ctx, sk, p, t, LOOK, {
+    grin: 1.6,
+    extra,
+    face: () => {
+      // War paint across the cheeks
+      for (const phi of [-0.5, 0.5]) {
+        decal(ctx, H, R, 0.9, phi, () => {
+          ctx.strokeStyle = 'rgba(190,30,30,0.9)';
+          ctx.lineWidth = 0.7;
+          for (const y of [-0.6, 0.8]) {
+            ctx.beginPath();
+            ctx.moveTo(-1.4, y);
+            ctx.lineTo(1.4, y + 0.4);
+            ctx.stroke();
+          }
+        }, { minVis: 0.05 });
+      }
+    },
+    over: () => {
+      // Iron dome helm with a rim band, rivets and a nose guard
+      const dome = ringsBetween(R, 4.2, 9, 0.55);
+      loftFill(ctx, H, dome, IRON, { band: 1.4, hi: 0.7 });
+      band(ctx, H, R, 4.6, IRON_DARK, 1.6, 0.7);
+      for (let k = 0; k < 8; k++) {
+        decal(ctx, H, R, 4.6, (k / 8) * Math.PI * 2, () => {
+          ctx.fillStyle = IRON.light;
+          ctx.fillRect(-0.4, -0.4, 0.8, 0.8);
+        }, { lift: 1, minVis: 0.1 });
+      }
+      if (H.vis(0) > -0.1) cel(ctx, () => polyPath(ctx, surfPatch(H, R, 5, 1.6, -0.14, 0.14, 0.8, 3)), IRON_DARK, { band: 0.3 });
+    },
+  });
+}
+
 const SKIN: HumanSkin = {
   prop: {
     thigh: 10.5, shin: 10.5, upperArm: 9, foreArm: 8.5,
@@ -208,6 +325,20 @@ export const GoblinChiefDrawer = humanoidMonster({
   contactWpn: 2.1,
   walk: { stride: 6, lift: 3.4, bob: 1.5, lean: 0.06, armSwing: 2.4 },
   shadowR: 12,
+  view: {
+    build: { hipW: 2.6, shW: 5.4, elbowOut: 1.3 },
+    headBias: 6,
+    torso: chiefTorsoView,
+    head: chiefHeadView,
+  },
+  viewFx: (ctx, p, sk, act) => {
+    if (act === 'death') return;
+    const H = turnedHead(sk);
+    if (H.vis(0) < 0.1) return;
+    for (const phi of [-0.42, 0.42]) {
+      if (H.vis(phi) > 0.05) glow(ctx, surfPoint(H, 3.2, phi), 2, 0xff5a2a, 0.3 + p.fx * 0.3);
+    }
+  },
   fx: (ctx, p, sk, act) => {
     // Elite menace: faint ember glow in the eyes
     if (act === 'death') return;

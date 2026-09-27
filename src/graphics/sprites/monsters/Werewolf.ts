@@ -40,6 +40,29 @@ import {
   type Skeleton,
 } from '../rig/Humanoid';
 import { humanoidTracks, rigMonster } from '../rig/MonsterKit';
+import { Section, drawHumanoidView, solveViewSkeleton, v3, type HumanView, type ViewSkeleton } from '../rig/HumanView';
+import {
+  MONSTER_VIEWS,
+  TurnedSection,
+  band,
+  clipTo,
+  decal,
+  depthOf,
+  groundX,
+  hull3,
+  loftFill,
+  monsterViewSkin,
+  poly3,
+  profileRings,
+  ringsBetween,
+  sd,
+  sorted,
+  sp,
+  surf,
+  surfPatch,
+  surfVis,
+  type L3,
+} from '../rig/MonsterView';
 
 export interface WolfLook {
   fur: Tone;
@@ -397,6 +420,270 @@ export function werewolfDrawer(spec: WolfSpec): EntityDrawer {
     cel(ctx, () => blobPath(ctx, [left[k0], left[k0 + 1], left[k0 + 2], vec(tip.x - 1.5, tip.y + 1.5), ...right.slice(0, 3)]), L.pale, { band: 0.6 });
   }
 
+
+  // ── Isometric 3/4 views ───────────────────────────────────────────────
+
+  const BODY = (len: number): V[] => [
+    vec(-7 * b, -0.6), vec(0, -3 * b), vec(6.8 * b, -0.2), vec(8.6 * b, len * 0.34),
+    vec(6.4 * b, len * 0.72), vec(4.6 * b, len + 0.4), vec(-4.8 * b, len + 0.8), vec(-6.6 * b, len * 0.5),
+  ];
+
+  function torsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+    const T = sk.torso;
+    const len = sk.torsoLen;
+    const R = profileRings(BODY(len), y => len - y, a => a * 0.95, 8);
+    const ph = t * Math.PI * 2;
+    const ruffle = Math.sin(ph) * 0.4 + p.flow * 1.2;
+    const front = T.vis(0) > T.vis(Math.PI);
+    // Spiky mane down the back: tufts standing off the spine
+    const mane: { d: number; draw: () => void }[] = [];
+    for (let i = 0; i < 5; i++) {
+      const h = len + 1.6 - i * (len * 0.17);
+      for (const s of [-1, 0, 1]) {
+        const rr = (R.find(q => q.h <= h) ?? R[R.length - 1]);
+        const back = (rr.f ?? 0) - rr.a * 0.85;
+        const len2 = (3 - i * 0.3) * b + ruffle * 0.6;
+        const pts: L3[] = [
+          [h + 1.8, back, s * rr.b * 0.45 - 2],
+          [h + 1.8, back, s * rr.b * 0.45 + 2],
+          [h + 1.6 + len2 * 0.5, back - len2, s * rr.b * 0.6 + 1],
+          [h + 0.4, back - len2 * 0.55, s * rr.b * 0.55],
+          [h + 0.8 + len2 * 0.3, back - len2 * 0.9, s * rr.b * 0.6 - 1.2],
+          [h - 1.6, back, s * rr.b * 0.45],
+        ];
+        mane.push({ d: depthOf(T, pts), draw: () => poly3(ctx, T, pts, L.mane, { band: 0.8 }) });
+      }
+    }
+    const d0 = depthOf(T, [[len * 0.5, 0, 0]]);
+    sorted(mane.filter(m => m.d < d0));
+    // Tattered breeches (behind the body where they hang away)
+    const body = loftFill(ctx, T, R, L.fur, { band: 1.8 });
+    clipTo(ctx, body, () => {
+      // Pale chest ruff with a jagged lower edge
+      if (T.vis(0) > -0.2) {
+        const ruff = surfPatch(T, R, len + 0.6, len * 0.35, -1.1, 1.1, 0.15, 10, k => len * 0.3 + Math.abs(Math.sin(k * Math.PI * 3.5)) * 2.4 - Math.sin(k * Math.PI) * 1.6);
+        cel(ctx, () => polyPath(ctx, ruff), L.pale, { band: 1 });
+      }
+      // Fur strokes
+      ctx.strokeStyle = L.furLine;
+      ctx.lineWidth = 0.45;
+      ctx.lineCap = 'round';
+      for (const [h, phi] of [[len * 0.8, 2.2], [len * 0.5, 2.6], [len * 0.3, 1.8], [len * 0.6, -2.2], [len * 0.25, -2.7], [len * 0.7, 3.1]] as const) {
+        decal(ctx, T, R, h, phi, () => {
+          ctx.beginPath();
+          ctx.moveTo(0, -0.8);
+          ctx.lineTo(-0.6, 0.9);
+          ctx.stroke();
+        }, { lift: 0.1 });
+      }
+      if (L.scars) {
+        decal(ctx, T, R, len * 0.62, 0.3, () => {
+          ctx.strokeStyle = 'rgba(214,168,176,0.85)';
+          ctx.lineWidth = 0.6;
+          ctx.beginPath();
+          ctx.moveTo(-2.6, -2.4);
+          ctx.lineTo(2.2, 1.6);
+          ctx.moveTo(-2.8, -0.6);
+          ctx.lineTo(1.6, 3);
+          ctx.stroke();
+        }, { lift: 0.2 });
+      }
+    });
+    // Shredded breeches + rope belt
+    const pants = ringsBetween(R, -1.2, 3.4, 0.4);
+    loftFill(ctx, T, pants, L.pants, { band: 0.9 });
+    const bottom = pants[pants.length - 1];
+    for (let k = 0; k < 9; k++) {
+      const phi = (k / 9) * Math.PI * 2 + 0.2;
+      if (T.vis(phi) < 0.02) continue;
+      const l = 1.6 + ((k * 5) % 3) * 0.8 + p.flow * 0.8;
+      const a = T.at(bottom.h + 0.2, phi - 0.22, bottom.a, bottom.b, bottom.f ?? 0);
+      const c = T.at(bottom.h + 0.2, phi + 0.22, bottom.a, bottom.b, bottom.f ?? 0);
+      const tip = T.at(bottom.h - l, phi, bottom.a + 0.2, bottom.b + 0.2, bottom.f ?? 0);
+      cel(ctx, () => polyPath(ctx, [a, c, tip]), L.pants, { band: 0.4, stroke: 0.4 });
+    }
+    band(ctx, T, R, 3, tone(0x7a6448), 1.2, 0.6);
+    sorted(mane.filter(m => m.d >= d0));
+    if (front) {
+      // Throat ruff tuft
+      const pts: L3[] = [[len + 1.4, (R[0].f ?? 0) + R[0].a * 0.6, -2.6 * b], [len + 1.4, (R[0].f ?? 0) + R[0].a * 0.6, 2.6 * b], [len - 3.4, (R[0].f ?? 0) + R[0].a + 2.2 * b, 0]];
+      poly3(ctx, T, pts, L.pale, { band: 0.6 });
+    }
+    if (L.collar) {
+      band(ctx, T, R, len - 0.2, IRON, 2, 0.5);
+      for (let k = 0; k < 10; k++) {
+        const phi = (k / 10) * Math.PI * 2;
+        if (T.vis(phi) < 0.1) continue;
+        const base = surf(T, R, len - 0.2, phi, 0.9);
+        const tip = surf(T, R, len - 0.2, phi, 3);
+        const n = { x: tip.x - base.x, y: tip.y - base.y };
+        cel(ctx, () => polyPath(ctx, [vec(base.x - n.y * 0.3 - 0.6, base.y + n.x * 0.3), vec(tip.x, tip.y - 0.6), vec(base.x + n.y * 0.3 + 0.6, base.y - n.x * 0.3)]), IRON, { band: 0.25, stroke: 0.35 });
+      }
+    }
+  }
+
+  /** Head frame with the face levelled (the neck juts forward). */
+  function faceSection(sk: ViewSkeleton, p: HumanPose): Section {
+    const a = p.lean + p.head - FACE_TILT + (sk.rig.front ? 0 : 0.35);
+    const S = new Section(sk.rig, sk.j.head, v3(Math.sin(a), -Math.cos(a), 0), v3(Math.cos(a), Math.sin(a), 0));
+    return sk.rig.front ? new TurnedSection(S, 0.35) : S;
+  }
+
+  const k = b * 0.96;
+  const CRANIUM = profileRings(
+    [vec(-5.4, -0.4), vec(-4, -4.6), vec(0.6, -5.8), vec(4.6, -4), vec(5.8, -1.6), vec(4.4, 2.6), vec(0.6, 3.4), vec(-4, 3)].map(q => vec(q.x * k, q.y * k)),
+    y => -y, a => a * 1.02, 8,
+  );
+  /** Snout cross-sections along the face's forward axis: [forward, up offset, vertical r, lateral r]. */
+  const SNOUT: [number, number, number, number][] = [
+    [2.6, 0.9, 2.7, 2.9], [7, 0.6, 2.1, 2.1], [10.4, 0.1, 1.6, 1.5], [11.2, -0.1, 0.9, 1],
+  ];
+  const ring3 = (f: number, up: number, rv: number, rl: number, n = 12): L3[] => {
+    const out: L3[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      out.push([(up + Math.cos(a) * rv) * k, f * k, Math.sin(a) * rl * k]);
+    }
+    return out;
+  };
+  const EYE_H = 1.8 * k;
+  const EYE_PHI = 0.62;
+
+  function headView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+    limb(ctx, sk.neck, lerpV(sk.neck, sk.head, 0.55), 3.8 * b, 3 * b, L.fur);
+    const F = faceSection(sk, p);
+    const ph = t * Math.PI * 2;
+    const twitch = Math.sin(ph * 2 + 0.5) * 0.12;
+    const jaw = 0.12 + p.fx * 0.5 + Math.max(0, Math.sin(ph * 2)) * 0.04;
+    const items: { d: number; draw: () => void }[] = [];
+    for (const s of [1, -1] as const) {
+      const torn = L.tornEar && s < 0;
+      const ear: L3[] = torn
+        ? [[3.2 * k, -0.4 * k, s * 1.2 * k], [3.4 * k, 0.2 * k, s * 4.4 * k], [7.6 * k, -0.6 * k, s * 4.2 * k], [8 * k, -0.9 * k, s * 3.2 * k], [9.6 * k, -1.2 * k, s * 2.8 * k]]
+        : [[3.2 * k, -0.4 * k, s * 1.2 * k], [3.4 * k, 0.2 * k, s * 4.4 * k], [10.6 * k + twitch * 3, -1.4 * k, s * 3.4 * k]];
+      const inner: L3[] = [[4 * k, 0, s * 2 * k], [4 * k, 0.3 * k, s * 3.8 * k], [8.8 * k + twitch * 3, -0.8 * k, s * 3.2 * k]];
+      items.push({
+        d: depthOf(F, ear),
+        draw: () => {
+          poly3(ctx, F, ear, s > 0 ? L.fur : L.furFar, { band: 0.7 });
+          if (F.vis(s * 0.3) > 0.05) poly3(ctx, F, inner, tone(0x8a2a3a), { band: 0.2, stroke: 0 });
+        },
+      });
+      // Cheek ruff flaring back behind the jaw
+      const ruff: L3[] = [[1 * k, -1 * k, s * 4.4 * k], [-2.6 * k, 0, s * 4.8 * k], [-1.4 * k, -4 * k, s * 7.2 * k], [-3.4 * k, -3 * k, s * 6.4 * k], [-4 * k, -6.2 * k, s * 6.2 * k], [-2.2 * k, -3 * k, s * 4.2 * k]];
+      items.push({ d: depthOf(F, ruff) - 0.5, draw: () => poly3(ctx, F, ruff, L.mane, { band: 0.8 }) });
+    }
+    const center = depthOf(F, [[0, 0, 0]]);
+    // Lower jaw hinged under the ear, dropping open with the snarl
+    const drop = jaw * 4;
+    const jawPts: L3[] = [
+      ...ring3(1.4, -1.6, 1.4, 2.2, 8),
+      ...ring3(8.4, -2.4 - drop * 0.6 / k, 0.9, 1.2, 8),
+    ];
+    items.push({ d: center + 0.2, draw: () => hull3(ctx, F, jawPts, L.pale, { band: 0.6 }) });
+    items.push({
+      d: center,
+      draw: () => {
+        const shell = loftFill(ctx, F, CRANIUM, L.fur, { band: 1.4 });
+        if (F.vis(0) < -0.3) return;
+        clipTo(ctx, shell, () => {
+          cel(ctx, () => polyPath(ctx, surfPatch(F, CRANIUM, EYE_H + 2.2 * k, EYE_H + 0.9 * k, -1.2, 1.2, 0.15, 6)), L.furFar, { band: 0.3, stroke: 0.3 });
+          for (const s of [1, -1]) {
+            decal(ctx, F, CRANIUM, EYE_H, s * EYE_PHI, () => {
+              ctx.fillStyle = '#140e18';
+              ctx.beginPath();
+              ctx.ellipse(0, 0, 1.8 * k, 1.15 * k, 0.3 * s, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = L.eyeCore;
+              ctx.beginPath();
+              ctx.ellipse(0, 0, 1.25 * k, 0.7 * k, 0.3 * s, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = '#140e18';
+              ctx.fillRect(-0.2, -0.6, 0.45, 1.2);
+            }, { minVis: 0.02 });
+          }
+          if (L.scars) {
+            decal(ctx, F, CRANIUM, EYE_H + 1, -0.4, () => {
+              ctx.strokeStyle = 'rgba(214,168,176,0.9)';
+              ctx.lineWidth = 0.5;
+              ctx.beginPath();
+              ctx.moveTo(-0.6, -2.8);
+              ctx.lineTo(0.8, 3.2);
+              ctx.stroke();
+            }, { minVis: 0.02 });
+          }
+        });
+      },
+    });
+    // Muzzle, gums, fangs and nose
+    items.push({
+      d: depthOf(F, [[0, 6 * k, 0]]),
+      draw: () => {
+        const pts: L3[] = SNOUT.flatMap(([f, up, rv, rl]) => ring3(f, up - (f > 9 ? p.fx * 0.3 : 0), rv, rl));
+        const outline = hull3(ctx, F, pts, L.pale, { band: 0.8 });
+        ctx.save();
+        ctx.beginPath();
+        polyPath(ctx, outline);
+        ctx.clip();
+        for (const s of [1, -1] as const) {
+          const g0 = sp(F, -1.3 * k, 2.8 * k, s * 2.6 * k);
+          const g1 = sp(F, -0.9 * k, 10.6 * k, s * 1.1 * k);
+          ctx.strokeStyle = L.gum;
+          ctx.lineWidth = 0.9;
+          ctx.beginPath();
+          ctx.moveTo(g0.x, g0.y);
+          ctx.lineTo(g1.x, g1.y);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = L.furLine;
+        ctx.lineWidth = 0.4;
+        for (let i = 0; i < 2 + Math.round(p.fx); i++) {
+          const a = sp(F, 2.6 * k, (4.6 + i * 1.3) * k, -0.9 * k);
+          const c = sp(F, 2.8 * k, (4.8 + i * 1.3) * k, 0.9 * k);
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.stroke();
+        }
+        ctx.restore();
+        ctx.fillStyle = '#f4efe0';
+        for (const s of [1, -1] as const) {
+          for (const [f, l] of [[4, 1.6], [6.4, 1.1], [8.8, 1.9]] as const) {
+            const lat = s * (2.7 - f * 0.14) * k;
+            if (sd(F, -1.2 * k, f * k, lat) < sd(F, -1.2 * k, f * k, 0) - 0.3) continue;
+            const a = sp(F, -1.1 * k, (f - 0.5) * k, lat);
+            const c = sp(F, -1.1 * k, (f + 0.5) * k, lat);
+            const tp = sp(F, -1.1 * k - l, f * k, lat * 0.95);
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(tp.x, tp.y);
+            ctx.lineTo(c.x, c.y);
+            ctx.fill();
+          }
+        }
+        const np = sp(F, 0.8 * k, 11.3 * k, 0);
+        cel(ctx, () => ellipsePath(ctx, np, 1.3 * k, 1 * k), tone(0x1a1620), { band: 0.3, stroke: 0.35 });
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.fillRect(np.x - 0.6, np.y - 0.6, 0.6, 0.4);
+      },
+    });
+    sorted(items);
+  }
+
+  function eyePoints(sk: ViewSkeleton, p: HumanPose): V[] {
+    const F = faceSection(sk, p);
+    return [1, -1]
+      .filter(s => surfVis(F, CRANIUM, EYE_H, s * EYE_PHI) > 0.28)
+      .map(s => surf(F, CRANIUM, EYE_H, s * EYE_PHI, 0.2));
+  }
+
+  const VIEW_OPTS = {
+    build: { hipW: 2.6 * b, shW: 5.6 * b, elbowOut: 1.5, footOut: 0.5 },
+    headBias: 3,
+    torso: torsoView,
+    head: headView,
+  };
+
   const SKIN: HumanSkin = {
     prop: PROP,
     back: tail,
@@ -599,19 +886,58 @@ export function werewolfDrawer(spec: WolfSpec): EntityDrawer {
     glow(ctx, eye, 3 + p.fx * 1.5, L.eye, 0.55 + p.fx * 0.3);
   }
 
+  const VSKIN = monsterViewSkin(SKIN, VIEW_OPTS);
+
+  function viewFx(ctx: CanvasRenderingContext2D, p: HumanPose, act: MonsterAction, t: number, view: HumanView): void {
+    const vsk = solveViewSkeleton(p, PROP, VSKIN.build, view);
+    if (act === 'attack' && t > 0.5) {
+      for (const far of spec.attack === 'maul' ? [true, false] : [false]) {
+        const tips: V[] = [];
+        const bases: V[] = [];
+        for (let i = 5; i >= 0; i--) {
+          const sp0 = samplePoseTrack(ATTACK, Math.max(0, t - i * 0.07));
+          const s = solveViewSkeleton(sp0, PROP, VSKIN.build, view);
+          const hand = far ? s.handF : s.handN;
+          const el = far ? s.elF : s.elN;
+          const d = perp(el, hand).u;
+          tips.push(vec(hand.x + d.x * (clawLen + 2), hand.y + d.y * (clawLen + 2)));
+          bases.push(hand);
+        }
+        smear(ctx, tips, bases, 0xe8f0ff, 0.45 * p.fx);
+        for (let c = 0; c < 3; c++) {
+          const off = (c - 1) * 1.6;
+          ctx.strokeStyle = `rgba(255,255,255,${0.75 * p.fx})`;
+          ctx.lineWidth = 0.8;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          tips.forEach((q, i) => {
+            if (i === 0) ctx.moveTo(q.x + off, q.y - off * 0.6); else ctx.lineTo(q.x + off, q.y - off * 0.6);
+          });
+          ctx.stroke();
+        }
+      }
+    }
+    if (act === 'death' && t > 0.6) return;
+    for (const eye of eyePoints(vsk, p)) glow(ctx, eye, 2.6 + p.fx * 1.4, L.eye, 0.5 + p.fx * 0.3);
+  }
+
   return rigMonster<HumanPose>({
     key: spec.key,
     frameW: spec.frameW,
     frameH: spec.frameH,
     scale: spec.scale,
+    views: MONSTER_VIEWS,
     pose,
-    draw: (ctx, p, _act, t) => { drawHumanoid(ctx, p, SKIN, t); },
-    shadow: (p) => ({
-      x: Math.abs(p.spin) > 1 ? p.root.x + (p.spin > 0 ? 8 : -8) : p.root.x + 2,
+    draw: (ctx, p, _act, t, view) => {
+      if (view) drawHumanoidView(ctx, p, VSKIN, t, view);
+      else drawHumanoid(ctx, p, SKIN, t);
+    },
+    shadow: (p, _act, _t, view) => ({
+      x: groundX(view, Math.abs(p.spin) > 1 ? p.root.x + (p.spin > 0 ? 8 : -8) : p.root.x + 2),
       r: (spec.shadowR ?? 13) * (Math.abs(p.spin) > 1 ? 1.4 : 1),
       lift: Math.max(0, GROUND_Y - Math.max(p.footN.y, p.footF.y)),
     }),
-    fx,
+    fx: (ctx, p, act, t, view) => (view ? viewFx(ctx, p, act, t, view) : fx(ctx, p, act, t)),
   });
 }
 

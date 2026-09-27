@@ -29,6 +29,25 @@ import {
 } from '../rig/Rig';
 import { basePose, solveSkeleton, spun, type HumanPose, type HumanSkin, type Skeleton } from '../rig/Humanoid';
 import { humanoidMonster, humanoidTracks, monsterTime, type HumanoidMonsterSpec } from '../rig/MonsterKit';
+import { solveViewSkeleton, type HumanView, type ViewSkeleton } from '../rig/HumanView';
+import {
+  band,
+  celPieces,
+  clipTo,
+  decal,
+  loftFill,
+  loftPieces,
+  poly3,
+  profileRings,
+  sagittal,
+  sp,
+  surf,
+  surfCurve,
+  surfPatch,
+  surfVis,
+  turnedHead,
+  type L3,
+} from '../rig/MonsterView';
 
 // ── Palette (cool ivory bone under twilight, violet shroud, teal soul-fire) ──
 const BONE = tone(0xddd6c4, { light: 0.4, shadow: 0.34 });
@@ -413,6 +432,210 @@ function shield(ctx: CanvasRenderingContext2D, at: V, angle: number): void {
   ctx.restore();
 }
 
+// ── Isometric 3/4 views ─────────────────────────────────────────────────
+
+const CAGE = (len: number): V[] => [vec(-4, 1.2), vec(0.8, 0.2), vec(4.6, 2), vec(5.4, len * 0.34), vec(3.4, len * 0.6), vec(-1.6, len * 0.64), vec(-4.2, len * 0.42)];
+const PELVIS = (len: number): V[] => [vec(-4.4, len - 2.4), vec(-1, len - 3.6), vec(3.4, len - 2.2), vec(4.2, len + 0.6), vec(1.2, len + 2.2), vec(-3.4, len + 1.6)];
+
+function ribStroke(ctx: CanvasRenderingContext2D, run: V[]): void {
+  const path = (dx = 0, dy = 0): void => {
+    ctx.beginPath();
+    ctx.moveTo(run[0].x + dx, run[0].y + dy);
+    for (let i = 1; i < run.length; i++) ctx.lineTo(run[i].x + dx, run[i].y + dy);
+  };
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  path(); ctx.strokeStyle = BONE.line; ctx.lineWidth = 1.9; ctx.stroke();
+  path(); ctx.strokeStyle = BONE.base; ctx.lineWidth = 1.1; ctx.stroke();
+  path(-0.2, -0.35); ctx.strokeStyle = BONE.light; ctx.lineWidth = 0.4; ctx.stroke();
+}
+
+function shroudFlap(_len: number, fr: number, s: 1 | -1, p: HumanPose, t: number): L3[] {
+  const sway = Math.sin(t * Math.PI * 2 + (s > 0 ? 0.8 : 2)) * 0.6 - p.flow * 2 * s;
+  return [
+    [1.8, fr, -2.4], [1.8, fr, 2.2], [-6.5, fr + sway + 0.4 * s, 2], [-4.4, fr + sway * 0.6, 0.8],
+    [-7.6, fr + sway + 0.6 * s, -0.4], [-5, fr + sway * 0.6, -1.4], [-6.4, fr + sway + 0.4 * s, -2.4],
+  ];
+}
+
+function skeletonTorsoView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const T = sk.torso;
+  const len = sk.torsoLen;
+  const hOf = (y: number): number => len - y;
+  const cage = profileRings(CAGE(len), hOf, a => a * 1.18, 7);
+  const pelvis = profileRings(PELVIS(len), hOf, a => a * 1.35, 5);
+  const front = T.vis(0) > T.vis(Math.PI);
+  // Shroud strip hanging on the far side of the body.
+  poly3(ctx, T, shroudFlap(len, front ? -3.6 : 4.2, front ? -1 : 1, p, t), SHROUD_FAR, { band: 0.6 });
+  // Lumbar spine between pelvis and cage
+  for (let i = 0; i < 4; i++) {
+    const h = len * 0.36 - i * (len * 0.4 - 1) / 4;
+    const c = sp(T, h, -2.4 + i * 0.15, 0);
+    cel(ctx, () => ellipsePath(ctx, c, 1.5, 1.1), BONE, { band: 0.5, stroke: 0.4 });
+  }
+  // Pelvis bowl
+  const pel = loftFill(ctx, T, pelvis, BONE, { band: 0.9 });
+  clipTo(ctx, pel, () => {
+    for (const phi of [-0.5, 0.5]) {
+      decal(ctx, T, pelvis, 0.2, phi, () => {
+        ctx.fillStyle = CAVITY.base;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 1.2, 0.9, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }, { minVis: 0.05 });
+    }
+  });
+  band(ctx, T, pelvis, 1.6, LEATHER, 1.2, 0.2);
+  // Rib cavity with the thoracic spine inside, ribs wrapped round it.
+  const cav = loftPieces(T, cage);
+  celPieces(ctx, cav, CAVITY, { band: 0.8, stroke: 0.4 });
+  clipTo(ctx, cav, () => {
+    for (let i = 0; i < 4; i++) {
+      const c = sp(T, len - 1.8 - i * len * 0.13, -3, 0);
+      cel(ctx, () => ellipsePath(ctx, c, 1.1, 0.9), BONE_FAR, { band: 0.3, stroke: 0.3 });
+    }
+  });
+  for (let i = 0; i < 4; i++) {
+    const h0 = len - 2 - i * len * 0.12;
+    const drop = 1.6 + i * 0.35;
+    for (const s of [1, -1]) {
+      for (const run of surfCurve(T, cage, [[h0, Math.PI], [h0 - drop * 0.3, s * 1.6], [h0 - drop, s * 0.28]], 0.35, 8, -0.05)) ribStroke(ctx, run);
+    }
+  }
+  if (front) {
+    // Sternum
+    const a = surf(T, cage, len - 2.2, 0, 0.5);
+    const b = surf(T, cage, len * 0.54, 0, 0.5);
+    cel(ctx, () => capsule(ctx, a, b, 1, 0.8), BONE, { band: 0.4, stroke: 0.4 });
+  } else {
+    for (let i = 0; i < 5; i++) {
+      const c = surf(T, cage, len - 1.6 - i * len * 0.12, Math.PI, 0.4);
+      cel(ctx, () => ellipsePath(ctx, c, 1.2, 1), BONE, { band: 0.4, stroke: 0.4 });
+    }
+  }
+  // Front scrap of shroud on the rope belt
+  poly3(ctx, T, shroudFlap(len, front ? 4.4 : -3.8, front ? 1 : -1, p, t), SHROUD, { band: 0.8 });
+  // Tattered mantle over the shoulders
+  const ph = t * Math.PI * 2;
+  const mantle = [
+    { h: len + 2, a: 2.6, b: 3.4, f: -0.6 },
+    { h: len + 0.2, a: 4.8, b: 6.4, f: -1 },
+    { h: len - 2.4, a: 5.2, b: 6.8, f: -1.2 },
+  ];
+  loftFill(ctx, T, mantle, SHROUD, { band: 0.9 });
+  for (let k = 0; k < 10; k++) {
+    const phi = (k / 10) * Math.PI * 2 + 0.2;
+    if (T.vis(phi) < 0.02) continue;
+    const l = 1.6 + ((k * 7) % 3) * 0.9 + Math.sin(ph + k) * 0.3;
+    const a = T.at(len - 2.2, phi - 0.18, 5.2, 6.8, -1.2);
+    const b = T.at(len - 2.2, phi + 0.18, 5.2, 6.8, -1.2);
+    const c = T.at(len - 2.2 - l, phi, 5.3, 6.9, -1.3);
+    cel(ctx, () => polyPath(ctx, [a, b, c]), SHROUD, { band: 0.4, stroke: 0.4 });
+  }
+}
+
+const SKULL_PROFILE: V[] = [vec(-5.2, -0.4), vec(-4.2, -5), vec(0.4, -6.8), vec(5, -5.2), vec(7, -1.4), vec(6.6, 2.6), vec(3.2, 3.4), vec(-0.2, 3), vec(-3.6, 2.4)];
+const SKULL_RINGS = profileRings(SKULL_PROFILE, y => -y, a => a * 0.86, 8);
+
+function skullView(ctx: CanvasRenderingContext2D, sk: ViewSkeleton, p: HumanPose, t: number): void {
+  const dt = deathT();
+  if (dt > 0.5) {
+    // The loose skull rolls along the ground: reuse the side art.
+    sagittal(ctx, sk.rig, 0, () => head(ctx, solveSkeleton(p, SKIN.prop), p, t));
+    return;
+  }
+  const idleChatter = Math.max(0, Math.sin(t * Math.PI * 8)) * 0.25;
+  const jaw = CUR.act === 'death' ? 0.6 : Math.min(1, p.fx * 0.9 + idleChatter);
+  const fire = CUR.act === 'death' ? Math.max(0, 1 - dt * 1.6) : 1;
+  // Neck vertebrae
+  for (let i = 0; i < 2; i++) {
+    const c = lerpV(sk.neck, sk.head, 0.2 + i * 0.3);
+    cel(ctx, () => ellipsePath(ctx, c, 1.3, 1.1), BONE, { band: 0.4, stroke: 0.4 });
+  }
+  const H = turnedHead(sk, 0.4);
+  const R = SKULL_RINGS;
+  // Jaw hangs under the cranium
+  const drop = jaw * 1.6;
+  const jawRings = [
+    { h: -1.6, a: 4, b: 3.6, f: 2.6 },
+    { h: -3.6 - drop * 0.6, a: 3.6, b: 3.4, f: 2.8 + drop * 0.2 },
+    { h: -5.2 - drop, a: 2.4, b: 2.4, f: 3.2 + drop * 0.3 },
+  ];
+  const jawP = loftFill(ctx, H, jawRings, BONE, { band: 0.6 });
+  if (H.vis(0) > -0.2) {
+    clipTo(ctx, jawP, () => {
+      ctx.fillStyle = BONE.light;
+      for (const phi of [-0.5, -0.17, 0.17, 0.5]) {
+        if (surfVis(H, jawRings, -3.2, phi) < 0.05) continue;
+        const q = surf(H, jawRings, -2.2 - drop * 0.3, phi, 0.1);
+        ctx.fillRect(q.x - 0.4, q.y - 0.4, 0.8, 0.9);
+      }
+    });
+  }
+  const shell = loftFill(ctx, H, R, BONE, { band: 1.3 });
+  clipTo(ctx, shell, () => {
+    // Crack across the dome
+    for (const run of surfCurve(H, R, [[6.4, -2.6], [4.6, -2.2], [3.4, -2.8], [2, -2.4]], 0.05, 4)) {
+      ctx.strokeStyle = BONE.line;
+      ctx.lineWidth = 0.45;
+      ctx.beginPath();
+      run.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+      ctx.stroke();
+    }
+    if (H.vis(0) < -0.3) return;
+    // Brow shadow
+    ctx.fillStyle = 'rgba(40,30,60,0.35)';
+    ctx.beginPath();
+    polyPath(ctx, surfPatch(H, R, 4.4, 3.2, -0.9, 0.9, 0.05));
+    ctx.fill();
+    // Eye sockets with soul-fire pupils
+    for (const phi of [-0.42, 0.42]) {
+      decal(ctx, H, R, 1.6, phi, () => {
+        ctx.fillStyle = '#140f1e';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 1.8, 2.1, 0, 0, Math.PI * 2);
+        ctx.fill();
+        if (fire > 0.02) {
+          ctx.fillStyle = `rgba(160,255,240,${fire})`;
+          ctx.beginPath();
+          ctx.arc(0, 0.2, 0.9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(255,255,255,${fire})`;
+          ctx.fillRect(-0.2, -0.3, 0.5, 0.5);
+        }
+      }, { minVis: 0.02 });
+    }
+    // Nasal cavity
+    decal(ctx, H, R, -1, 0, () => {
+      ctx.fillStyle = '#140f1e';
+      ctx.beginPath();
+      ctx.moveTo(0, -1);
+      ctx.lineTo(0.9, 0.9);
+      ctx.lineTo(-0.9, 0.9);
+      ctx.closePath();
+      ctx.fill();
+    }, { minVis: 0.02 });
+    // Cheekbones + upper teeth
+    cel(ctx, () => polyPath(ctx, surfPatch(H, R, -1.6, -2.4, -0.9, -0.35, 0.1, 4)), BONE_FAR, { band: 0.3, stroke: 0.3 });
+    cel(ctx, () => polyPath(ctx, surfPatch(H, R, -1.6, -2.4, 0.35, 0.9, 0.1, 4)), BONE_FAR, { band: 0.3, stroke: 0.3 });
+    for (const phi of [-0.45, -0.15, 0.15, 0.45]) {
+      decal(ctx, H, R, -2.8, phi, () => {
+        ctx.fillStyle = BONE.light;
+        ctx.fillRect(-0.45, -0.5, 0.9, 1.1);
+        ctx.strokeStyle = BONE.line;
+        ctx.lineWidth = 0.3;
+        ctx.strokeRect(-0.45, -0.5, 0.9, 1.1);
+      }, { minVis: 0.05, lift: 0.1 });
+    }
+  });
+}
+
+/** Soul-fire eye glow positions in a view (visible sockets only). */
+function viewEyes(sk: ViewSkeleton): V[] {
+  const H = turnedHead(sk, 0.4);
+  return [-0.42, 0.42].filter(phi => surfVis(H, SKULL_RINGS, 1.6, phi) > 0.18).map(phi => surf(H, SKULL_RINGS, 1.6, phi, 0.2));
+}
+
 // ── Skin & poses ────────────────────────────────────────────────────────
 
 const SKIN: HumanSkin = {
@@ -496,6 +719,12 @@ const SPEC: HumanoidMonsterSpec = {
   deathDir: 1,
   walk: { stride: 5.5, lift: 3.6, bob: 1.4, lean: 0.04, armSwing: 2.2 },
   shadowR: 11,
+  view: {
+    build: { hipW: 2.3, shW: 5, elbowOut: 1.3 },
+    headBias: 5,
+    torso: skeletonTorsoView,
+    head: skullView,
+  },
 };
 
 function buildTracks(): Partial<Record<MonsterAction, Key<HumanPose>[]>> {
@@ -535,6 +764,10 @@ function buildTracks(): Partial<Record<MonsterAction, Key<HumanPose>[]>> {
 const TRACKS = buildTracks();
 const ATTACK = TRACKS.attack!;
 
+function solveViewSkeletonFor(p: HumanPose, view: HumanView): ViewSkeleton {
+  return solveViewSkeleton(p, SKIN.prop, SPEC.view!.build, view);
+}
+
 function swordLine(p: HumanPose): { tip: V; base: V } {
   const sk = solveSkeleton(p, SKIN.prop);
   const hand = spun(p, sk.handN, sk);
@@ -544,6 +777,34 @@ function swordLine(p: HumanPose): { tip: V; base: V } {
 const BASE = humanoidMonster({
   ...SPEC,
   tracks: TRACKS,
+  viewFx: (ctx, p, sk, act, t) => {
+    if (act === 'attack' && p.fx > 0.3) {
+      const tips: V[] = [];
+      const bases: V[] = [];
+      for (let i = 5; i >= 0; i--) {
+        const sp0 = samplePoseTrack(ATTACK, Math.max(0, t - i * 0.05));
+        const vsk = solveViewSkeletonFor(sp0, sk.rig.view);
+        const { ang, k } = vsk.rig.dir(sp0.wpn);
+        const dir = vec(Math.sin(ang) * k, -Math.cos(ang) * k);
+        tips.push(vec(vsk.handN.x + dir.x * BLADE_LEN, vsk.handN.y + dir.y * BLADE_LEN));
+        bases.push(vec(vsk.handN.x + dir.x * 4, vsk.handN.y + dir.y * 4));
+      }
+      smear(ctx, tips, bases, SOUL, 0.5 * p.fx);
+    }
+    const dt = act === 'death' ? t : 0;
+    const fire = act === 'death' ? Math.max(0, 1 - dt * 1.6) : 1;
+    if (fire <= 0.02 || dt > 0.5) return;
+    const back = sk.rig.fwd;
+    for (const eye of viewEyes(sk)) {
+      glow(ctx, eye, 3 + p.fx * 1.5, SOUL, (0.5 + p.fx * 0.3) * fire);
+      for (let i = 1; i <= 3; i++) {
+        const k = i / 3;
+        const wob = Math.sin(t * Math.PI * 4 + i * 1.7) * 0.8;
+        const d = k * 4.5 + p.flow * 3;
+        glow(ctx, vec(eye.x - back.x * d, eye.y - back.y * d - k * 1.5 + wob), 1.6 - k * 0.5, SOUL, 0.3 * (1 - k * 0.6) * fire);
+      }
+    }
+  },
   fx: (ctx, p, sk, act, t) => {
     if (act === 'attack' && p.fx > 0.3) {
       const tips: V[] = [];
@@ -574,10 +835,10 @@ const BASE = humanoidMonster({
 
 export const SkeletonDrawer: EntityDrawer = {
   ...BASE,
-  drawFrame(ctx, frame, action: EntityAction, w, h, utils) {
+  drawFrame(ctx, frame, action: EntityAction, w, h, utils, view) {
     const act = action as MonsterAction;
     CUR.act = act;
     CUR.t = monsterTime(act, frame);
-    BASE.drawFrame(ctx, frame, action, w, h, utils);
+    BASE.drawFrame(ctx, frame, action, w, h, utils, view);
   },
 };

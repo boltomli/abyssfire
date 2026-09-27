@@ -103,6 +103,9 @@ const WALK_START = 4, WALK_COUNT = 6;
 const ATK_START = 10, ATK_COUNT = 4;
 const HURT_START = 14, HURT_COUNT = 2;
 const DEATH_START = 16, DEATH_COUNT = 4;
+/** Frames per view in a monster sheet (multi-view sheets repeat the block). */
+const MONSTER_VIEW_FRAMES = 20;
+const MONSTER_ACTIONS = ['idle', 'walk', 'attack', 'hurt', 'death'] as const;
 
 // NPC frame layout (24 frames total per NPC)
 const NPC_WORK_START = 0, NPC_WORK_COUNT = 8;
@@ -465,9 +468,11 @@ export class SpriteGenerator {
       }
       return;
     }
-    for (const action of ['idle', 'walk', 'attack', 'hurt', 'death']) {
-      const animKey = `${key}_${action}`;
-      if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
+    for (const view of PLAYER_VIEWS) {
+      for (const action of MONSTER_ACTIONS) {
+        const animKey = playerAnimKey(key, view, action);
+        if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
+      }
     }
   }
 
@@ -582,13 +587,14 @@ export class SpriteGenerator {
           const range = view ? getPlayerViewFrameRange(view, action) : getPlayerActionFrameRange(action);
           return [action, range.start, PLAYER_ACTION_FRAME_COUNTS[action], view];
         }))
-      : [
-          ['idle', IDLE_START, IDLE_COUNT, undefined],
-          ['walk', WALK_START, WALK_COUNT, undefined],
-          ['attack', ATK_START, ATK_COUNT, undefined],
-          ['hurt', HURT_START, HURT_COUNT, undefined],
-          ['death', DEATH_START, DEATH_COUNT, undefined],
-        ];
+      // Monsters: 20 frames per view, view-major (se first).
+      : (drawer.views ?? [undefined]).flatMap((view, vi): [EntityAction, number, number, PlayerView | undefined][] => [
+          ['idle', vi * MONSTER_VIEW_FRAMES + IDLE_START, IDLE_COUNT, view],
+          ['walk', vi * MONSTER_VIEW_FRAMES + WALK_START, WALK_COUNT, view],
+          ['attack', vi * MONSTER_VIEW_FRAMES + ATK_START, ATK_COUNT, view],
+          ['hurt', vi * MONSTER_VIEW_FRAMES + HURT_START, HURT_COUNT, view],
+          ['death', vi * MONSTER_VIEW_FRAMES + DEATH_START, DEATH_COUNT, view],
+        ]);
 
     // Rigged drawers ink themselves; legacy ones get the shared ink pass.
     const legacy = !drawer.inked;
@@ -729,7 +735,16 @@ export class SpriteGenerator {
       return this.playerSheetViews(key).every(view =>
         PLAYER_ACTION_ORDER.every(action => this.scene.anims.exists(playerAnimKey(key, view, action))));
     }
-    return ['idle', 'walk', 'attack', 'hurt', 'death'].every(action => this.scene.anims.exists(`${key}_${action}`));
+    return this.monsterSheetViews(key).every(view =>
+      MONSTER_ACTIONS.every(action => this.scene.anims.exists(playerAnimKey(key, view, action))));
+  }
+
+  /** Views a monster sheet holds (an external PNG override only has the first). */
+  private monsterSheetViews(key: string): readonly PlayerView[] {
+    const views = ENTITY_DRAWER_BY_KEY.get(key)?.views ?? [PLAYER_VIEWS[0]];
+    if (!this.scene.textures.exists(key)) return views;
+    const frames = this.scene.textures.get(key).frameTotal - 1; // minus __BASE
+    return views.filter((_, vi) => (vi + 1) * MONSTER_VIEW_FRAMES <= frames);
   }
 
   /**
@@ -758,13 +773,17 @@ export class SpriteGenerator {
           const repeat = action === 'idle' || action === 'walk' ? -1 : 0;
           return [playerAnimKey('', view, action).slice(1), range.start, PLAYER_ACTION_FRAME_COUNTS[action], rate, repeat];
         }))
-      : [
-          ['idle', IDLE_START, IDLE_COUNT, 6, -1],
-          ['walk', WALK_START, WALK_COUNT, 10, -1],
-          ['attack', ATK_START, ATK_COUNT, 12, 0],
-          ['hurt', HURT_START, HURT_COUNT, 10, 0],
-          ['death', DEATH_START, DEATH_COUNT, 6, 0],
-        ];
+      : this.monsterSheetViews(key).flatMap((view, vi): [string, number, number, number, number][] => {
+          const base = vi * MONSTER_VIEW_FRAMES;
+          const name = (action: string): string => playerAnimKey('', view, action).slice(1);
+          return [
+            [name('idle'), base + IDLE_START, IDLE_COUNT, 6, -1],
+            [name('walk'), base + WALK_START, WALK_COUNT, 10, -1],
+            [name('attack'), base + ATK_START, ATK_COUNT, 12, 0],
+            [name('hurt'), base + HURT_START, HURT_COUNT, 10, 0],
+            [name('death'), base + DEATH_START, DEATH_COUNT, 6, 0],
+          ];
+        });
     for (const [action, start, count, rate, repeat] of defs) {
       const animKey = `${key}_${action}`;
       if (anims.exists(animKey)) anims.remove(animKey);
