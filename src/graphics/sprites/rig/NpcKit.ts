@@ -1,7 +1,8 @@
 /**
  * NPC drawer factory: a FolkLook (Townsfolk.ts) plus a work-loop preset
  * becomes a full 24-frame NPC sheet (working 8, alert 4, idle 6, talking 6)
- * in the shared rigged style.
+ * in the shared rigged style, drawn in the isometric front 3/4 view (`se`,
+ * mirrored for sw when an NPC turns to face the player).
  */
 import type { EntityDrawer, NPCAction } from '../types';
 import {
@@ -17,10 +18,31 @@ import {
   tone,
   vec,
   type Key,
+  type V,
 } from './Rig';
-import { basePose, drawHumanoid, solveSkeleton, type HumanPose, type Skeleton } from './Humanoid';
-import { folkSkin, type FolkLook } from './Townsfolk';
+import { basePose, type HumanPose } from './Humanoid';
+import {
+  drawHumanoidView,
+  hull,
+  type HumanViewSkin,
+  type ViewPart,
+  type ViewRig,
+  type ViewSkeleton,
+} from './HumanView';
+import { STAFF_ORB, UPRIGHT_PROPS, folkBuild, folkSkin, propTip, type FolkLook, type Prop } from './Townsfolk';
 import { getCurrentZonePalette, standardOutlineBlur } from '../../ZonePalette';
+
+export { STAFF_ORB, propTip };
+
+/** The single view NPC sheets are drawn in. */
+export const NPC_VIEW = 'se' as const;
+
+/**
+ * In the 3/4 view the feet (and scenery in front of the figure) drop below
+ * the side-view ground line by half their depth toward the camera; the frame
+ * only has ~5 units below GROUND_Y, so the figure is drawn this much higher.
+ */
+const NPC_LIFT = 3.5;
 
 export const NPC_FRAME_COUNTS: Readonly<Record<NPCAction, number>> = {
   working: 8,
@@ -40,16 +62,29 @@ export interface NpcSpec {
   scale?: number;
   frameW?: number;
   frameH?: number;
+  /**
+   * Which hand gestures while talking. Defaults to the far (off) hand unless
+   * it holds an upright prop such as a staff.
+   */
+  gesture?: 'near' | 'far';
   /** Adjust the resting pose (hands, stance, props). */
   ready?: Partial<HumanPose>;
-  /** Scenery drawn behind the NPC (anvil, counter…). */
-  scenery?: (ctx: CanvasRenderingContext2D, action: NPCAction, t: number) => void;
-  /** Extra glows/particles over the inked figure. */
-  fx?: (ctx: CanvasRenderingContext2D, p: HumanPose, sk: Skeleton, action: NPCAction, t: number) => void;
+  /**
+   * Scenery set beside the NPC (anvil, counter…), painted in the same
+   * projected space as the figure and inked with it. `sceneryZ` is its draw
+   * depth among the body parts (0 = torso; default 0.5, in front of the
+   * body but behind the arms and props).
+   */
+  scenery?: (ctx: CanvasRenderingContext2D, sk: ViewSkeleton, action: NPCAction, t: number) => void;
+  sceneryZ?: number;
+  /** Extra glows/particles over the inked figure (screen-space skeleton). */
+  fx?: (ctx: CanvasRenderingContext2D, p: HumanPose, sk: ViewSkeleton, action: NPCAction, t: number) => void;
 }
 
 function readyFor(spec: NpcSpec): HumanPose {
-  const prop = folkSkin(spec.look).prop;
+  const prop = folkBuild(spec.look).prop;
+  const item: Prop = spec.look.item ?? 'none';
+  const off: Prop = spec.look.offItem ?? 'none';
   const rootY = GROUND_Y - prop.ankle - (prop.thigh + prop.shin) * 0.975;
   return basePose({
     root: vec(CENTER_X - 1, rootY),
@@ -62,6 +97,13 @@ function readyFor(spec: NpcSpec): HumanPose {
     wpn: 0.3,
     off: 0.2,
     flow: 0.08,
+    // 3/4 view: arms hang a little away from the body; long upright props
+    // are held out to the side so they don't cross the face.
+    zN: UPRIGHT_PROPS.has(item) ? 7 : 1.4,
+    zF: UPRIGHT_PROPS.has(off) ? -3 : off === 'shield' ? 1.2 : -1,
+    ...(UPRIGHT_PROPS.has(item) ? { handN: vec(CENTER_X + 4, rootY - 5) } : {}),
+    // An upright prop in the off hand is planted beside the far foot, in front.
+    ...(UPRIGHT_PROPS.has(off) ? { handF: vec(CENTER_X + 6, rootY - 4), off: 0.05 } : {}),
     ...spec.ready,
   });
 }
@@ -75,18 +117,20 @@ function workTrack(style: WorkStyle, R: HumanPose): Key<HumanPose>[] {
   const y = R.root.y;
   switch (style) {
     case 'hammer':
+      // The anvil stands at the smith's front-left (screen right), so the
+      // hammer arm swings across the body onto it; the tongs hold the work.
       return loopKeys([
-        { at: 0, pose: P({ handN: vec(CENTER_X - 5.5, y - 18), wpn: -1.2, lean: -0.08, head: 0.12, handF: vec(CENTER_X + 11, y + 3), off: 1.35 }) },
-        { at: 0.32, ease: 'in', pose: P({ handN: vec(CENTER_X + 11, y + 2), wpn: 1.9, lean: 0.24, head: 0.3, root: vec(R.root.x + 1, y + 1.2), handF: vec(CENTER_X + 11, y + 4), off: 1.35, fx: 1 }) },
-        { at: 0.45, pose: P({ handN: vec(CENTER_X + 10.5, y), wpn: 1.6, lean: 0.2, head: 0.27, root: vec(R.root.x + 1, y + 0.8), handF: vec(CENTER_X + 11, y + 3.5), off: 1.35, fx: 0.4 }) },
-        { at: 0.8, ease: 'out', pose: P({ handN: vec(CENTER_X - 5, y - 17), wpn: -1.1, lean: -0.06, head: 0.14, handF: vec(CENTER_X + 11, y + 3), off: 1.35 }) },
+        { at: 0, pose: P({ handN: vec(CENTER_X - 4, y - 18), zN: 1, wpn: -1.1, lean: -0.08, head: 0.18, handF: vec(CENTER_X + 5, y + 2), zF: -0.5, off: 2.1 }) },
+        { at: 0.32, ease: 'in', pose: P({ handN: vec(CENTER_X + 8.5, y - 3), zN: -10, wpn: 2.65, lean: 0.24, head: 0.32, root: vec(R.root.x + 1, y + 1.2), handF: vec(CENTER_X + 5, y + 3), zF: -0.5, off: 2.1, fx: 1 }) },
+        { at: 0.45, pose: P({ handN: vec(CENTER_X + 8.5, y - 4.5), zN: -10, wpn: 2.4, lean: 0.2, head: 0.3, root: vec(R.root.x + 1, y + 0.8), handF: vec(CENTER_X + 5, y + 2.6), zF: -0.5, off: 2.1, fx: 0.4 }) },
+        { at: 0.8, ease: 'out', pose: P({ handN: vec(CENTER_X - 3.5, y - 17), zN: 0.5, wpn: -1, lean: -0.06, head: 0.2, handF: vec(CENTER_X + 5, y + 2), zF: -0.5, off: 2.1 }) },
       ]);
     case 'ledger':
       return loopKeys([
-        { at: 0, pose: P({ head: 0.3, handF: vec(CENTER_X + 8, y - 4), off: 1.5, handN: vec(CENTER_X + 9, y - 3), wpn: 0.6 }) },
-        { at: 0.25, pose: P({ head: 0.32, handF: vec(CENTER_X + 8, y - 4), off: 1.5, handN: vec(CENTER_X + 10.5, y - 2.4), wpn: 0.7 }) },
-        { at: 0.5, pose: P({ head: 0.28, handF: vec(CENTER_X + 8, y - 4.4), off: 1.5, handN: vec(CENTER_X + 9, y - 1.6), wpn: 0.6 }) },
-        { at: 0.75, pose: P({ head: 0.3, handF: vec(CENTER_X + 8, y - 4), off: 1.5, handN: vec(CENTER_X + 11, y - 2.8), wpn: 0.75 }) },
+        { at: 0, pose: P({ zN: -5, zF: -0.5, head: 0.3, handF: vec(CENTER_X + 8, y - 4), off: 1.5, handN: vec(CENTER_X + 9, y - 3), wpn: 0.6 }) },
+        { at: 0.25, pose: P({ zN: -5, zF: -0.5, head: 0.32, handF: vec(CENTER_X + 8, y - 4), off: 1.5, handN: vec(CENTER_X + 10.5, y - 2.4), wpn: 0.7 }) },
+        { at: 0.5, pose: P({ zN: -5, zF: -0.5, head: 0.28, handF: vec(CENTER_X + 8, y - 4.4), off: 1.5, handN: vec(CENTER_X + 9, y - 1.6), wpn: 0.6 }) },
+        { at: 0.75, pose: P({ zN: -5, zF: -0.5, head: 0.3, handF: vec(CENTER_X + 8, y - 4), off: 1.5, handN: vec(CENTER_X + 11, y - 2.8), wpn: 0.75 }) },
       ]);
     case 'count':
       return loopKeys([
@@ -96,8 +140,8 @@ function workTrack(style: WorkStyle, R: HumanPose): Key<HumanPose>[] {
       ]);
     case 'read':
       return loopKeys([
-        { at: 0, pose: P({ head: 0.3, handN: vec(CENTER_X + 9, y - 6), wpn: 0.1, handF: vec(CENTER_X + 7, y - 5), off: 0.2 }) },
-        { at: 0.5, pose: P({ head: 0.36, lean: 0.07, handN: vec(CENTER_X + 9.5, y - 5.4), wpn: 0.14, handF: vec(CENTER_X + 7, y - 4.6), off: 0.2 }) },
+        { at: 0, pose: P({ zF: 0.5, head: 0.3, handN: vec(CENTER_X + 9, y - 6), wpn: 0.1, handF: vec(CENTER_X + 7, y - 5), off: 0.2 }) },
+        { at: 0.5, pose: P({ zF: 0.5, head: 0.36, lean: 0.07, handN: vec(CENTER_X + 9.5, y - 5.4), wpn: 0.14, handF: vec(CENTER_X + 7, y - 4.6), off: 0.2 }) },
       ]);
     case 'lookout':
       return loopKeys([
@@ -130,10 +174,10 @@ function workTrack(style: WorkStyle, R: HumanPose): Key<HumanPose>[] {
       ]);
     case 'polish':
       return loopKeys([
-        { at: 0, pose: P({ head: 0.25, handF: vec(CENTER_X + 8, y - 3), off: 1.2, handN: vec(CENTER_X + 10, y - 6), wpn: 0.3 }) },
-        { at: 0.25, pose: P({ head: 0.25, handF: vec(CENTER_X + 8, y - 3), off: 1.2, handN: vec(CENTER_X + 12, y - 4.6), wpn: 0.3 }) },
-        { at: 0.5, pose: P({ head: 0.27, handF: vec(CENTER_X + 8, y - 3), off: 1.2, handN: vec(CENTER_X + 10, y - 3), wpn: 0.3 }) },
-        { at: 0.75, pose: P({ head: 0.25, handF: vec(CENTER_X + 8, y - 3), off: 1.2, handN: vec(CENTER_X + 8.5, y - 5), wpn: 0.3 }) },
+        { at: 0, pose: P({ zN: -5, zF: -0.5, head: 0.25, handF: vec(CENTER_X + 8, y - 3), off: 1.2, handN: vec(CENTER_X + 10, y - 6), wpn: 0.3 }) },
+        { at: 0.25, pose: P({ zN: -5, zF: -0.5, head: 0.25, handF: vec(CENTER_X + 8, y - 3), off: 1.2, handN: vec(CENTER_X + 12, y - 4.6), wpn: 0.3 }) },
+        { at: 0.5, pose: P({ zN: -5, zF: -0.5, head: 0.27, handF: vec(CENTER_X + 8, y - 3), off: 1.2, handN: vec(CENTER_X + 10, y - 3), wpn: 0.3 }) },
+        { at: 0.75, pose: P({ zN: -5, zF: -0.5, head: 0.25, handF: vec(CENTER_X + 8, y - 3), off: 1.2, handN: vec(CENTER_X + 8.5, y - 5), wpn: 0.3 }) },
       ]);
   }
 }
@@ -144,11 +188,18 @@ export function npcDrawer(spec: NpcSpec): EntityDrawer {
   const work = workTrack(spec.work, R);
   const y = R.root.y;
   // Talking keeps the prop hand at rest and gestures with the other.
-  const talk: Key<HumanPose>[] = loopKeys([
-    { at: 0, pose: { ...R, handF: vec(CENTER_X + 6, y - 5), off: 0.9, head: 0.02, fx: 1 } },
-    { at: 0.33, pose: { ...R, handF: vec(CENTER_X + 10, y - 9), off: 1.2, head: -0.06, lean: R.lean + 0.03, fx: 0 } },
-    { at: 0.66, pose: { ...R, handF: vec(CENTER_X + 8, y - 3), off: 1, head: 0.06, fx: 1 } },
-  ]);
+  const gestureNear = (spec.gesture ?? (UPRIGHT_PROPS.has(spec.look.offItem ?? 'none') ? 'near' : 'far')) === 'near';
+  const talk: Key<HumanPose>[] = gestureNear
+    ? loopKeys([
+        { at: 0, pose: { ...R, handN: vec(CENTER_X + 6, y - 5), zN: -1, head: 0.02, fx: 1 } },
+        { at: 0.33, pose: { ...R, handN: vec(CENTER_X + 9, y - 9), zN: -1.5, head: -0.06, lean: R.lean + 0.03, fx: 0 } },
+        { at: 0.66, pose: { ...R, handN: vec(CENTER_X + 8, y - 3), zN: -1, head: 0.06, fx: 1 } },
+      ])
+    : loopKeys([
+        { at: 0, pose: { ...R, handF: vec(CENTER_X + 6, y - 5), off: 0.9, head: 0.02, fx: 1 } },
+        { at: 0.33, pose: { ...R, handF: vec(CENTER_X + 10, y - 9), off: 1.2, head: -0.06, lean: R.lean + 0.03, fx: 0 } },
+        { at: 0.66, pose: { ...R, handF: vec(CENTER_X + 8, y - 3), off: 1, head: 0.06, fx: 1 } },
+      ]);
   const workStart = samplePoseTrack(work, 0);
   const alert: Key<HumanPose>[] = [
     { at: 0, pose: workStart },
@@ -190,15 +241,29 @@ export function npcDrawer(spec: NpcSpec): EntityDrawer {
       const t = frameTime(frame % count, count, act !== 'alert');
       const p = pose(act, t);
       const palette = getCurrentZonePalette();
+      const scenery = spec.scenery;
+      const frameSkin: HumanViewSkin = scenery
+        ? {
+            prop: skin.prop,
+            build: skin.build,
+            parts(c, sk, pp, tt): ViewPart[] {
+              return [...skin.parts(c, sk, pp, tt), { z: spec.sceneryZ ?? 0.5, draw: () => scenery(c, sk, act, tt) }];
+            },
+          }
+        : skin;
+      let sk: ViewSkeleton | null = null;
       renderRigFrame(
         ctx, w, h,
-        c => { drawHumanoid(c, p, skin, t); },
-        { glowColor: palette.npcOutlineColor, glowBlur: standardOutlineBlur(w, h), scale: spec.scale ?? 1 },
         c => {
-          groundShadow(c, p.root.x + 1, 12, 0);
-          spec.scenery?.(c, act, t);
+          c.translate(0, -NPC_LIFT);
+          sk = drawHumanoidView(c, p, frameSkin, t, NPC_VIEW);
         },
-        spec.fx ? c => spec.fx!(c, p, solveSkeleton(p, skin.prop), act, t) : undefined,
+        { glowColor: palette.npcOutlineColor, glowBlur: standardOutlineBlur(w, h), scale: spec.scale ?? 1 },
+        c => { groundShadow(c, CENTER_X + 1, 13, 0, GROUND_Y + 1 - NPC_LIFT); },
+        spec.fx ? c => {
+          c.translate(0, -NPC_LIFT);
+          if (sk) spec.fx!(c, p, sk, act, t);
+        } : undefined,
       );
     },
   };
@@ -207,35 +272,81 @@ export function npcDrawer(spec: NpcSpec): EntityDrawer {
 // ── Shared scenery & effects ────────────────────────────────────────────
 
 const IRON = tone(0x5c6270, { light: 0.4 });
+const STUMP = tone(0x6e4a2c);
 
-/** Small anvil on a stump in front of the smith. */
-const ANVIL_X = CENTER_X + 19;
-const ANVIL_TOP = GROUND_Y - 18;
+/**
+ * Anvil on a stump at the smith's front-left, in pose space (x forward from
+ * CENTER_X, z toward the smith's right): projected with the figure, it sits
+ * on the ground to the screen right, clear of his body.
+ */
+const ANVIL_X = CENTER_X + 11;
+const ANVIL_Z = -5.5;
+const ANVIL_TOP = GROUND_Y - 17;
+const STUMP_R = 4;
 
-export function anvilScenery(ctx: CanvasRenderingContext2D): void {
+function ring(rig: ViewRig, y: number, r: number, n = 16): V[] {
+  const pts: V[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    pts.push(rig.pt(ANVIL_X + Math.cos(a) * r, y, ANVIL_Z + Math.sin(a) * r));
+  }
+  return pts;
+}
+
+export function anvilScenery(ctx: CanvasRenderingContext2D, sk: ViewSkeleton): void {
+  const rig = sk.rig;
+  const stumpTop = ANVIL_TOP + 5;
+  // Stump: a projected cylinder, bark side then the cut top.
+  const side = hull([...ring(rig, GROUND_Y, STUMP_R + 0.5), ...ring(rig, stumpTop, STUMP_R)]);
+  cel(ctx, () => polyPath(ctx, side), STUMP, { band: 0.9 });
+  ctx.strokeStyle = 'rgba(40,24,12,0.45)';
+  ctx.lineWidth = 0.5;
+  for (const a of [0.9, 1.6, 2.4]) {
+    const q0 = rig.pt(ANVIL_X + Math.cos(a) * STUMP_R, stumpTop + 1, ANVIL_Z + Math.sin(a) * STUMP_R);
+    const q1 = rig.pt(ANVIL_X + Math.cos(a) * (STUMP_R + 0.5), GROUND_Y - 0.5, ANVIL_Z + Math.sin(a) * (STUMP_R + 0.5));
+    ctx.beginPath();
+    ctx.moveTo(q0.x, q0.y);
+    ctx.lineTo(q1.x, q1.y);
+    ctx.stroke();
+  }
+  cel(ctx, () => polyPath(ctx, ring(rig, stumpTop, STUMP_R)), tone(0x9a7048, { light: 0.3 }), { band: 0.4, stroke: 0.45 });
+  // Anvil: the side profile (horn forward) extruded across z.
   const x = ANVIL_X;
   const top = ANVIL_TOP;
-  cel(ctx, () => polyPath(ctx, [vec(x - 4.4, GROUND_Y), vec(x + 4.4, GROUND_Y), vec(x + 3.8, top + 5), vec(x - 3.8, top + 5)]), tone(0x6e4a2c), { band: 0.7 });
-  ctx.strokeStyle = 'rgba(40,24,12,0.5)';
-  ctx.lineWidth = 0.5;
+  const prof: [number, number][] = [
+    [x - 6, top], [x + 3.4, top], [x + 7.5, top + 1], [x + 3.2, top + 2.4],
+    [x + 2.2, top + 5], [x - 2.4, top + 5], [x - 3, top + 2.4], [x - 5.6, top + 1.6],
+  ];
+  const hw = 2.3;
+  const face = (z: number): V[] => prof.map(([px, py]) => rig.pt(px, py, ANVIL_Z + z));
+  const near = rig.facing(0, 0, 1) > 0 ? hw : -hw;
+  const body = hull([...face(-hw), ...face(hw)]);
+  cel(ctx, () => polyPath(ctx, body), IRON, { band: 0.9, hi: 0.5 });
+  cel(ctx, () => polyPath(ctx, face(near)), IRON, { band: 0.7, hi: 0.4, stroke: 0.4 });
+  // Working face on top
+  const faceTop = [
+    rig.pt(x - 6, top, ANVIL_Z - hw), rig.pt(x + 3.4, top, ANVIL_Z - hw * 0.9),
+    rig.pt(x + 3.4, top, ANVIL_Z + hw * 0.9), rig.pt(x - 6, top, ANVIL_Z + hw),
+  ];
+  ctx.fillStyle = 'rgba(200,210,226,0.85)';
   ctx.beginPath();
-  ctx.ellipse(x, top + 5.2, 3.8, 1, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  cel(ctx, () => polyPath(ctx, [
-    vec(x - 7, top), vec(x + 3.6, top), vec(x + 8, top + 1), vec(x + 3.4, top + 2.4),
-    vec(x + 2.4, top + 5), vec(x - 2.6, top + 5), vec(x - 3.2, top + 2.4), vec(x - 6.6, top + 1.6),
-  ]), IRON, { band: 0.9, hi: 0.5 });
+  polyPath(ctx, faceTop);
+  ctx.fill();
+}
+
+/** Where the hammer lands on the anvil face. */
+export function anvilStrikePoint(sk: ViewSkeleton): V {
+  return sk.rig.pt(ANVIL_X - 1, ANVIL_TOP, ANVIL_Z);
 }
 
 /** Forge sparks at the anvil face when the hammer lands. */
-export function hammerSparks(ctx: CanvasRenderingContext2D, fx: number, t: number): void {
+export function hammerSparks(ctx: CanvasRenderingContext2D, fx: number, t: number, sk: ViewSkeleton): void {
   if (fx < 0.3) return;
-  const x = ANVIL_X - 2;
-  const yy = ANVIL_TOP;
-  glow(ctx, vec(x, yy), 5 * fx, 0xffa040, 0.7 * fx);
+  const at = anvilStrikePoint(sk);
+  glow(ctx, at, 5 * fx, 0xffa040, 0.7 * fx);
   for (let i = 0; i < 6; i++) {
     const a = -Math.PI / 2 + (i - 2.5) * 0.45;
     const r = 3 + ((i * 37 + Math.round(t * 100)) % 5);
-    glow(ctx, vec(x + Math.cos(a) * r, yy + Math.sin(a) * r * 0.8), 1.2, 0xffd070, fx);
+    glow(ctx, vec(at.x + Math.cos(a) * r, at.y + Math.sin(a) * r * 0.8), 1.2, 0xffd070, fx);
   }
 }

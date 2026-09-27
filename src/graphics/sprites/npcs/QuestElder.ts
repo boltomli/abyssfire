@@ -3,7 +3,7 @@
 // 村长 — the village elder: long grey hair and beard, sage robe with gold
 // trim, leaning on a staff topped with a golden orb, reading old records.
 import { glow, vec } from '../rig/Rig';
-import { npcDrawer } from '../rig/NpcKit';
+import { npcDrawer, propTip, STAFF_ORB } from '../rig/NpcKit';
 
 export const QuestElderDrawer = npcDrawer({
   key: 'npc_quest_elder',
@@ -23,6 +23,6 @@ export const QuestElderDrawer = npcDrawer({
   work: 'read',
   ready: { lean: 0.08, head: 0.04, handN: vec(56, 60), wpn: 0.05 },
   fx: (ctx, p, sk) => {
-    glow(ctx, vec(sk.handN.x + Math.sin(p.wpn) * 19.6, sk.handN.y - Math.cos(p.wpn) * 19.6), 4, 0xffcf50, 0.55);
+    glow(ctx, propTip(sk, p.wpn, STAFF_ORB, true, 'staff'), 4, 0xffcf50, 0.55);
   },
 });
