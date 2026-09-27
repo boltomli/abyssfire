@@ -4,6 +4,7 @@ import { GAME_WIDTH, GAME_HEIGHT, DPR, RENDER_SCALE } from '../config';
 import { EventBus, GameEvents } from '../utils/EventBus';
 import { DisposableScope } from '../utils/DisposableScope';
 import { getItemBase, GEM_STAT_MAP } from '../data/items/bases';
+import { AVG_DAMAGE, BASE_DEFENSE, compareTarget, statDeltas, type CompareTarget } from '../systems/ItemCompare';
 import { STAT_DISPLAY } from '../data/items/affixes';
 import { SetDefinitions } from '../data/items/sets';
 import { DUNGEON_EXCLUSIVE_SETS } from '../data/dungeonData';
@@ -4167,8 +4168,44 @@ export class UIScene extends Phaser.Scene {
   }
 
   // --- Item Tooltip ---
+  /**
+   * Item tooltip. Equipment not being worn also shows what wearing it would
+   * change, and (desktop) the worn item's card beside it for a side-by-side look.
+   */
   private showItemTooltip(item: ItemInstance, screenX: number, screenY: number): void {
     this.hideItemTooltip();
+    const compare = compareTarget(item, this.zone.inventorySystem.equipment);
+    const main = this.buildItemTooltip(item, compare);
+    if (IS_MOBILE) {
+      this.tooltipContainer = main.container;
+      this.placeMobileTooltip(main.container, main.tipW, main.tipH, screenX, screenY);
+      return;
+    }
+    const worn = compare?.equipped ? this.buildItemTooltip(compare.equipped, null, t('ui.compare.equippedTag')) : null;
+    const gap = px(8);
+    const tagH = worn ? px(18) : 0;
+    const totalW = main.tipW + (worn ? worn.tipW + gap : 0);
+    const totalH = Math.max(main.tipH, worn ? worn.tipH + tagH : 0);
+    // Clamp to screen: the pair sits right of the cursor, or left of it when there is no room.
+    let tx = screenX + px(16);
+    let ty = screenY - px(10);
+    if (tx + totalW > W - px(4)) tx = screenX - totalW - px(16);
+    if (ty + totalH > H - px(4)) ty = H - totalH - px(4);
+    if (ty < px(4)) ty = px(4);
+    if (tx < px(4)) tx = px(4);
+    const outer = this.add.container(tx, ty).setDepth(PANEL_STYLE.depth.tooltip);
+    outer.add(main.container);
+    if (worn) {
+      // The worn item sits on the far side from the cursor, main card nearest the item.
+      const wornLeft = tx >= screenX;
+      main.container.setPosition(wornLeft ? worn.tipW + gap : 0, 0);
+      worn.container.setPosition(wornLeft ? 0 : main.tipW + gap, tagH);
+      outer.add(worn.container);
+    }
+    this.tooltipContainer = outer;
+  }
+
+  private buildItemTooltip(item: ItemInstance, compare: CompareTarget | null, tag?: string): { container: Phaser.GameObjects.Container; tipW: number; tipH: number } {
     const base = getItemBase(item.baseId);
     const tipW = px(256);
     const pad = px(PANEL_STYLE.tooltip.padding) + px(2);
@@ -4289,6 +4326,18 @@ export class UIScene extends Phaser.Scene {
       container.add(txt);
       ly += txt.height + px(3);
     }
+    if (compare) {
+      container.add(addDivider(this, tipW / 2, ly + px(3), tipW - pad * 4, false));
+      ly += px(9);
+      for (const line of this.compareLines(item, compare)) {
+        const txt = this.add.text(pad, ly, line.text, {
+          fontSize: fs(line.size), color: line.color, fontFamily: PANEL_STYLE.tooltip.font,
+          fontStyle: line.bold ? 'bold' : 'normal', wordWrap: { width: tipW - pad * 2, useAdvancedWrap: true },
+        });
+        container.add(txt);
+        ly += txt.height + px(3);
+      }
+    }
     if (base) {
       ly += px(4);
       container.add(this.add.image(pad + px(7), ly + px(8), coinTexture(this, px(12))));
@@ -4300,17 +4349,42 @@ export class UIScene extends Phaser.Scene {
     const tipH = Math.ceil((ly + pad) / px(4)) * px(4);
 
     container.addAt(addFrame(this, 0, 0, tipW, tipH, { variant: 'tooltip', accent: qualityNum(item.quality) }), 0);
-    this.tooltipContainer = container;
-    if (IS_MOBILE) { this.placeMobileTooltip(container, tipW, tipH, screenX, screenY); return; }
+    if (tag) {
+      container.add(this.add.text(px(4), -px(17), tag, {
+        fontSize: fs(11), color: '#d8b56a', fontFamily: PANEL_STYLE.tooltip.font, fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: Math.round(2 * DPR),
+      }));
+    }
+    return { container, tipW, tipH };
+  }
 
-    // Clamp to screen
-    let tx = screenX + px(16);
-    let ty = screenY - px(10);
-    if (tx + tipW > W - px(4)) tx = screenX - tipW - px(16);
-    if (ty + tipH > H - px(4)) ty = H - tipH - px(4);
-    if (ty < px(4)) ty = px(4);
-    if (tx < px(4)) tx = px(4);
-    container.setPosition(tx, ty);
+  /** "If you wear this": per-stat gains (green) and losses (red) against the worn item. */
+  private compareLines(item: ItemInstance, compare: CompareTarget): { text: string; color: string; size: number; bold?: boolean }[] {
+    const slotLabel = t(`ui.tooltip.slot.${compare.slot}`);
+    const lines: { text: string; color: string; size: number; bold?: boolean }[] = [
+      { text: t('ui.compare.header', { slot: slotLabel }), color: '#d8b56a', size: 11, bold: true },
+    ];
+    if (!compare.equipped) {
+      lines.push({ text: t('ui.compare.emptySlot'), color: '#7ee07e', size: 12 });
+      return lines;
+    }
+    if (!item.identified && item.quality !== 'normal') {
+      lines.push({ text: t('ui.compare.unidentified'), color: '#8f8676', size: 11 });
+    }
+    const deltas = statDeltas(item, compare.equipped);
+    if (deltas.length === 0) lines.push({ text: t('ui.compare.same'), color: '#8f8676', size: 12 });
+    for (const d of deltas) {
+      const label = d.stat === AVG_DAMAGE ? t('ui.compare.avgDamage')
+        : d.stat === BASE_DEFENSE ? t('ui.compare.defense')
+          : getStatLabel(d.stat);
+      const suffix = d.stat !== AVG_DAMAGE && d.stat !== BASE_DEFENSE && isStatPercent(d.stat) ? '%' : '';
+      const sign = d.delta > 0 ? '+' : '−';
+      lines.push({
+        text: `${d.delta > 0 ? '▲' : '▼'} ${sign}${Math.abs(d.delta)}${suffix} ${label}`,
+        color: d.delta > 0 ? '#7ee07e' : '#ff6b5a', size: 12,
+      });
+    }
+    return lines;
   }
 
   /**

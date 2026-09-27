@@ -1687,6 +1687,13 @@ const en: LocaleData = {
   'ui.tooltip.gemEffect': 'Socket Effect: +{value}{suffix} {label}',
   'ui.tooltip.gemHeader': '── Gems ──',
   'ui.tooltip.socketCount': 'Sockets: {filled}/{max}',
+  'ui.compare.header': 'Compared with equipped ({slot})',
+  'ui.compare.equippedTag': 'Equipped',
+  'ui.compare.emptySlot': '▲ Slot is empty: wearing it is an upgrade',
+  'ui.compare.same': 'Same stats as equipped',
+  'ui.compare.unidentified': 'Unidentified: base stats only',
+  'ui.compare.avgDamage': 'avg damage',
+  'ui.compare.defense': 'defense',
   'ui.tooltip.sellPrice': 'Sell: {price}G',
   'ui.tooltip.legendaryEffect': 'Contains unknown power',
 
