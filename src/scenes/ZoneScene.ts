@@ -880,6 +880,10 @@ export class ZoneScene extends Phaser.Scene {
   /** A run's final result waits here until we are back in the rift and the UI can show it. */
   private static pendingRunEnd: import('../utils/EventBus').DungeonRunEndPayload | null = null;
 
+  private abyssModalOpen(): boolean {
+    return (this.scene.get('UIScene') as UIScene | undefined)?.isAbyssModalOpen?.() ?? false;
+  }
+
   private openDungeonTierPicker(): void {
     const rec = this.session?.abyss ?? { unlockedTier: 1, bestTier: 0 };
     EventBus.emit(GameEvents.DUNGEON_TIER_PICK, { unlockedTier: rec.unlockedTier, bestTier: rec.bestTier, heroLevel: this.player.level });
@@ -898,7 +902,12 @@ export class ZoneScene extends Phaser.Scene {
       const ended = ZoneScene.pendingRunEnd;
       if (ended) {
         ZoneScene.pendingRunEnd = null;
-        this.time.delayedCall(700, () => EventBus.emit(GameEvents.DUNGEON_RUN_END, ended));
+        // Wait out any story beat (a chapter card, a cutscene) so the summary isn't hidden under it.
+        const show = (): void => {
+          if (this.storyDirector?.busy || this.storyDirector?.cinematic) this.time.delayedCall(500, show);
+          else EventBus.emit(GameEvents.DUNGEON_RUN_END, ended);
+        };
+        this.time.delayedCall(700, show);
         this.time.delayedCall(800, () => { void this.autoSave(); });
       }
       return;
@@ -1256,7 +1265,8 @@ export class ZoneScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
-    if (this.storyDirector?.cinematic || this.dungeonChoosing) return;
+    // A labyrinth panel (tier picker, boon cards) holds the world and its keys.
+    if (this.storyDirector?.cinematic || this.dungeonChoosing || this.abyssModalOpen()) return;
     if (this.isInDungeon) this.updateDungeonCurse(delta);
     const recovery = this.getPlayerRecoveryModifiers();
     this.handleKeyboardMovement(delta);

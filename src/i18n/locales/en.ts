@@ -4,6 +4,7 @@
  */
 import type { LocaleData } from '../types';
 import { STORY_EN } from './story';
+import { ABYSS_RUN_EN } from './abyssRun';
 import { QUEST_STORY_EN } from './questStory';
 
 const en: LocaleData = {
@@ -2298,6 +2299,9 @@ const en: LocaleData = {
 
   // ─── Main story (prologue, chapters, cutscenes, ending) ───
   ...STORY_EN,
+
+  // ─── Abyss Labyrinth (boons, curses, floor themes, run UI) ───
+  ...ABYSS_RUN_EN,
 };
 
 export default en;

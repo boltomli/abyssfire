@@ -24,6 +24,7 @@ import {
 import { QUEST_TYPE_LABELS } from '../systems/QuestSystem';
 import { gatherNpcQuests, buildQuestCardData, formatRewardSummary, buildToastMessage } from '../ui/QuestCardUI';
 import { buildTrackerState, buildTrackerSignature, MAX_VISIBLE_QUESTS } from '../ui/QuestTrackerHUD';
+import { AbyssRunUI } from '../ui/AbyssRunUI';
 import type { TrackerQuestEntry, TrackerState } from '../ui/QuestTrackerHUD';
 import type { NpcQuestEntry, QuestCardData } from '../ui/QuestCardUI';
 import type { MercenaryState } from '../systems/MercenarySystem';
@@ -326,6 +327,10 @@ export class UIScene extends Phaser.Scene {
   /** Compact quest card panel. */
   private questCardPanel: Phaser.GameObjects.Container | null = null;
   private questCardBackdrop: Phaser.GameObjects.Image | null = null;
+  /** Abyss Labyrinth panels (tier picker, boon choice, run summary) and run widget. */
+  private abyssUI: AbyssRunUI | null = null;
+  /** Extra downward shift of the desktop quest tracker while the labyrinth widget sits above it. */
+  private trackerShift = 0;
 
   constructor() {
     super({ key: 'UIScene' });
@@ -375,6 +380,7 @@ export class UIScene extends Phaser.Scene {
     this.createQuestTracker();
     this.createMinimap();
     this.setupEventListeners();
+    this.createAbyssUI();
     this.events.once('shutdown', this.shutdown, this);
   }
 
@@ -828,6 +834,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   private handlePanelToggle(data: { panel: string; npcId?: string }): void {
+    if (this.abyssUI?.blocksPanels()) return; // the boon choice is mandatory
     if (data.panel === 'inventory') this.toggleInventory();
     if (data.panel === 'map') this.toggleMap();
     if (data.panel === 'skills') this.toggleSkillTree();
@@ -5879,6 +5886,34 @@ export class UIScene extends Phaser.Scene {
     this.hideContextPopup();
     this.closeDialogue();
     this.closeQuestCard();
+    this.abyssUI?.closeDismissable();
+  }
+
+  /** A labyrinth modal (tier picker / boon choice / summary) is open: gameplay keys should wait. */
+  isAbyssModalOpen(): boolean {
+    return !!this.abyssUI?.isModalOpen();
+  }
+
+  /**
+   * Labyrinth UI. Its run widget sits under the minimap on desktop (the quest tracker moves
+   * down below it) and left of the zone plate on touch devices, clear of the panel buttons.
+   */
+  private createAbyssUI(): void {
+    this.trackerShift = 0;
+    const w = IS_MOBILE ? px(300) : HUD.tracker.w;
+    const hudAnchor = IS_MOBILE
+      ? { x: HUD.info.x - px(20) - w, y: HUD.info.y - px(8), w }
+      : { x: HUD.tracker.x - px(9), y: HUD.tracker.y - px(8), w };
+    this.abyssUI = new AbyssRunUI(this, {
+      hudAnchor,
+      onHudResize: (bottom) => {
+        if (IS_MOBILE) return;
+        this.trackerShift = bottom === null ? 0 : bottom - hudAnchor.y + px(14);
+        this.questTracker.setY(HUD.tracker.y + this.trackerShift);
+        this.lastQuestTrackerSignature = '';
+        this.nextQuestTrackerRefreshAt = 0;
+      },
+    });
   }  private getQualityColorNum(quality: string): number {
     switch (quality) {
       case 'magic': return 0x2471a3;
@@ -5901,6 +5936,8 @@ export class UIScene extends Phaser.Scene {
 
   shutdown(): void {
     this.closeAllPanels();
+    this.abyssUI?.destroy();
+    this.abyssUI = null;
     this.cleanupAudioPanelInputHandlers();
     this.subscriptions.dispose();
     this.skillSlots = [];

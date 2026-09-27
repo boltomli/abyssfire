@@ -4,6 +4,7 @@
  */
 import type { LocaleData } from '../types';
 import { STORY_ZH } from './story';
+import { ABYSS_RUN_ZH } from './abyssRun';
 import { QUEST_STORY_ZH } from './questStory';
 
 const zhCN: LocaleData = {
@@ -2243,6 +2244,9 @@ const zhCN: LocaleData = {
 
   // ─── Main story (prologue, chapters, cutscenes, ending) ───
   ...STORY_ZH,
+
+  // ─── Abyss Labyrinth (boons, curses, floor themes, run UI) ───
+  ...ABYSS_RUN_ZH,
 };
 
 export default zhCN;
